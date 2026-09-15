@@ -7,12 +7,14 @@
 //! Использование:
 //!     cargo run --quiet --example write_roundtrip_dbs -- <выходная директория>
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+// Key store из интеграционных тестов. Логгер не включаем (только init_key_main_store):
+// debug-логи ядра засоряли бы вывод и искажали замеры.
+#[allow(dead_code)]
+#[path = "../tests/common/mod.rs"]
+mod common;
 
 use onekeepass_core::db_content;
-use onekeepass_core::db_service::{self, KeyStoreOperation, KeyStoreService, NewDatabase, Result};
-use secstr::SecVec;
+use onekeepass_core::db_service::{self, NewDatabase};
 use uuid::Uuid;
 
 // Значения должны совпадать с verify_roundtrip.py — он их проверяет
@@ -21,36 +23,6 @@ const ATTACHMENT_NAME: &str = "notes.txt";
 const ATTACHMENT_DATA: &[u8] = b"example doc\n2 lines\n";
 const TOTP_URL: &str =
     "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30";
-
-// db_service требует инициализированный key store: при открытии базы ключи шифруются
-// AES-GCM, а ключ шифрования хранится вне ядра (на мобильных — в keychain).
-#[derive(Default)]
-struct InMemoryKeyStore {
-    store: HashMap<String, SecVec<u8>>,
-}
-
-impl KeyStoreService for InMemoryKeyStore {
-    fn store_key(&mut self, db_key: &str, data: Vec<u8>) -> Result<()> {
-        self.store.insert(db_key.into(), SecVec::new(data));
-        Ok(())
-    }
-
-    fn get_key(&self, db_key: &str) -> Option<Vec<u8>> {
-        self.store.get(db_key).map(|v| Vec::from(v.unsecure()))
-    }
-
-    fn delete_key(&mut self, db_key: &str) -> Result<()> {
-        self.store.remove(db_key);
-        Ok(())
-    }
-
-    fn copy_key(&mut self, source_db_key: &str, target_db_key: &str) -> Result<()> {
-        if let Some(key) = self.store.get(source_db_key).cloned() {
-            self.store.insert(target_db_key.into(), key);
-        }
-        Ok(())
-    }
-}
 
 // NewDatabase собирается через serde: поля pub(crate), но структура Serialize/Deserialize.
 // Так же поступают интеграционные тесты.
@@ -197,7 +169,7 @@ fn main() {
         .expect("укажите выходную директорию для баз");
     std::fs::create_dir_all(&out_dir).unwrap();
 
-    KeyStoreOperation::init(Arc::new(Mutex::new(InMemoryKeyStore::default())));
+    common::init_key_main_store();
 
     build_db(
         &out_dir,
