@@ -127,16 +127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "argon2-sys"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "190bcd1a5417d25c2fff051cd443de3c9c348094d1cb5760d28ecf88428b76a0"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "async-compression"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,30 +280,6 @@ checksum = "62ce3946557b35e71d1bbe07ec385073ce9eda05043f95de134eb578fcf1a298"
 dependencies = [
  "byteorder",
  "cipher",
-]
-
-[[package]]
-name = "botan"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24d4c7647d67c53194fa0740404c6c508880aef2bfe99a9868dbb4b86f090377"
-dependencies = [
- "botan-sys",
-]
-
-[[package]]
-name = "botan-src"
-version = "0.30701.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c4e1c7910f3b4712aed10e4259eca77e79ed84c1b023098c8eac596b993fc44"
-
-[[package]]
-name = "botan-sys"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04285fa0c094cc9961fe435b1b279183db9394844ad82ce483aa6196c0e6da38"
-dependencies = [
- "botan-src",
 ]
 
 [[package]]
@@ -2114,9 +2080,7 @@ dependencies = [
  "aes",
  "aes-gcm",
  "argon2",
- "argon2-sys",
  "base64",
- "botan",
  "cbc",
  "cfg-if",
  "chacha20",

@@ -110,16 +110,6 @@ pub enum Error {
     #[error("{0}")]
     UrlParseError(#[from] url::ParseError),
 
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "windows",
-        target_os = "linux",
-        target_os = "ios",
-        all(target_os = "android", target_arch = "aarch64")
-    ))]
-    #[error("{0}")]
-    CryptoError(#[from] botan::Error),
-
     #[error("{0}")]
     XmlReadingFailed(String),
     #[error("{0}")]
