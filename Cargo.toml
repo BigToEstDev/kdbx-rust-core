@@ -141,3 +141,12 @@ optional = true
 env_logger = "0.11.8"
 test-context = "=0.4.1"
 
+## Argon2 is memory-hard: unoptimized Rust (dev/test profile) makes every database open/save
+## several times slower (db_file_reading_writing tests 9 s -> 37 s, debug Android builds suffer
+## the same). Optimize only the KDF crates; our own code stays debuggable. `test` inherits `dev`,
+## release is unaffected (already opt-level 3). blake2 is used inside Argon2.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
