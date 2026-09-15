@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-#[path = "botan_impl/mod.rs"]
+#[path = "rust_crypto_impl/mod.rs"]
 mod crypto_impl;
 pub use crypto_impl::*;
 
@@ -55,7 +55,7 @@ pub enum ContentCipherId {
 impl ContentCipherId {
     // Gets the UUID and Encryption IV of the supported algorithm
     pub fn uuid_with_iv(&self) -> Result<(Vec<u8>, Vec<u8>)> {
-        let (rn16, rn12) = get_random_bytes_2::<16, 12>();
+        let (rn16, rn12) = get_random_bytes_2::<16, 12>()?;
         match self {
             ContentCipherId::Aes256 => Ok((constants::uuid::AES256.to_vec(), rn16)),
             ContentCipherId::ChaCha20 => Ok((constants::uuid::CHACHA20.to_vec(), rn12)),
@@ -65,7 +65,7 @@ impl ContentCipherId {
 
     // Generates the random master seed and iv for the selected algorithm
     pub fn generate_master_seed_iv(&self) -> Result<(Vec<u8>, Vec<u8>)> {
-        let (rn32, rn16, rn12) = get_random_bytes_3::<32, 16, 12>();
+        let (rn32, rn16, rn12) = get_random_bytes_3::<32, 16, 12>()?;
         match self {
             ContentCipherId::Aes256 => Ok((rn32, rn16)),
             ContentCipherId::ChaCha20 => Ok((rn32, rn12)),
@@ -87,7 +87,7 @@ mod tests {
     use crate::util::init_test_logging;
     #[test]
     fn veriy_aes_gcm() {
-        let kc = KeyCipher::new();
+        let kc = KeyCipher::new().unwrap();
 
         assert_eq!(kc.key.len(), 32);
         assert_eq!(kc.nonce.len(), 12);
@@ -112,7 +112,7 @@ mod tests {
         let cipher = ContentCipher::try_from(&uuid, &enc_iv).unwrap();
 
         let text = "Hello World!";
-        let key = get_random_bytes::<32>();
+        let key = get_random_bytes::<32>().unwrap();
 
         let encrypted = cipher.encrypt(text.as_bytes(), &key).unwrap();
         let decrypted = cipher.decrypt(&encrypted, &key).unwrap();
@@ -143,7 +143,7 @@ mod tests {
 
         // A few MB of generated data, large enough to exercise multi-block encryption
         let data: Vec<u8> = generated_data(4 * 1024 * 1024);
-        let key = get_random_bytes::<32>();
+        let key = get_random_bytes::<32>().unwrap();
 
         let encrypted = cipher.encrypt(&data, &key).unwrap();
         let decrypted = cipher.decrypt(&encrypted, &key).unwrap();

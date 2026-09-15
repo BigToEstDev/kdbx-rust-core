@@ -272,7 +272,7 @@ impl SecuredDatabaseKeys {
     // The stored encrypted compsoite key can be used for quick unlock of a database
     // after decryption
     pub(crate) fn secure_keys(&mut self, db_key: &str) -> Result<()> {
-        let kc = crypto::KeyCipher::new();
+        let kc = crypto::KeyCipher::new()?;
 
         // Encrypt all previously calculated hashes
 

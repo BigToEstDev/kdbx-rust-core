@@ -341,7 +341,7 @@ fn encrypt_content_blob(db_key: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
         ))
     })?;
     let keyinfo = SecureKeyInfo::from_key_nonce(keydata);
-    let nonce = crypto::get_random_bytes::<12>();
+    let nonce = crypto::get_random_bytes::<12>()?;
     let kc = crypto::KeyCipher::from(&keyinfo.key, &nonce);
     let ciphertext = kc.encrypt(plaintext)?;
 

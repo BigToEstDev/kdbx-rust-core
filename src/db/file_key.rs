@@ -139,7 +139,7 @@ impl KeyFileData {
     }
 
     pub fn generate_key_data() -> Result<Self> {
-        let data_vec = crypto::get_random_bytes::<32>();
+        let data_vec = crypto::get_random_bytes::<32>()?;
         let data_vec_hash = crypto::sha256_hash_from_slice(&data_vec)?;
         let check_sum_hash = hex::encode_upper(&data_vec_hash[..4]);
         //let check_sum_hash =

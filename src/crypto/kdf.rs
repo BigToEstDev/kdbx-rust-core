@@ -42,7 +42,8 @@ impl Default for Argon2Kdf {
         // super module is crypto
         Self {
             memory: 67_108_864, // = 64 MB,
-            salt: super::get_random_bytes::<32>(),
+            // TODO(Step 10 p.5): salt generation moves out of Default/from into a fallible path
+            salt: super::get_random_bytes::<32>().expect("OS CSPRNG unavailable"),
             iterations: 10,
             parallelism: 2,
             // hard code use of the default for now
@@ -77,7 +78,8 @@ impl Argon2Kdf {
     pub(crate) fn from(memory: u64, iterations: u64, parallelism: u32) -> Self {
         Self {
             memory,
-            salt: super::get_random_bytes::<32>(),
+            // TODO(Step 10 p.5): salt generation moves out of Default/from into a fallible path
+            salt: super::get_random_bytes::<32>().expect("OS CSPRNG unavailable"),
             iterations,
             parallelism,
             // hard code use of the default for now
