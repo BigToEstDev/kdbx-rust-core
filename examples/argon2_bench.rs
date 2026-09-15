@@ -22,15 +22,9 @@ const WARMUP_RUNS: usize = 1;
 const MEASURED_RUNS: usize = 5;
 const MIB: u64 = 1024 * 1024;
 
-// Значения поля `variant` в Argon2Kdf (crypto/kdf.rs). Передавать явно обязательно:
-// без него serde(default) подставит Argon2d даже для algorithm = "Argon2id".
-const VARIANT_ARGON2_D: u32 = 0;
-const VARIANT_ARGON2_ID: u32 = 2;
-
 struct KdfCase {
     name: &'static str,
     algorithm: &'static str,
-    variant: u32,
     memory: u64,
     iterations: u64,
     parallelism: u32,
@@ -40,7 +34,6 @@ const CASES: &[KdfCase] = &[
     KdfCase {
         name: "argon2d_64mib_i10_p2 (default)",
         algorithm: "Argon2d",
-        variant: VARIANT_ARGON2_D,
         memory: 64 * MIB,
         iterations: 10,
         parallelism: 2,
@@ -48,7 +41,6 @@ const CASES: &[KdfCase] = &[
     KdfCase {
         name: "argon2id_64mib_i10_p2",
         algorithm: "Argon2id",
-        variant: VARIANT_ARGON2_ID,
         memory: 64 * MIB,
         iterations: 10,
         parallelism: 2,
@@ -56,7 +48,6 @@ const CASES: &[KdfCase] = &[
     KdfCase {
         name: "argon2d_64mib_i10_p1",
         algorithm: "Argon2d",
-        variant: VARIANT_ARGON2_D,
         memory: 64 * MIB,
         iterations: 10,
         parallelism: 1,
@@ -64,7 +55,6 @@ const CASES: &[KdfCase] = &[
     KdfCase {
         name: "argon2d_64mib_i10_p4",
         algorithm: "Argon2d",
-        variant: VARIANT_ARGON2_D,
         memory: 64 * MIB,
         iterations: 10,
         parallelism: 4,
@@ -80,7 +70,6 @@ fn new_db(db_key: &str, case: &KdfCase) -> NewDatabase {
     value["cipher_id"] = serde_json::json!("Aes256");
     value["kdf"] = serde_json::json!({
         "algorithm": case.algorithm,
-        "variant": case.variant,
         "memory": case.memory,
         "iterations": case.iterations,
         "parallelism": case.parallelism,

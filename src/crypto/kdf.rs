@@ -1,180 +1,140 @@
-extern crate argon2_sys;
-use argon2_sys::{
-    argon2_ctx, argon2_error_message, argon2_type, Argon2_Context, ARGON2_OK, ARGON2_VERSION_13,
-};
-use std::ffi::CStr;
+use argon2::{Algorithm, Argon2, Params, Version};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     constants,
     error::{Error, Result},
 };
-use serde::{Deserialize, Serialize};
 
-pub trait Kdf {
-    fn transform_key(&self, composite_key: Vec<u8>) -> Result<Vec<u8>>;
+// Length of the transformed key and of the generated salt (KeePass uses 32 bytes for both)
+const KEY_LEN: usize = 32;
+const SALT_LEN: usize = 32;
+
+// KDBX stores Argon2 memory in bytes, the Argon2 API takes 1 KiB blocks
+const BYTES_PER_KIB: u64 = 1024;
+
+// Argon2 versions allowed by the KDBX4 spec: 0x10 and 0x13
+const ARGON2_VERSION_10: u32 = 0x10;
+const ARGON2_VERSION_13: u32 = 0x13;
+
+// Argon2 variant of a KDBX4 file. It is defined only by `KdfAlgorithm` (`Argon2d`/`Argon2id`),
+// never by a field of `Argon2Kdf`: a separate field could disagree with the enum, which made a
+// database created as Argon2id silently use Argon2d.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Argon2Variant {
+    D,
+    Id,
 }
 
-// Argon2 variants are identified by these constants
-// https://docs.rs/argon2-sys/0.1.0/argon2_sys/constant.Argon2_d.html
-const VARIANT_ARGON2_D: u32 = 0;
-const VARIANT_ARGON2_ID: u32 = 2;
+impl Argon2Variant {
+    // The uuids used by KeePass KDBX 4
+    pub(crate) fn uuid_bytes(self) -> &'static [u8] {
+        match self {
+            Argon2Variant::D => constants::uuid::ARGON2_D_KDF,
+            Argon2Variant::Id => constants::uuid::ARGON2_ID_KDF,
+        }
+    }
 
-// This variant is not used in KeePass
-// const VARIANT_ARGON2_I: u32 = 1;
+    fn algorithm(self) -> Algorithm {
+        match self {
+            Argon2Variant::D => Algorithm::Argon2d,
+            Argon2Variant::Id => Algorithm::Argon2id,
+        }
+    }
+}
 
+// Parameters are shared by both variants. The salt is never serialized for the UI: it is read
+// from the file header on load and regenerated on every save (see `reset_salt`).
 #[derive(Clone, Deserialize, Serialize, Debug)]
 // While deserializing, any missing fields are formed from the struct's implementation of Default
 #[serde(default)]
 pub struct Argon2Kdf {
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     pub(crate) salt: Vec<u8>,
 
+    // In bytes, as stored in KDBX
     pub(crate) memory: u64,
     pub(crate) iterations: u64,
     pub(crate) parallelism: u32,
     pub(crate) version: u32,
-
-    variant: u32,
 }
 
 impl Default for Argon2Kdf {
     fn default() -> Self {
-        // super module is crypto
         Self {
-            memory: 67_108_864, // = 64 MB,
-            // TODO(Step 10 p.5): salt generation moves out of Default/from into a fallible path
-            salt: super::get_random_bytes::<32>().expect("OS CSPRNG unavailable"),
+            salt: Vec::new(),
+            memory: 64 * 1024 * 1024,
             iterations: 10,
             parallelism: 2,
-            // hard code use of the default for now
-            version: 19,
-            variant: VARIANT_ARGON2_D,
+            version: ARGON2_VERSION_13,
         }
     }
 }
 
 impl Argon2Kdf {
-    pub(crate) fn variant_2d() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn variant_2id() -> Self {
-        let mut argon_kdf = Self::default();
-        argon_kdf.variant = VARIANT_ARGON2_ID;
-        argon_kdf
-    }
-
-    // The uuids used by KeePass KDBX 4
-    pub(crate) fn uuid_bytes(&self) -> &[u8] {
-        if self.variant == VARIANT_ARGON2_D {
-            constants::uuid::ARGON2_D_KDF
-        } else {
-            constants::uuid::ARGON2_ID_KDF
-        }
-    }
-
     // Creates argon2kdf with specific parameters values
     // The arg 'memory' size is in bytes
     pub(crate) fn from(memory: u64, iterations: u64, parallelism: u32) -> Self {
         Self {
             memory,
-            // TODO(Step 10 p.5): salt generation moves out of Default/from into a fallible path
-            salt: super::get_random_bytes::<32>().expect("OS CSPRNG unavailable"),
             iterations,
             parallelism,
-            // hard code use of the default for now
-            version: 19,
-            variant: VARIANT_ARGON2_D,
+            ..Self::default()
         }
     }
-}
 
-impl Kdf for Argon2Kdf {
-    fn transform_key(&self, composite_key: Vec<u8>) -> Result<Vec<u8>> {
-        let (pwd, pwdlen) = (composite_key.as_ptr() as *mut u8, 32);
-        let (salt, saltlen) = (self.salt.as_ptr() as *mut u8, 32);
+    // Called before every save, together with the master seed and encryption IV reset, so that
+    // each saved file gets a fresh KDF salt (as KeePass does)
+    pub(crate) fn reset_salt(&mut self) -> Result<()> {
+        self.salt = super::get_random_bytes::<SALT_LEN>()?;
+        Ok(())
+    }
 
-        let mut buffer = vec![0u8; 32]; //output
-        let (ad, adlen) = (::std::ptr::null_mut(), 0);
-        let (secret, secretlen) = (::std::ptr::null_mut(), 0);
-
-        let memory_cost = self.memory / 1024; //in Kb
-
-        let mut context = Argon2_Context {
-            out: buffer.as_mut_ptr(),
-            outlen: buffer.len() as u32,
-            pwd,
-            pwdlen,
-            salt,
-            saltlen,
-            secret,
-            secretlen,
-            ad,
-            adlen,
-            t_cost: self.iterations as u32,
-            m_cost: memory_cost as u32,
-            lanes: self.parallelism,
-            threads: self.parallelism,
-            version: ARGON2_VERSION_13,
-            allocate_cbk: None,
-            free_cbk: None,
-            flags: 0,
+    pub(crate) fn transform_key(
+        &self,
+        variant: Argon2Variant,
+        composite_key: &[u8],
+    ) -> Result<Vec<u8>> {
+        // Parameters may come from a foreign file: convert without truncating casts
+        let m_cost = u32::try_from(self.memory / BYTES_PER_KIB).map_err(|_| {
+            Error::Argon2Error(format!("memory {} bytes is too large", self.memory))
+        })?;
+        let t_cost = u32::try_from(self.iterations).map_err(|_| {
+            Error::Argon2Error(format!("iterations {} is too large", self.iterations))
+        })?;
+        let version = match self.version {
+            ARGON2_VERSION_10 => Version::V0x10,
+            ARGON2_VERSION_13 => Version::V0x13,
+            v => {
+                return Err(Error::Argon2Error(format!(
+                    "unsupported Argon2 version {:#x}",
+                    v
+                )))
+            }
         };
 
-        let context_ptr = &mut context as *mut Argon2_Context;
-        let variant = self.variant as argon2_type;
-        let return_code = unsafe { argon2_ctx(context_ptr, variant) };
+        let params = Params::new(m_cost, t_cost, self.parallelism, Some(KEY_LEN))
+            .map_err(|e| Error::Argon2Error(e.to_string()))?;
 
-        match check_return_code(return_code) {
-            Ok(_) => {
-                //println!("Hashed output: {:?}", u8_arr_to_i8_arr(&buffer[..]));
-                Ok(buffer)
-            }
-            Err(m) => Err(Error::UnexpectedError(m)),
-        }
-    }
-}
-
-// TODO:: Need to redo this ??
-fn check_return_code(
-    return_code: argon2_sys::Argon2_ErrorCodes,
-) -> std::result::Result<(), String> {
-    match return_code {
-        ARGON2_OK => Ok(()),
-
-        argon2_sys::ARGON2_MEMORY_ALLOCATION_ERROR => Err("MemoryAllocationError".to_string()),
-
-        argon2_sys::ARGON2_THREAD_FAIL => Err("ThreadError".to_string()),
-
-        _ => {
-            let err_msg_ptr = unsafe { argon2_error_message(return_code) };
-            if err_msg_ptr.is_null() {
-                return Err(format!(
-                    "Unhandled error from argon2 api c lib call. Error code: {}",
-                    return_code,
-                ));
-            }
-            let err_msg_cstr = unsafe { CStr::from_ptr(err_msg_ptr) };
-            let err_msg = err_msg_cstr.to_str().unwrap(); // Safe; see argon2_error_message
-            Err(format!(
-                "Unhandled error from argon2 api c lib call. Error code: {}. Error {}",
-                return_code, err_msg
-            ))
-        }
+        // With the `parallel` feature lanes are computed on rayon threads
+        let mut key = vec![0u8; KEY_LEN];
+        Argon2::new(variant.algorithm(), version, params)
+            .hash_password_into(composite_key, &self.salt, &mut key)
+            .map_err(|e| Error::Argon2Error(e.to_string()))?;
+        Ok(key)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Argon2Kdf, Kdf, VARIANT_ARGON2_D, VARIANT_ARGON2_ID};
+    use super::{Argon2Kdf, Argon2Variant, SALT_LEN};
 
     // Эталонные значения получены официальными биндингами референсной реализации Argon2
     // (argon2-cffi 25.1.0, крейт tools/kdbx-oracle), а не нашим кодом.
     //
     // Официальный вектор RFC 9106 через наш API недостижим: там salt 16 байт плюс secret и
-    // associated data, а `transform_key` жёстко берёт salt 32 байта и передаёт secret/ad как
-    // null (см. выше в этом файле). Поэтому вектор снят для нашей формы параметров.
-    // Сам примитив против RFC 9106 проверяется тестами крейта `argon2` (появится в Step 10).
+    // associated data, а KDBX-путь не передаёт secret/ad. Поэтому вектор снят для нашей формы
+    // параметров. Сам примитив против RFC 9106 проверяется тестами крейта `argon2`.
 
     const PASSWORD: [u8; 32] = [0x01; 32];
     const SALT: [u8; 32] = [0x02; 32];
@@ -188,43 +148,36 @@ mod tests {
     const EXPECTED_ARGON2ID: &str =
         "50b87226bb37ae4fb8d2ec86c5a944c4e361c7054f47a263df3a41911e56cba2";
 
-    fn kdf_with_fixed_salt(variant: u32) -> Argon2Kdf {
+    fn kdf_with_fixed_salt() -> Argon2Kdf {
         Argon2Kdf {
             salt: SALT.to_vec(),
-            memory: MEMORY_8_MIB,
-            iterations: ITERATIONS,
-            parallelism: PARALLELISM,
-            version: 19,
-            variant,
+            ..Argon2Kdf::from(MEMORY_8_MIB, ITERATIONS, PARALLELISM)
         }
+    }
+
+    fn transform(kdf: &Argon2Kdf, variant: Argon2Variant) -> crate::error::Result<Vec<u8>> {
+        kdf.transform_key(variant, &PASSWORD)
     }
 
     #[test]
     fn verify_argon2d_reference_vector() {
-        let transformed = kdf_with_fixed_salt(VARIANT_ARGON2_D)
-            .transform_key(PASSWORD.to_vec())
-            .unwrap();
+        let transformed = transform(&kdf_with_fixed_salt(), Argon2Variant::D).unwrap();
         assert_eq!(hex::encode(&transformed), EXPECTED_ARGON2D);
     }
 
     #[test]
     fn verify_argon2id_reference_vector() {
-        let transformed = kdf_with_fixed_salt(VARIANT_ARGON2_ID)
-            .transform_key(PASSWORD.to_vec())
-            .unwrap();
+        let transformed = transform(&kdf_with_fixed_salt(), Argon2Variant::Id).unwrap();
         assert_eq!(hex::encode(&transformed), EXPECTED_ARGON2ID);
     }
 
-    // Варианты должны давать разный результат: если параметр variant где-то потеряется,
+    // Варианты должны давать разный результат: если вариант где-то потеряется,
     // оба теста выше могут остаться зелёными по совпадению только при одинаковых выходах.
     #[test]
     fn verify_argon2_variants_differ() {
-        let d = kdf_with_fixed_salt(VARIANT_ARGON2_D)
-            .transform_key(PASSWORD.to_vec())
-            .unwrap();
-        let id = kdf_with_fixed_salt(VARIANT_ARGON2_ID)
-            .transform_key(PASSWORD.to_vec())
-            .unwrap();
+        let kdf = kdf_with_fixed_salt();
+        let d = transform(&kdf, Argon2Variant::D).unwrap();
+        let id = transform(&kdf, Argon2Variant::Id).unwrap();
         assert_ne!(d, id, "Argon2d и Argon2id дали одинаковый результат");
     }
 
@@ -232,7 +185,80 @@ mod tests {
     #[test]
     fn verify_variant_uuids() {
         use crate::constants::uuid::{ARGON2_D_KDF, ARGON2_ID_KDF};
-        assert_eq!(Argon2Kdf::variant_2d().uuid_bytes(), ARGON2_D_KDF);
-        assert_eq!(Argon2Kdf::variant_2id().uuid_bytes(), ARGON2_ID_KDF);
+        assert_eq!(Argon2Variant::D.uuid_bytes(), ARGON2_D_KDF);
+        assert_eq!(Argon2Variant::Id.uuid_bytes(), ARGON2_ID_KDF);
+    }
+
+    // Версия 0x10 разрешена спецификацией KDBX4 и даёт другой ключ, чем 0x13 —
+    // раньше C-код игнорировал поле и всегда считал 0x13
+    #[test]
+    fn verify_version_is_used() {
+        let v13 = transform(&kdf_with_fixed_salt(), Argon2Variant::D).unwrap();
+        let v10 = transform(
+            &Argon2Kdf {
+                version: 0x10,
+                ..kdf_with_fixed_salt()
+            },
+            Argon2Variant::D,
+        )
+        .unwrap();
+        assert_ne!(v10, v13);
+    }
+
+    #[test]
+    fn verify_unsupported_version_rejected() {
+        let kdf = Argon2Kdf {
+            version: 0x12,
+            ..kdf_with_fixed_salt()
+        };
+        assert!(transform(&kdf, Argon2Variant::D).is_err());
+    }
+
+    #[test]
+    fn verify_too_large_parameters_rejected() {
+        let kdf = Argon2Kdf {
+            iterations: u64::from(u32::MAX) + 1,
+            ..kdf_with_fixed_salt()
+        };
+        assert!(transform(&kdf, Argon2Variant::D).is_err());
+
+        let kdf = Argon2Kdf {
+            memory: (u64::from(u32::MAX) + 1) * 1024,
+            ..kdf_with_fixed_salt()
+        };
+        assert!(transform(&kdf, Argon2Variant::D).is_err());
+    }
+
+    // Соль больше не генерируется в Default: без reset_salt ключ вывести нельзя,
+    // а не молча с пустой/нулевой солью
+    #[test]
+    fn verify_empty_salt_rejected() {
+        let kdf = Argon2Kdf::from(MEMORY_8_MIB, ITERATIONS, PARALLELISM);
+        assert!(transform(&kdf, Argon2Variant::D).is_err());
+    }
+
+    #[test]
+    fn verify_reset_salt_generates_new_salt() {
+        let mut kdf = kdf_with_fixed_salt();
+        kdf.reset_salt().unwrap();
+        assert_eq!(kdf.salt.len(), SALT_LEN);
+        assert_ne!(kdf.salt, SALT.to_vec());
+
+        let previous = kdf.salt.clone();
+        kdf.reset_salt().unwrap();
+        assert_ne!(kdf.salt, previous);
+    }
+
+    // Клиент может прислать устаревшее поле variant — оно игнорируется, а соль в JSON
+    // не попадает ни при сериализации, ни при десериализации
+    #[test]
+    fn verify_serde_has_no_variant_and_salt() {
+        let json = serde_json::to_value(kdf_with_fixed_salt()).unwrap();
+        assert!(json.get("variant").is_none());
+        assert!(json.get("salt").is_none());
+
+        let kdf: Argon2Kdf =
+            serde_json::from_value(serde_json::json!({ "variant": 2, "salt": [1, 2, 3] })).unwrap();
+        assert!(kdf.salt.is_empty());
     }
 }

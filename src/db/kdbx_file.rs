@@ -54,8 +54,8 @@ impl KdbxFile {
 
     pub fn compute_all_keys(&mut self, seed_reset: bool) -> Result<()> {
         if seed_reset {
-            // Before the next save, we need to reset the master seed and encryption iv to new set of values
-            let _r = self.main_header.reset_master_seed_iv()?;
+            // Before the next save: new master seed, encryption iv and KDF salt
+            self.main_header.reset_random_values()?;
         }
         self.secured_database_keys.compute_all_keys(
             &self.database_file_name,
@@ -65,9 +65,6 @@ impl KdbxFile {
     }
 
     // #[inline]
-    // pub fn reset_master_seed_iv(&mut self) -> Result<(Vec<u8>,Vec<u8>)> {
-    //     self.main_header.reset_master_seed_iv()
-    // }
 
     pub fn compare_key(&self, password: Option<&str>, key_file_name: Option<&str>) -> Result<bool> {
         let file_key = FileKey::from(key_file_name)?;
@@ -499,9 +496,9 @@ impl MainHeader {
                 vd_type::BYTEARRAY => {
                     if name.as_str() == "$UUID" {
                         if bytes_buf == constants::uuid::ARGON2_D_KDF {
-                            kdf = KdfAlgorithm::Argon2d(crypto::kdf::Argon2Kdf::variant_2d());
+                            kdf = KdfAlgorithm::Argon2d(crypto::kdf::Argon2Kdf::default());
                         } else if bytes_buf == constants::uuid::ARGON2_ID_KDF {
-                            kdf = KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::variant_2id());
+                            kdf = KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::default());
                         }
                     } else {
                         vds.push(VariantDict::BYTEARRAY(name, bytes_buf.clone()));
@@ -579,9 +576,9 @@ impl MainHeader {
         };
 
         match &self.kdf_algorithm {
-            // Both Argon2 variants have the same parameters
+            // Both Argon2 variants have the same parameters; the UUID comes from the enum variant
             KdfAlgorithm::Argon2d(kdf) | KdfAlgorithm::Argon2id(kdf) => {
-                write(vd_type::BYTEARRAY, "$UUID", kdf.uuid_bytes())?;
+                write(vd_type::BYTEARRAY, "$UUID", self.kdf_algorithm.uuid_bytes()?)?;
                 write(vd_type::UINT64, "I", &kdf.iterations.to_le_bytes())?;
                 write(vd_type::UINT64, "M", &kdf.memory.to_le_bytes())?;
                 write(vd_type::UINT32, "P", &kdf.parallelism.to_le_bytes())?;
@@ -638,8 +635,14 @@ impl MainHeader {
         Ok(())
     }
 
-    // Reset the master seed and encryption iv for the next saving
-    pub(crate) fn reset_master_seed_iv(&mut self) -> Result<()> {
+    // Resets all per-save random header values: master seed, encryption iv and KDF salt
+    // (a fresh salt on every save, as KeePass does)
+    pub(crate) fn reset_random_values(&mut self) -> Result<()> {
+        self.kdf_algorithm.reset_salt()?;
+        self.reset_master_seed_iv()
+    }
+
+    fn reset_master_seed_iv(&mut self) -> Result<()> {
         let cid = match self.cipher_id.as_slice() {
             constants::uuid::AES256 => ContentCipherId::Aes256,
             constants::uuid::CHACHA20 => ContentCipherId::ChaCha20,

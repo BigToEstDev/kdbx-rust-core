@@ -6,6 +6,8 @@
 //! Round-trip своим же кодом этого не видит: чтение берёт вариант из UUID в заголовке,
 //! так что файл «Argon2d под видом Argon2id» открывается без ошибок. Поэтому тест
 //! разбирает outer header записанного файла сам.
+//!
+//! Там же проверяется, что соль KDF обновляется при каждом сохранении (как в KeePass).
 
 mod common;
 
@@ -29,6 +31,8 @@ const FIELD_KDF_PARAMETERS: u8 = 11;
 const VARIANT_DICT_START: usize = 2;
 const VARIANT_END: u8 = 0;
 const KDF_UUID_KEY: &[u8] = b"$UUID";
+const KDF_SALT_KEY: &[u8] = b"S";
+const SALT_LEN: usize = 32;
 
 fn read_u32(data: &[u8], pos: usize) -> usize {
     u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize
@@ -49,7 +53,7 @@ fn kdf_parameters(file: &[u8]) -> &[u8] {
     }
 }
 
-fn kdf_uuid(file: &[u8]) -> [u8; 16] {
+fn kdf_parameter<'a>(file: &'a [u8], wanted: &[u8]) -> &'a [u8] {
     let dict = kdf_parameters(file);
     let mut pos = VARIANT_DICT_START;
     while dict[pos] != VARIANT_END {
@@ -59,16 +63,31 @@ fn kdf_uuid(file: &[u8]) -> [u8; 16] {
         let val_len = read_u32(dict, pos);
         let value = &dict[pos + 4..pos + 4 + val_len];
         pos += 4 + val_len;
-        if key == KDF_UUID_KEY {
-            return value.try_into().expect("$UUID должен быть 16 байт");
+        if key == wanted {
+            return value;
         }
     }
-    panic!("в KdfParameters нет $UUID");
+    panic!("в KdfParameters нет {}", String::from_utf8_lossy(wanted));
+}
+
+fn kdf_uuid(file: &[u8]) -> [u8; 16] {
+    kdf_parameter(file, KDF_UUID_KEY)
+        .try_into()
+        .expect("$UUID должен быть 16 байт")
+}
+
+fn kdf_salt(db_key: &str) -> Vec<u8> {
+    let file = std::fs::read(db_key).unwrap();
+    kdf_parameter(&file, KDF_SALT_KEY).to_vec()
 }
 
 fn temp_path(name: &str) -> String {
     let mut p = std::env::temp_dir();
-    p.push(format!("okp_kdf_written_{}_{}.kdbx", name, std::process::id()));
+    p.push(format!(
+        "okp_kdf_written_{}_{}.kdbx",
+        name,
+        std::process::id()
+    ));
     p.to_str().unwrap().to_string()
 }
 
@@ -119,4 +138,30 @@ fn verify_argon2d_written_to_header() {
 #[test]
 fn verify_argon2id_written_to_header() {
     assert_written_kdf("Argon2id", ARGON2_ID_UUID);
+}
+
+#[test]
+fn verify_kdf_salt_regenerated_on_every_save() {
+    common::init();
+    let db_key = temp_path("salt_regenerated");
+    let _ = std::fs::remove_file(&db_key);
+
+    db_service::create_kdbx(client_new_db(&db_key, "Argon2id")).unwrap();
+    let created_salt = kdf_salt(&db_key);
+
+    db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
+    let saved_salt = kdf_salt(&db_key);
+    db_service::close_kdbx(&db_key).unwrap();
+
+    // Новая соль означает и новый ключ — база должна открываться после пересохранения
+    db_service::load_kdbx(&db_key, Some(PASSWORD), None).unwrap();
+    db_service::close_kdbx(&db_key).unwrap();
+    let _ = std::fs::remove_file(&db_key);
+
+    assert_eq!(created_salt.len(), SALT_LEN);
+    assert_eq!(saved_salt.len(), SALT_LEN);
+    assert_ne!(
+        created_salt, saved_salt,
+        "соль KDF не обновилась при сохранении"
+    );
 }
