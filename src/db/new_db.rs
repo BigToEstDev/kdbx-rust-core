@@ -52,7 +52,7 @@ impl NewDatabase {
 
         let (cid, eiv) = self.cipher_id.uuid_with_iv()?;
 
-        let (rn64, rn32) = get_random_bytes_2::<64, 32>();
+        let (rn64, rn32) = get_random_bytes_2::<64, 32>()?;
 
         let mh = MainHeader {
             cipher_id: cid,

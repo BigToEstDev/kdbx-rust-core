@@ -50,6 +50,15 @@ pub enum Error {
     #[error("Only `ChaCha20` is supported for decrypting/encrypting protected content")]
     UnsupportedStreamCipher(String),
 
+    /// Wrong key / IV / nonce length passed to a crypto primitive: a corrupted or crafted
+    /// file header, or a caller bug.
+    #[error("Invalid {0} length")]
+    InvalidCryptoInputLength(&'static str),
+
+    /// The OS CSPRNG is unavailable. Never fall back to zeroed or predictable bytes.
+    #[error("Secure random number generation failed: {0}")]
+    RandomGenerationFailed(String),
+
     #[error("Header corrupted")] //#[error("Header Hash Check Failed")]
     HeaderHashCheckFailed,
 
@@ -100,16 +109,6 @@ pub enum Error {
 
     #[error("{0}")]
     UrlParseError(#[from] url::ParseError),
-
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "windows",
-        target_os = "linux",
-        target_os = "ios",
-        all(target_os = "android", target_arch = "aarch64")
-    ))]
-    #[error("{0}")]
-    CryptoError(#[from] botan::Error),
 
     #[error("{0}")]
     XmlReadingFailed(String),

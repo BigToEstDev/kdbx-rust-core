@@ -19,7 +19,7 @@ use self::kdbx_file::InnerHeader;
 use self::reader_writer::{KdbxFileReader, KdbxFileWriter};
 use crate::constants::{self, EMPTY_STR};
 use crate::constants::{header_type, inner_header_type, vd_type};
-use crate::crypto::kdf::Kdf;
+use crate::crypto::kdf::Argon2Variant;
 use crate::{crypto, error};
 
 use crate::db_content::*;
@@ -77,6 +77,31 @@ impl Default for KdfAlgorithm {
 impl KdfAlgorithm {
     pub fn default_argon2() -> Self {
         KdfAlgorithm::Argon2d(crypto::kdf::Argon2Kdf::default())
+    }
+
+    // The enum variant is the only source of the Argon2 variant (see crypto::kdf::Argon2Variant)
+    fn argon2(&self) -> Result<(Argon2Variant, &crypto::kdf::Argon2Kdf)> {
+        match self {
+            KdfAlgorithm::Argon2d(kdf) => Ok((Argon2Variant::D, kdf)),
+            KdfAlgorithm::Argon2id(kdf) => Ok((Argon2Variant::Id, kdf)),
+            KdfAlgorithm::NoValidKdfAvailable => Err(Error::SupportedOnlyArgon2dKdfAlgorithm),
+        }
+    }
+
+    pub(crate) fn uuid_bytes(&self) -> Result<&'static [u8]> {
+        Ok(self.argon2()?.0.uuid_bytes())
+    }
+
+    pub(crate) fn transform_key(&self, composite_key: &[u8]) -> Result<Vec<u8>> {
+        let (variant, kdf) = self.argon2()?;
+        kdf.transform_key(variant, composite_key)
+    }
+
+    pub(crate) fn reset_salt(&mut self) -> Result<()> {
+        match self {
+            KdfAlgorithm::Argon2d(kdf) | KdfAlgorithm::Argon2id(kdf) => kdf.reset_salt(),
+            KdfAlgorithm::NoValidKdfAvailable => Err(Error::SupportedOnlyArgon2dKdfAlgorithm),
+        }
     }
 
     // Creates argon2 with specific parameters values
@@ -272,7 +297,7 @@ impl SecuredDatabaseKeys {
     // The stored encrypted compsoite key can be used for quick unlock of a database
     // after decryption
     pub(crate) fn secure_keys(&mut self, db_key: &str) -> Result<()> {
-        let kc = crypto::KeyCipher::new();
+        let kc = crypto::KeyCipher::new()?;
 
         // Encrypt all previously calculated hashes
 
@@ -320,32 +345,12 @@ impl SecuredDatabaseKeys {
         kdf_algorithm: &KdfAlgorithm,
         master_seed: &Vec<u8>,
     ) -> Result<()> {
-        match &kdf_algorithm {
-            KdfAlgorithm::Argon2d(kdf) | KdfAlgorithm::Argon2id(kdf) => {
-                let ck = self.get_composite_key(db_key)?;
-                // Then transform the composite key using KDF
-                let transformed_key = kdf.transform_key(ck)?;
+        let ck = self.get_composite_key(db_key)?;
+        // Then transform the composite key using KDF
+        let transformed_key = kdf_algorithm.transform_key(&ck)?;
 
-                // Determine the HMAC and Payload Encryption/Decryption Key
-                self.compute_keys(&master_seed, transformed_key)?;
-            }
-            _ => {
-                return Err(Error::SupportedOnlyArgon2dKdfAlgorithm);
-            }
-        }
-
-        // if let KdfAlgorithm::Argon2d(kdf) = &kdf_algorithm {
-        //     let ck = self.get_composite_key(db_key)?;
-        //     // Then transform the composite key using KDF
-        //     let transformed_key = kdf.transform_key(ck)?;
-
-        //     // Determine the HMAC and Payload Encryption/Decryption Key
-        //     self.compute_keys(&master_seed, transformed_key)?;
-        // } else {
-        //     return Err(Error::SupportedOnlyArgon2dKdfAlgorithm);
-        // }
-
-        Ok(())
+        // Determine the HMAC and Payload Encryption/Decryption Key
+        self.compute_keys(master_seed, transformed_key)
     }
 
     // Gets the previously computed composite key; This decrypts the key if required

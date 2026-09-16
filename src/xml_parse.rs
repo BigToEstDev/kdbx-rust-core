@@ -2062,7 +2062,7 @@ mod tests {
         init();
         log::info!("This record will be captured by `cargo test`");
 
-        let key = crate::crypto::get_random_bytes::<32>();
+        let key = crate::crypto::get_random_bytes::<32>().unwrap();
         let xml = sample_kdbx_xml(&key);
         let cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
 
@@ -2106,7 +2106,7 @@ mod tests {
 
     #[test]
     fn read_write_sample_xml() {
-        let key = crate::crypto::get_random_bytes::<32>();
+        let key = crate::crypto::get_random_bytes::<32>().unwrap();
         let xml = sample_kdbx_xml(&key);
         let cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
 
