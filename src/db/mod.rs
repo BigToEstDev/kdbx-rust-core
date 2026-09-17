@@ -76,7 +76,7 @@ impl Default for KdfAlgorithm {
 
 impl KdfAlgorithm {
     pub fn default_argon2() -> Self {
-        KdfAlgorithm::Argon2d(crypto::kdf::Argon2Kdf::default())
+        KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::default())
     }
 
     // The enum variant is the only source of the Argon2 variant (see crypto::kdf::Argon2Variant)
@@ -109,7 +109,7 @@ impl KdfAlgorithm {
     pub fn as_argon2(memory: u64, iterations: u64, parallelism: u32) -> Self {
         // The incoming memory bytes size needs to be converted to size in Mb
         let mem = memory * 1024 * 1024;
-        KdfAlgorithm::Argon2d(crypto::kdf::Argon2Kdf::from(mem, iterations, parallelism))
+        KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::from(mem, iterations, parallelism))
     }
 }
 

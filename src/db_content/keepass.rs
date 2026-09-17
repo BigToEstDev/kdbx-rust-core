@@ -94,17 +94,6 @@ impl KeepassFile {
         self.root.insert_entry(entry)
     }
 
-    // Cross-db move variant. Rebinds meta_share to this KeepassFile's meta (so the
-    // entry's EntryType lookups resolve against the target db's custom entry types)
-    // and then inserts without pushing onto the parent's entry_uuids list.
-    pub(crate) fn insert_entry_cross_db(&mut self, mut entry: Entry) -> Result<()> {
-        entry.meta_share = self.meta.clone_meta_share();
-        for h in entry.history.entries.iter_mut() {
-            h.meta_share = self.meta.clone_meta_share();
-        }
-        self.root.insert_entry_cross_db(entry)
-    }
-
     // Memory-security lock: volatile-zero the sensitive in-memory content
     // (entry field values, incl. history) before this KeepassFile is dropped on
     // lock. Rust does not zero on drop, so without this the plaintext would linger
@@ -141,8 +130,6 @@ impl KeepassFile {
 
         //self.root.custom_data_to_entries();
         self.root.entries_after_xml_reading(&self.meta);
-
-        self.root.adjust_auto_open_group_entries();
 
         #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
         self.root

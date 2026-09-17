@@ -5,9 +5,6 @@ mod attachment;
 mod custom_icon;
 mod io;
 
-// Passkey DB types and functions — compiled on all platforms (no cfg gate).
-pub mod passkey;
-
 // URL-based autofill entry matching — shared by the desktop browser extension
 // and the mobile autofill flows (no cfg gate).
 pub mod autofill;
@@ -69,8 +66,7 @@ pub use io::*;
 pub use crate::error::{self, Error, Result};
 
 pub use crate::password_passphrase_generator::{
-    AnalyzedPassword, GeneratedPassPhrase, PassphraseGenerationOptions, PasswordGenerationOptions,
-    PasswordScore, WordListLoader,
+    AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
 };
 
 // See lib.rs where util module is reexported as service_util
@@ -111,14 +107,6 @@ pub use autofill::associate_app_to_entry;
 pub use custom_icon::{
     add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon,
     set_entry_custom_icon, set_group_custom_icon,
-};
-
-#[cfg(feature = "favicon")]
-pub use custom_icon::{download_and_add_custom_icon, normalize_image_to_png};
-
-pub use crate::remote_storage::connection_entry::{
-    entry_first_attachment, find_remote_connection_entry, list_remote_connection_entries,
-    RemoteConnectionEntry, RemoteConnectionEntrySummary,
 };
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -210,16 +198,6 @@ type MainStore = Arc<Mutex<HashMap<String, KdbxContext>>>;
 fn main_store() -> &'static MainStore {
     static MAIN_STORE: Lazy<MainStore> = Lazy::new(Default::default);
     &MAIN_STORE
-}
-
-// Inserts a `KdbxFile` directly into the in-memory cache.
-//
-// Intended **only** for unit tests that need to populate the cache without
-// going through the full disk-IO path (i.e. without calling `create_kdbx` or
-// `load_kdbx`).
-#[cfg(test)]
-pub(crate) fn insert_kdbx_for_test(kdbx_file: KdbxFile) {
-    KdbxContext::insert(kdbx_file);
 }
 
 // Gets a ref to the main keepass content
@@ -398,8 +376,7 @@ pub fn all_kdbx_cache_keys() -> Result<Vec<String>> {
 }
 
 // Open db keys that are currently unlocked. Used to gate browser-extension access
-// so that a locked (but still open) database is not reachable for autofill or
-// passkeys.
+// so that a locked (but still open) database is not reachable for autofill.
 pub fn unlocked_kdbx_cache_keys() -> Result<Vec<String>> {
     let store = main_store().lock().unwrap();
     let mut vec = vec![];
@@ -580,6 +557,12 @@ pub fn unlock_kdbx(
     })
 }
 
+// Returns the human-readable name of the database identified by `db_key`.
+pub fn get_db_name(db_key: &str) -> Result<String> {
+    let action = |k: &KeepassFile| Ok(k.meta.database_name().clone());
+    main_content_action!(db_key, action, no_times)
+}
+
 // Gather all unique tags that are used in all groups and entries
 pub fn collect_entry_group_tags(db_key: &str) -> Result<AllTags> {
     main_content_action!(db_key, move |k: &KeepassFile| Ok(k.root.collect_tags()))
@@ -721,8 +704,8 @@ pub struct EntrySearchResult {
     pub entry_items: Vec<EntrySummary>,
 }
 
-// Returns true if entries of this type are offered for autofill candidate lists
-// (password or passkey). Login, Credit/Debit Card and Bank Account all carry a
+// Returns true if entries of this type are offered for autofill candidate lists.
+// Login, Credit/Debit Card and Bank Account all carry a
 // Login Details section (UserName/Password/URL/Additional URLs), so all three are
 // username/password candidates. This is the single source of truth for autofill
 // type eligibility, shared by the desktop browser extension and the mobile
@@ -849,7 +832,6 @@ fn create_groups_summary_data(k: &KeepassFile) -> Result<GroupTree> {
     Ok(GroupTree {
         root_uuid: k.root.root_uuid(),
         recycle_bin_uuid: k.root.recycle_bin_uuid(),
-        auto_open_group_uuid: k.root.auto_open_group_uuid(),
         deleted_group_uuids: k.deleted_group_uuids(),
         groups: grps,
     })
@@ -933,32 +915,6 @@ pub fn get_entry_form_data_by_id(db_key: &str, entry_uuid: &Uuid) -> Result<Entr
                 entry_uuid
             ))),
         }
-    })
-}
-
-// Gets all entries found under the special group 'AutoOpen'
-pub fn auto_open_group_entries(db_key: &str) -> Result<Vec<EntryFormData>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        let ao_entries: Vec<EntryFormData> = k
-            .root
-            .auto_open_group_entries()
-            .iter()
-            .map(|entry| EntryFormData::place_holder_resolved_form_data(&k.root, entry))
-            .collect();
-
-        Ok(ao_entries)
-    })
-}
-
-pub fn auto_open_group_entry_uuids(db_key: &str) -> Result<Vec<Uuid>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        Ok(k.root.auto_open_group_entry_uuids())
-    })
-}
-
-pub fn auto_open_group_uuid(db_key: &str) -> Result<Option<Uuid>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        Ok(k.root.auto_open_group_uuid())
     })
 }
 
@@ -1178,231 +1134,6 @@ pub fn move_entry(db_key: &str, entry_uuid: Uuid, new_parent_id: Uuid) -> Result
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         k.root.move_entry(entry_uuid, new_parent_id)
     })
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CrossDbMoveSummary {
-    pub moved_entry_count: usize,
-    pub moved_group_count: usize,
-    pub source_db_key: String,
-    pub target_db_key: String,
-    pub target_parent_group_name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CrossDbCloneSummary {
-    pub new_entry_uuid: Uuid,
-    pub source_db_key: String,
-    pub target_db_key: String,
-    pub target_parent_group_name: String,
-}
-
-pub fn move_entry_to_other_db(
-    source_db_key: &str,
-    entry_uuid: &Uuid,
-    target_db_key: &str,
-    target_parent_group_uuid: &Uuid,
-) -> Result<CrossDbMoveSummary> {
-    if source_db_key == target_db_key {
-        return Err(Error::UnexpectedError(
-            "Source and target databases must be different for cross-db move".into(),
-        ));
-    }
-
-    let summary = {
-        let mut store = main_store().lock().unwrap();
-        let [target_opt, source_opt] = store.get_disjoint_mut([target_db_key, source_db_key]);
-        let target_ctx =
-            target_opt.ok_or_else(|| Error::NotFound("Target database key is not found".into()))?;
-        let source_ctx =
-            source_opt.ok_or_else(|| Error::NotFound("Source database key is not found".into()))?;
-
-        // Copy all source attachments into the target. The storage is content-addressed
-        // by hash so unreferenced extras are filtered out at save time.
-        let source_attachments = source_ctx.kdbx_file.attachmentset().clone();
-        target_ctx
-            .kdbx_file
-            .insert_or_update_with_attachmentset(&source_attachments);
-
-        let result = {
-            let source_kp = source_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_mut()
-                .ok_or_else(|| {
-                    Error::NotFound("Source keepass main content is not available".into())
-                })?;
-            let target_kp = target_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_mut()
-                .ok_or_else(|| {
-                    Error::NotFound("Target keepass main content is not available".into())
-                })?;
-            crate::db_content::move_entry_between_keepass_files(
-                source_kp,
-                target_kp,
-                entry_uuid,
-                target_parent_group_uuid,
-            )?
-        };
-
-        let now = util::now_utc();
-        source_ctx.last_write_time = now;
-        source_ctx.save_pending = true;
-        target_ctx.last_write_time = now;
-        target_ctx.save_pending = true;
-
-        CrossDbMoveSummary {
-            moved_entry_count: result.moved_entry_uuids.len(),
-            moved_group_count: result.moved_group_uuids.len(),
-            source_db_key: source_db_key.to_string(),
-            target_db_key: target_db_key.to_string(),
-            target_parent_group_name: result.target_parent_group_name,
-        }
-    };
-
-    Ok(summary)
-}
-
-pub fn move_group_to_other_db(
-    source_db_key: &str,
-    group_uuid: &Uuid,
-    target_db_key: &str,
-    target_parent_group_uuid: &Uuid,
-) -> Result<CrossDbMoveSummary> {
-    if source_db_key == target_db_key {
-        return Err(Error::UnexpectedError(
-            "Source and target databases must be different for cross-db move".into(),
-        ));
-    }
-
-    let summary = {
-        let mut store = main_store().lock().unwrap();
-        let [target_opt, source_opt] = store.get_disjoint_mut([target_db_key, source_db_key]);
-        let target_ctx =
-            target_opt.ok_or_else(|| Error::NotFound("Target database key is not found".into()))?;
-        let source_ctx =
-            source_opt.ok_or_else(|| Error::NotFound("Source database key is not found".into()))?;
-
-        let source_attachments = source_ctx.kdbx_file.attachmentset().clone();
-        target_ctx
-            .kdbx_file
-            .insert_or_update_with_attachmentset(&source_attachments);
-
-        let result = {
-            let source_kp = source_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_mut()
-                .ok_or_else(|| {
-                    Error::NotFound("Source keepass main content is not available".into())
-                })?;
-            let target_kp = target_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_mut()
-                .ok_or_else(|| {
-                    Error::NotFound("Target keepass main content is not available".into())
-                })?;
-            crate::db_content::move_group_between_keepass_files(
-                source_kp,
-                target_kp,
-                group_uuid,
-                target_parent_group_uuid,
-            )?
-        };
-
-        let now = util::now_utc();
-        source_ctx.last_write_time = now;
-        source_ctx.save_pending = true;
-        target_ctx.last_write_time = now;
-        target_ctx.save_pending = true;
-
-        CrossDbMoveSummary {
-            moved_entry_count: result.moved_entry_uuids.len(),
-            moved_group_count: result.moved_group_uuids.len(),
-            source_db_key: source_db_key.to_string(),
-            target_db_key: target_db_key.to_string(),
-            target_parent_group_name: result.target_parent_group_name,
-        }
-    };
-
-    Ok(summary)
-}
-
-pub fn clone_entry_to_other_db(
-    source_db_key: &str,
-    entry_uuid: &Uuid,
-    target_db_key: &str,
-    target_parent_group_uuid: &Uuid,
-) -> Result<CrossDbCloneSummary> {
-    if source_db_key == target_db_key {
-        return Err(Error::UnexpectedError(
-            "Source and target databases must be different for cross-db clone".into(),
-        ));
-    }
-
-    let summary = {
-        let mut store = main_store().lock().unwrap();
-        let [target_opt, source_opt] = store.get_disjoint_mut([target_db_key, source_db_key]);
-        let target_ctx =
-            target_opt.ok_or_else(|| Error::NotFound("Target database key is not found".into()))?;
-        let source_ctx =
-            source_opt.ok_or_else(|| Error::NotFound("Source database key is not found".into()))?;
-
-        // Copy all source attachments into target (content-addressed; unreferenced extras
-        // are filtered at save time — same approach as move)
-        let source_attachments = source_ctx.kdbx_file.attachmentset().clone();
-        target_ctx
-            .kdbx_file
-            .insert_or_update_with_attachmentset(&source_attachments);
-
-        let new_entry_uuid = {
-            let source_kp = source_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_ref() // immutable — clone_entry_to_other_db only reads source
-                .ok_or_else(|| {
-                    Error::NotFound("Source keepass main content is not available".into())
-                })?;
-            let target_kp = target_ctx
-                .kdbx_file
-                .keepass_main_content
-                .as_mut()
-                .ok_or_else(|| {
-                    Error::NotFound("Target keepass main content is not available".into())
-                })?;
-            crate::db_content::clone_entry_to_other_db(
-                source_kp,
-                target_kp,
-                entry_uuid,
-                target_parent_group_uuid,
-            )?
-        };
-
-        let target_parent_group_name = target_ctx
-            .kdbx_file
-            .keepass_main_content
-            .as_ref()
-            .and_then(|kp| kp.root.group_by_id(target_parent_group_uuid))
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
-
-        // Only target is modified — source is unchanged
-        let now = util::now_utc();
-        target_ctx.last_write_time = now;
-        target_ctx.save_pending = true;
-
-        CrossDbCloneSummary {
-            new_entry_uuid,
-            source_db_key: source_db_key.to_string(),
-            target_db_key: target_db_key.to_string(),
-            target_parent_group_name,
-        }
-    };
-
-    Ok(summary)
 }
 
 pub fn remove_entry_permanently(db_key: &str, entry_uuid: Uuid) -> Result<()> {

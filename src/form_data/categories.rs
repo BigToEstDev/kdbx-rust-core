@@ -16,7 +16,6 @@ pub struct GroupTree {
     //pub root_uuid: String,
     pub root_uuid: Uuid,
     pub recycle_bin_uuid: Uuid,
-    pub auto_open_group_uuid: Option<Uuid>,
     pub deleted_group_uuids: Vec<Uuid>,
     pub groups: HashMap<String, GroupSummary>,
 }

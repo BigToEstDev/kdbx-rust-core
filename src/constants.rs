@@ -38,10 +38,6 @@ pub const EMPTY_STR: &str = "";
 
 pub const OTP_URL_PREFIX: &str = "otpauth://totp";
 
-// pub const AUTO_OPEN_GROUP_NAME: &str = "AutoOpen";
-
-pub const AUTO_OPEN_GROUP_UC_NAME: &str = "AUTOOPEN";
-
 // All Custom Data keys are of pattern OKP_K*. This is used instead of some descriptive
 // string to reduce number of bytes taken by the key name entries in db and thus overall size of db
 // Any new key should have the next OKP_Kx.
@@ -101,9 +97,8 @@ pub mod entry_type_name {
 
     pub const AUTO_DB_OPEN: &str = "Auto Database Open";
 
-    // Remote-storage connection entry types. A user keeps SFTP / WebDAV server
-    // credentials as regular kdbx entries; the remote_storage resolver looks
-    // them up by entry uuid (= connection id).
+    // Connection entry types from OneKeePass. Kept so that entries of these
+    // types, created by other clients, are displayed and stored without loss.
     pub const REMOTE_CONNECTION_SFTP: &str = "SFTP Connection";
     pub const REMOTE_CONNECTION_WEBDAV: &str = "WebDAV Connection";
 
@@ -207,9 +202,9 @@ pub mod entry_keyvalue_key {
 
     pub const IF_DEVICE: &str = "IfDevice";
 
-    // Fields used by the REMOTE_CONNECTION_SFTP / REMOTE_CONNECTION_WEBDAV
-    // entry types. The remote-storage resolver maps these kvs onto
-    // SftpConnectionConfig / WebdavConnectionConfig via from_kvs.
+    // Fields of the REMOTE_CONNECTION_SFTP / REMOTE_CONNECTION_WEBDAV entry
+    // types. The core no longer connects to remote storage; the fields are
+    // kept so such entries from other clients are displayed and stored intact.
     pub const HOST: &str = "Host";
     pub const PORT: &str = "Port";
     pub const START_DIR: &str = "Start Dir";

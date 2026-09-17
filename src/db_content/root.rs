@@ -5,7 +5,6 @@ use std::vec;
 
 use crate::constants::entry_keyvalue_key::{PASSWORD, TITLE, USER_NAME};
 use crate::constants::general_category_names::FAVORITES;
-use crate::constants::AUTO_OPEN_GROUP_UC_NAME;
 use crate::db_content::{
     move_to_recycle_bin, verify_uuid, AttachmentHashValue, Entry, Group, KeyValue,
 };
@@ -90,7 +89,6 @@ impl DeletedObject {
 pub struct Root {
     root_uuid: Uuid,
     recycle_bin_uuid: Uuid,
-    auto_open_group_uuid: Option<Uuid>,
 
     deleted_objects: Vec<DeletedObject>,
 
@@ -107,7 +105,6 @@ impl Root {
             root_uuid: Uuid::default(),
             recycle_bin_uuid: Uuid::default(),
             deleted_objects: vec![],
-            auto_open_group_uuid: None,
             all_groups: HashMap::new(),
             all_entries: HashMap::new(),
         }
@@ -133,14 +130,6 @@ impl Root {
 
     pub(crate) fn set_deleted_objects(&mut self, deleted_objects: Vec<DeletedObject>) {
         self.deleted_objects = deleted_objects;
-    }
-
-    pub(crate) fn auto_open_group_uuid(&self) -> Option<Uuid> {
-        self.auto_open_group_uuid
-    }
-
-    pub(crate) fn _set_auto_open_group_uuid(&mut self, uuid: Uuid) {
-        self.auto_open_group_uuid = Some(uuid);
     }
 
     pub(crate) fn root_uuid(&self) -> Uuid {
@@ -785,126 +774,6 @@ impl Root {
         Ok(())
     }
 
-    // Removes an entry from all_entries and from its parent's entry_uuids, regardless of
-    // whether the entry sits inside the recycle bin. A DeletedObject marker is added so a
-    // future merge of the source db against a peer knows the entry left this database.
-    pub(crate) fn remove_entry_cross_db_move(&mut self, entry_uuid: &Uuid) -> Result<()> {
-        verify_uuid!(self, *entry_uuid, all_entries);
-
-        let entry = self
-            .all_entries
-            .remove(entry_uuid)
-            .ok_or_else(|| "The entry is not found in All entries")?;
-
-        if let Some(old_parent) = self.all_groups.get_mut(&entry.parent_group_uuid) {
-            old_parent.entry_uuids.retain(|&id| id != *entry_uuid);
-        }
-
-        self.add_deleted_object_by_id(*entry_uuid);
-
-        Ok(())
-    }
-
-    // Inserts an entry whose parent group is already present in this db (having been
-    // inserted in the same cross-db operation). Unlike insert_entry, the parent's
-    // entry_uuids list is NOT touched because the cloned parent already carries this
-    // entry's uuid.
-    pub(crate) fn insert_entry_cross_db(&mut self, mut entry: Entry) -> Result<()> {
-        if self.all_entries.contains_key(&entry.uuid) {
-            return Err(Error::DataError(
-                "ErrorEntryUuidExistsInTarget", //"insert_entry_cross_db: an entry with the same uuid already exists",
-            ));
-        }
-        if !self.all_groups.contains_key(&entry.parent_group_uuid) {
-            return Err(Error::DataError(
-                "ErrorGroupUuidExistsInTarget", //"insert_entry_cross_db: parent group is not present in target".into(),
-            ));
-        }
-        entry.complete_insert();
-        self.all_entries.insert(entry.uuid, entry);
-        Ok(())
-    }
-
-    // Inserts a group into all_groups. When append_to_parent is true, the group's uuid
-    // is appended to its parent's group_uuids (used for the top-level of a moved subtree).
-    // When false (used for descendant groups of a moved subtree), the parent already
-    // carries the child uuid via the cloned parent's preserved group_uuids list.
-    pub(crate) fn insert_group_cross_db(
-        &mut self,
-        group: Group,
-        append_to_parent: bool,
-    ) -> Result<()> {
-        if self.all_groups.contains_key(&group.uuid) {
-            return Err(Error::DataError(
-                "ErrorEntryUuidExistsInTarget", // "insert_group_cross_db: a group with the same uuid already exists",
-            ));
-        }
-        if !self.all_groups.contains_key(&group.parent_group_uuid) {
-            return Err(Error::NotFound(
-                "insert_group_cross_db: parent group is not present in target".into(),
-            ));
-        }
-        if append_to_parent {
-            self.all_groups
-                .entry(group.parent_group_uuid)
-                .and_modify(|g| g.group_uuids.push(group.uuid));
-        }
-        self.all_groups.insert(group.uuid, group);
-        Ok(())
-    }
-
-    // Removes a whole subtree rooted at group_uuid regardless of recycle-bin state.
-    // Walks the subtree leaf-first: entries first, then descendant groups bottom-up,
-    // then the top-level group itself. Each removed uuid is recorded in deleted_objects.
-    // Rejects removal of the root group.
-    pub(crate) fn remove_group_subtree_cross_db_move(&mut self, group_uuid: &Uuid) -> Result<()> {
-        verify_uuid!(self, *group_uuid, all_groups);
-
-        if *group_uuid == self.root_uuid {
-            return Err(Error::DataError(
-                "remove_group_subtree_cross_db_move: the root group cannot be removed",
-            ));
-        }
-
-        // Collect all descendant entries and groups.
-        let entry_ids = self.children_entry_uuids(group_uuid);
-        let descendant_group_ids = self.children_groups_uuids(group_uuid);
-
-        // Remove all entries first (from any depth in the subtree). Mark each deleted.
-        for eid in entry_ids {
-            let entry = self
-                .all_entries
-                .remove(&eid)
-                .ok_or_else(|| "A subtree entry is not found in All entries")?;
-            if let Some(parent) = self.all_groups.get_mut(&entry.parent_group_uuid) {
-                parent.entry_uuids.retain(|&id| id != eid);
-            }
-            self.add_deleted_object_by_id(eid);
-        }
-
-        // Remove descendant groups. children_groups_uuids returns descendants excluding
-        // the starting group; order is parent-before-children so we iterate in reverse
-        // to remove leaves first (safer if any integrity check ever walks children).
-        for gid in descendant_group_ids.into_iter().rev() {
-            self.all_groups
-                .remove(&gid)
-                .ok_or_else(|| "A subtree group is not found in All groups")?;
-            self.add_deleted_object_by_id(gid);
-        }
-
-        // Remove the top-level group itself and detach it from its parent.
-        let g = self
-            .all_groups
-            .remove(group_uuid)
-            .ok_or_else(|| "The top-level group is not found in All groups")?;
-        if let Some(parent) = self.all_groups.get_mut(&g.parent_group_uuid) {
-            parent.group_uuids.retain(|&id| id != *group_uuid);
-        }
-        self.add_deleted_object_by_id(*group_uuid);
-
-        Ok(())
-    }
-
     /// Moves a group from one parent group to another group
     pub fn move_group(&mut self, group_uuid: Uuid, new_parent_id: Uuid) -> Result<()> {
         verify_uuid!(self, group_uuid, all_groups);
@@ -1338,102 +1207,6 @@ impl Root {
             }
         }
         all_tags
-    }
-
-    pub(crate) fn auto_open_group_entries(&self) -> Vec<&Entry> {
-        // auto_open_group_uuid is an Option type as we may or may not have an 'AutoOpen' group
-        // Option<Uuid> -> Option<&Group>
-        self.auto_open_group_uuid
-            .and_then(|ref ao_grp_id| self.group_by_id(ao_grp_id))
-            .map_or_else(
-                // empty vec is returned if there is auto group
-                || vec![],
-                |group| {
-                    let mut acc: Vec<&Entry> = vec![];
-                    for entry_uuid in group.entry_uuids.iter() {
-                        if let Some(entry) = self.entry_by_id(entry_uuid) {
-                            acc.push(entry);
-                        };
-                    }
-                    // acc may be empty if there are no entries for this auto group
-                    acc
-                },
-            )
-    }
-
-    pub(crate) fn auto_open_group_entry_uuids(&self) -> Vec<Uuid> {
-        // Here we are assuming all entries under auto open group are of auto open type
-        self.auto_open_group_uuid.map_or_else(
-            || vec![],
-            |ref ao_grp_id| {
-                // Only top level entry_uuids for this group is returned. The sub groups are not considered
-                self.group_by_id(ao_grp_id)
-                    .map_or_else(|| vec![], |group| group.entry_uuids.clone())
-            },
-            // To include entry_uuids from sub broups of auto_open_group, we need to use this
-            // |ref ao_grp_id| self.children_entry_uuids(ao_grp_id),
-        )
-    }
-
-    // Called after xml content is parsed to ensure that AutoOpen group has entry type as AUTO_DB_OPEN
-    pub(crate) fn adjust_auto_open_group_entries(&mut self) {
-        // Only groups under root are considered
-        let root_child_group_ids = self
-            .all_groups
-            .get(&self.root_uuid)
-            .map_or(vec![], |root_child_group| {
-                root_child_group.group_uuids.clone()
-            });
-
-        let auto_open_entry_type = super::standard_entry_types::auto_open_entry_type();
-
-        for ref grp_id in root_child_group_ids {
-            // Find the AutoOpen group and change the entry type to AUTO_DB_OPEN if required
-            // Here for now we are assuming all entries under this group are meant for auto open purpose only
-            if let Some(ao_group) = self
-                .all_groups
-                .get_mut(grp_id)
-                .filter(|g| g.name.to_uppercase() == AUTO_OPEN_GROUP_UC_NAME)
-            {
-                // Keep this uuid for later use
-                self.auto_open_group_uuid = Some(ao_group.uuid);
-
-                for e_id in &mut ao_group.entry_uuids {
-                    if let Some(entry) = self.all_entries.get_mut(e_id) {
-                        if entry.entry_field.entry_type.uuid != auto_open_entry_type.uuid {
-                            // Though this entry type is not auto open type, we set the type to auto open type
-                            // only when we find that the url field of this entry starts with kdbx://
-                            if entry.entry_field.has_kdbx_url() {
-                                entry.entry_field.entry_type = auto_open_entry_type.clone();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // let found_opt = self.all_groups.iter_mut().try_for_each(|g| {
-        //     if g.1.name == "AutoOpen" {
-        //         std::ops::ControlFlow::Break(g.1)
-        //     } else {
-        //         std::ops::ControlFlow::Continue(())
-        //     }
-        // });
-
-        // // Move to group
-        // let auto_open_entry_type = super::standard_entry_types::auto_open_entry_type();
-
-        // if let Some(ao_group) = found_opt.break_value() {
-        //     for e_id in &mut ao_group.entry_uuids {
-        //         if let Some(entry) = self.all_entries.get_mut(e_id) {
-        //             if entry.entry_field.entry_type.name != AUTO_DB_OPEN {
-        //                 if let Some(t) = auto_open_entry_type {
-        //                     entry.entry_field.entry_type = t.clone();
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
     }
 
     // For imported KeeAgent/KeePassXC-style databases, treat entries with SSH

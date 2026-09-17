@@ -285,9 +285,9 @@ lazy_static! {
             },
         );
 
-        // SFTP remote-connection entry. Connection id = entry uuid; the SFTP
-        // private key (when used) is stored as an entry attachment, not a
-        // field.
+        // SFTP connection entry, as written by OneKeePass. Kept for display and
+        // lossless storage only; the SFTP private key (when used) lives in an
+        // entry attachment, not a field.
         m.insert(
             build_uuid!(entry_type_uuid::REMOTE_CONNECTION_SFTP),
             EntryType {
@@ -308,7 +308,7 @@ lazy_static! {
             },
         );
 
-        // WebDAV remote-connection entry. Connection id = entry uuid.
+        // WebDAV connection entry, as written by OneKeePass. Display and storage only.
         m.insert(
             build_uuid!(entry_type_uuid::REMOTE_CONNECTION_WEBDAV),
             EntryType {
@@ -543,17 +543,6 @@ pub fn standard_types_ordered_by_id() -> Vec<&'static EntryType> {
 // Gets the entry typ's UUID from its name
 pub fn standard_type_uuid_by_name(type_name: &str) -> &Uuid {
     STANDARD_TYPE_UUIDS_BY_NAME.get(type_name).unwrap()
-}
-
-pub fn _auto_open_entry_type_opt() -> Option<&'static EntryType> {
-    let uuid = build_uuid!(entry_type_uuid::AUTO_DB_OPEN);
-    UUID_TO_ENTRY_TYPE_MAP.get(&uuid)
-}
-
-pub fn auto_open_entry_type() -> &'static EntryType {
-    let uuid = build_uuid!(entry_type_uuid::AUTO_DB_OPEN);
-    // IMPORATNT: we use unwrap expecting that AUTO_DB_OPEN is already set
-    UUID_TO_ENTRY_TYPE_MAP.get(&uuid).unwrap()
 }
 
 /*
