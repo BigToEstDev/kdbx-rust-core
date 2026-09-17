@@ -545,17 +545,6 @@ pub fn standard_type_uuid_by_name(type_name: &str) -> &Uuid {
     STANDARD_TYPE_UUIDS_BY_NAME.get(type_name).unwrap()
 }
 
-pub fn _auto_open_entry_type_opt() -> Option<&'static EntryType> {
-    let uuid = build_uuid!(entry_type_uuid::AUTO_DB_OPEN);
-    UUID_TO_ENTRY_TYPE_MAP.get(&uuid)
-}
-
-pub fn auto_open_entry_type() -> &'static EntryType {
-    let uuid = build_uuid!(entry_type_uuid::AUTO_DB_OPEN);
-    // IMPORATNT: we use unwrap expecting that AUTO_DB_OPEN is already set
-    UUID_TO_ENTRY_TYPE_MAP.get(&uuid).unwrap()
-}
-
 /*
 
 pub fn entry_type_field_defs_by_id(uuid: &Uuid) -> Vec<&FieldDef> {

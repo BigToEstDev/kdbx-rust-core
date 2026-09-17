@@ -832,7 +832,6 @@ fn create_groups_summary_data(k: &KeepassFile) -> Result<GroupTree> {
     Ok(GroupTree {
         root_uuid: k.root.root_uuid(),
         recycle_bin_uuid: k.root.recycle_bin_uuid(),
-        auto_open_group_uuid: k.root.auto_open_group_uuid(),
         deleted_group_uuids: k.deleted_group_uuids(),
         groups: grps,
     })
@@ -916,32 +915,6 @@ pub fn get_entry_form_data_by_id(db_key: &str, entry_uuid: &Uuid) -> Result<Entr
                 entry_uuid
             ))),
         }
-    })
-}
-
-// Gets all entries found under the special group 'AutoOpen'
-pub fn auto_open_group_entries(db_key: &str) -> Result<Vec<EntryFormData>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        let ao_entries: Vec<EntryFormData> = k
-            .root
-            .auto_open_group_entries()
-            .iter()
-            .map(|entry| EntryFormData::place_holder_resolved_form_data(&k.root, entry))
-            .collect();
-
-        Ok(ao_entries)
-    })
-}
-
-pub fn auto_open_group_entry_uuids(db_key: &str) -> Result<Vec<Uuid>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        Ok(k.root.auto_open_group_entry_uuids())
-    })
-}
-
-pub fn auto_open_group_uuid(db_key: &str) -> Result<Option<Uuid>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        Ok(k.root.auto_open_group_uuid())
     })
 }
 

@@ -142,8 +142,6 @@ impl KeepassFile {
         //self.root.custom_data_to_entries();
         self.root.entries_after_xml_reading(&self.meta);
 
-        self.root.adjust_auto_open_group_entries();
-
         #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
         self.root
             .adjust_imported_ssh_key_attachment_entries(&self.meta, attachment_content);

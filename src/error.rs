@@ -161,9 +161,6 @@ pub enum Error {
     #[error("DuplicateKeyFileName: {0}")]
     DuplicateKeyFileName(String),
 
-    #[error("AutoOpenError: {0}")]
-    AutoOpenError(String),
-
     // See DataError where we can use str
     // UnexpectedError is used where we can use format!
     #[error("{0}")]
