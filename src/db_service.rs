@@ -113,9 +113,6 @@ pub use custom_icon::{
     set_entry_custom_icon, set_group_custom_icon,
 };
 
-#[cfg(feature = "favicon")]
-pub use custom_icon::{download_and_add_custom_icon, normalize_image_to_png};
-
 pub use crate::remote_storage::connection_entry::{
     entry_first_attachment, find_remote_connection_entry, list_remote_connection_entries,
     RemoteConnectionEntry, RemoteConnectionEntrySummary,
