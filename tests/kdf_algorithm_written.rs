@@ -140,6 +140,34 @@ fn verify_argon2id_written_to_header() {
     assert_written_kdf("Argon2id", ARGON2_ID_UUID);
 }
 
+// Дефолт для новой базы - Argon2id (решение Step 12). Клиент, не указавший KDF,
+// должен получить именно его: Argon2d остаётся только для чтения чужих файлов.
+#[test]
+fn verify_default_kdf_is_argon2id() {
+    common::init();
+    let db_key = temp_path("default_kdf");
+    let _ = std::fs::remove_file(&db_key);
+
+    // Никакого kdf в запросе: берётся NewDatabase::default()
+    let mut v = serde_json::to_value(NewDatabase::default()).unwrap();
+    v["database_name"] = serde_json::json!("DefaultKdfDb");
+    v["database_file_name"] = serde_json::json!(db_key.clone());
+    v["password"] = serde_json::json!(PASSWORD);
+    let new_db: NewDatabase = serde_json::from_value(v).unwrap();
+
+    db_service::create_kdbx(new_db).unwrap();
+    db_service::close_kdbx(&db_key).unwrap();
+
+    let file = std::fs::read(&db_key).unwrap();
+    let written = kdf_uuid(&file);
+    let _ = std::fs::remove_file(&db_key);
+
+    assert_eq!(
+        written, ARGON2_ID_UUID,
+        "новая база без явного KDF должна писаться с Argon2id"
+    );
+}
+
 #[test]
 fn verify_kdf_salt_regenerated_on_every_save() {
     common::init();
