@@ -285,9 +285,9 @@ lazy_static! {
             },
         );
 
-        // SFTP remote-connection entry. Connection id = entry uuid; the SFTP
-        // private key (when used) is stored as an entry attachment, not a
-        // field.
+        // SFTP connection entry, as written by OneKeePass. Kept for display and
+        // lossless storage only; the SFTP private key (when used) lives in an
+        // entry attachment, not a field.
         m.insert(
             build_uuid!(entry_type_uuid::REMOTE_CONNECTION_SFTP),
             EntryType {
@@ -308,7 +308,7 @@ lazy_static! {
             },
         );
 
-        // WebDAV remote-connection entry. Connection id = entry uuid.
+        // WebDAV connection entry, as written by OneKeePass. Display and storage only.
         m.insert(
             build_uuid!(entry_type_uuid::REMOTE_CONNECTION_WEBDAV),
             EntryType {

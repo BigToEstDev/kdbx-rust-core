@@ -202,9 +202,9 @@ pub mod entry_keyvalue_key {
 
     pub const IF_DEVICE: &str = "IfDevice";
 
-    // Fields used by the REMOTE_CONNECTION_SFTP / REMOTE_CONNECTION_WEBDAV
-    // entry types. The remote-storage resolver maps these kvs onto
-    // SftpConnectionConfig / WebdavConnectionConfig via from_kvs.
+    // Fields of the REMOTE_CONNECTION_SFTP / REMOTE_CONNECTION_WEBDAV entry
+    // types. The core no longer connects to remote storage; the fields are
+    // kept so such entries from other clients are displayed and stored intact.
     pub const HOST: &str = "Host";
     pub const PORT: &str = "Port";
     pub const START_DIR: &str = "Start Dir";
