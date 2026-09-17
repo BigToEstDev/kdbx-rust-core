@@ -66,8 +66,7 @@ pub use io::*;
 pub use crate::error::{self, Error, Result};
 
 pub use crate::password_passphrase_generator::{
-    AnalyzedPassword, GeneratedPassPhrase, PassphraseGenerationOptions, PasswordGenerationOptions,
-    PasswordScore, WordListLoader,
+    AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
 };
 
 // See lib.rs where util module is reexported as service_util

@@ -161,9 +161,6 @@ pub enum Error {
     #[error("DuplicateKeyFileName: {0}")]
     DuplicateKeyFileName(String),
 
-    #[error("WordListError: {0}")]
-    WordListError(#[from] chbs::word::WordListError),
-
     #[error("AutoOpenError: {0}")]
     AutoOpenError(String),
 
