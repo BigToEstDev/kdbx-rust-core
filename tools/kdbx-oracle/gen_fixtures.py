@@ -12,16 +12,19 @@ Python не нужен для `cargo test`. Запускать только пр
     .venv/Scripts/python.exe tools/kdbx-oracle/gen_fixtures.py
 """
 
+import base64
 import hashlib
 import os
 import shutil
 import sys
+import uuid as uuid_mod
 
 if hasattr(sys.stdout, "reconfigure"):
     # Windows-консоль не utf-8 по умолчанию
     sys.stdout.reconfigure(encoding="utf-8")
 from pathlib import Path
 
+from lxml.etree import SubElement
 from pykeepass import PyKeePass, create_database
 from pykeepass.kdbx_parsing.kdbx4 import kdf_uuids
 
@@ -50,6 +53,124 @@ FIXTURES = [
     ("aes256_argon2d_keyfile.kdbx", "aes256", "argon2", FAST_ARGON2, True),
     ("aes256_argon2d_prod_params.kdbx", "aes256", "argon2", PROD_ARGON2, False),
 ]
+
+
+# --- Фикстура сохранности данных (Step 13) -----------------------------------
+#
+# Step 13 удаляет из ядра КОД passkey / SFTP-WebDAV / AutoOpen, но НЕ формат:
+# записи таких типов, созданные OneKeePass или KeePassXC, должны и дальше
+# читаться и сохраняться без потерь. Эта фикстура собрана чужой реализацией и
+# содержит ровно то, что удаление могло бы незаметно испортить.
+#
+# Тип записи OneKeePass хранится в CustomData самой записи: ключ OKP_K3,
+# значение — base64 от 16 байт uuid типа (src/constants.rs, util::encode_uuid).
+# pykeepass не умеет CustomData, поэтому элемент добавляется через lxml.
+PRESERVATION_FIXTURE = "okp_entry_types.kdbx"
+
+CUSTOM_DATA_KEY_ENTRY_TYPE = "OKP_K3"
+
+ENTRY_TYPE_UUIDS = {
+    "auto_db_open": "389368a9-73a9-4256-8247-321a2e60b2c7",
+    "sftp": "c5a57a41-4cca-4a46-bac1-78a8803f4da0",
+    "webdav": "0a14d76d-8c38-4c62-9ad7-390dc020a2af",
+}
+
+# Поля passkey в формате KeePassXC (constants.rs, entry_type_name::KPEX_*).
+PASSKEY_FIELDS = {
+    "KPEX_PASSKEY_USERNAME": "octocat",
+    "KPEX_PASSKEY_RELYING_PARTY": "github.com",
+    "KPEX_PASSKEY_USER_HANDLE": "dXNlci1oYW5kbGUtMQ",
+    "KPEX_PASSKEY_CREDENTIAL_ID": "Y3JlZC1pZC0x",
+}
+# Однострочный фейковый ключ: содержимое неважно, важно что поле protected
+# и переживает сохранение нашим ядром.
+PASSKEY_PRIVATE_KEY = "fake-pkcs8-private-key-for-tests"
+
+
+def set_entry_type(entry, type_key):
+    """Проставить записи тип OneKeePass через CustomData/Item (OKP_K3)."""
+    raw = uuid_mod.UUID(ENTRY_TYPE_UUIDS[type_key]).bytes
+    custom_data = SubElement(entry._element, "CustomData")
+    item = SubElement(custom_data, "Item")
+    SubElement(item, "Key").text = CUSTOM_DATA_KEY_ENTRY_TYPE
+    SubElement(item, "Value").text = base64.b64encode(raw).decode("ascii")
+
+
+def fill_preservation_content(kp):
+    root = kp.root_group
+
+    # 1. Passkey: обычная Login-запись с полями KeePassXC. Приватный ключ protected.
+    passkey = kp.add_entry(root, "Passkey Site", "octocat", "pk-secret-1",
+                           url="https://github.com")
+    for key, value in PASSKEY_FIELDS.items():
+        passkey.set_custom_property(key, value)
+    passkey.set_custom_property("KPEX_PASSKEY_PRIVATE_KEY_PEM", PASSKEY_PRIVATE_KEY,
+                                protect=True)
+
+    # 2. AutoOpen: группа с записью типа "Auto Database Open".
+    auto_open = kp.add_group(root, "AutoOpen")
+    auto_entry = kp.add_entry(auto_open, "Work DB", "dbuser", "db-secret-2",
+                              url="kdbx://work.kdbx")
+    auto_entry.set_custom_property("IfDevice", "laptop")
+    set_entry_type(auto_entry, "auto_db_open")
+
+    # 3. SFTP / WebDAV: записи типов удалённых подключений OneKeePass.
+    connections = kp.add_group(root, "Connections")
+
+    sftp = kp.add_entry(connections, "My SFTP", "sftpuser", "sftp-secret-3")
+    sftp.set_custom_property("Host", "sftp.example.com")
+    sftp.set_custom_property("Port", "22")
+    sftp.set_custom_property("Start Dir", "/home/sftpuser")
+    set_entry_type(sftp, "sftp")
+
+    webdav = kp.add_entry(connections, "My WebDAV", "davuser", "dav-secret-4",
+                          url="https://dav.example.com/remote.php/dav")
+    webdav.set_custom_property("Allow Untrusted Cert", "true")
+    set_entry_type(webdav, "webdav")
+
+
+def verify_preservation(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+
+    assert sorted(g.name for g in kp.groups) == ["AutoOpen", "Connections", "Root"]
+    assert sorted(e.title for e in kp.entries) == [
+        "My SFTP", "My WebDAV", "Passkey Site", "Work DB",
+    ]
+
+    passkey = kp.find_entries(title="Passkey Site", first=True)
+    for key, value in PASSKEY_FIELDS.items():
+        assert passkey.get_custom_property(key) == value, key
+    assert passkey.get_custom_property("KPEX_PASSKEY_PRIVATE_KEY_PEM") == PASSKEY_PRIVATE_KEY
+
+    for title, type_key in (("Work DB", "auto_db_open"), ("My SFTP", "sftp"),
+                            ("My WebDAV", "webdav")):
+        entry = kp.find_entries(title=title, first=True)
+        items = entry._element.findall("CustomData/Item")
+        stored = {i.find("Key").text: i.find("Value").text for i in items}
+        expected = base64.b64encode(uuid_mod.UUID(ENTRY_TYPE_UUIDS[type_key]).bytes).decode("ascii")
+        assert stored.get(CUSTOM_DATA_KEY_ENTRY_TYPE) == expected, (title, stored)
+
+
+def build_preservation_fixture():
+    db_path = OUT_DIR / PRESERVATION_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    fill_preservation_content(kp)
+    kp.save()
+    verify_preservation(db_path)
+    return db_path
 
 
 def write_xml_key_file(path):
@@ -171,6 +292,13 @@ def main():
                 "  + %s" % key_file_path.name if key_file_path else "",
             )
         )
+    build_preservation_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (passkey/SFTP/WebDAV/AutoOpen)"
+        % (PRESERVATION_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+
     print("\nДальше: python tools/kdbx-oracle/dump_header.py tests/resources/*.kdbx")
     return 0
 
