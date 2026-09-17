@@ -228,6 +228,46 @@ mod tests {
 
     // --- Non-ignored unit tests ---
 
+    // --- Common-password detection (feature "common-password") ---
+    //
+    // is_common и итоговый score зависят от списка частых паролей, вшитого в крейт
+    // passwords. Обновление крейта меняет этот список, поэтому поведение
+    // зафиксировано тестами: иначе оценка стойкости может молча поехать.
+
+    #[test]
+    fn common_passwords_are_flagged() {
+        for pwd in ["123456", "password"] {
+            let analyzed = analyze_password(pwd);
+            assert!(analyzed.is_common, "пароль {} должен считаться частым", pwd);
+        }
+    }
+
+    #[test]
+    fn generated_password_is_not_common() {
+        let mut opts = PasswordGenerationOptions::new();
+        opts.length = 20;
+        let pwd = opts.generate().unwrap();
+        let analyzed = analyze_password(&pwd);
+        assert!(
+            !analyzed.is_common,
+            "сгенерированный пароль {} не должен быть в списке частых",
+            pwd
+        );
+    }
+
+    #[test]
+    fn common_password_scores_in_lowest_categories() {
+        let score = analyze_password("password").score;
+        assert!(
+            matches!(
+                score,
+                PasswordScore::VeryDangerous { .. } | PasswordScore::Dangerous { .. }
+            ),
+            "частый пароль должен попадать в нижние категории, получено {:?}",
+            score
+        );
+    }
+
     #[test]
     fn generate_default_length_is_8() {
         let opts = PasswordGenerationOptions::new();
