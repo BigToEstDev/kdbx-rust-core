@@ -1,4 +1,3 @@
-use reqwest_dav::re_exports::reqwest;
 use std::io;
 use uuid;
 
@@ -176,41 +175,6 @@ pub enum Error {
     // Used in a situation where we can't provide any solution for this kind of errors
     #[error("UnRecoverableError: {0}")]
     UnRecoverableError(String),
-
-    ////  Remote storage specifc errors
-    #[error("RusshError: {0}")]
-    RusshError(#[from] russh::Error),
-
-    #[error("RusshKeysError: {0}")]
-    RusshKeysError(#[from] russh::keys::Error),
-
-    #[error("RusshSftpClientError: {0}")]
-    RusshSftpClientError(#[from] russh_sftp::client::error::Error),
-
-    #[error("SftpServerAuthenticationFailed: Authentication to SFTP server failed")]
-    SftpServerAuthenticationFailed,
-
-    #[error("ReqwestError: {0}")]
-    ReqwestError(#[from] reqwest::Error),
-
-    #[error("ReqwestDavError: {0}")]
-    ReqwestDavError(#[from] reqwest_dav::types::Error),
-
-    #[error("NoRemoteStorageConnection")]
-    NoRemoteStorageConnection,
-
-    // The remote db's connection config could not be resolved. For entry-based
-    // (kdbx-source) connections this means the db holding the connection entry
-    // is not open; it may also mean the config was removed. The UI uses this to
-    // prompt the user to open the concerned db (or open read-only) instead of
-    // silently falling back to a read-only backup.
-    #[error("RemoteStorageConfigNotAvailable")]
-    RemoteStorageConfigNotAvailable,
-
-    // TODO: We may plan to use a struct RemoteStorageCallErrorEx {message,source, } See https://docs.rs/thiserror/latest/thiserror/ example
-    // instead of RemoteStorageCallError(String)
-    #[error("RemoteStorageCallError: {0}")]
-    RemoteStorageCallError(String),
 
     #[error("CsvImportError: {0}")]
     CsvImportError(#[from] csv::Error),

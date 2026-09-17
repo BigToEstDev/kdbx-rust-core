@@ -101,9 +101,8 @@ pub mod entry_type_name {
 
     pub const AUTO_DB_OPEN: &str = "Auto Database Open";
 
-    // Remote-storage connection entry types. A user keeps SFTP / WebDAV server
-    // credentials as regular kdbx entries; the remote_storage resolver looks
-    // them up by entry uuid (= connection id).
+    // Connection entry types from OneKeePass. Kept so that entries of these
+    // types, created by other clients, are displayed and stored without loss.
     pub const REMOTE_CONNECTION_SFTP: &str = "SFTP Connection";
     pub const REMOTE_CONNECTION_WEBDAV: &str = "WebDAV Connection";
 

@@ -113,11 +113,6 @@ pub use custom_icon::{
     set_entry_custom_icon, set_group_custom_icon,
 };
 
-pub use crate::remote_storage::connection_entry::{
-    entry_first_attachment, find_remote_connection_entry, list_remote_connection_entries,
-    RemoteConnectionEntry, RemoteConnectionEntrySummary,
-};
-
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub use crate::import::csv_reader::{CsvImport, CsvImportMapping, CsvImportOptions, CvsHeaderInfo};
 

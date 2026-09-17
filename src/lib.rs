@@ -10,7 +10,6 @@ pub mod custom_icons;
 
 mod db;
 mod db_merge;
-mod net_tls;
 mod form_data;
 
 mod password_passphrase_generator;
@@ -22,7 +21,6 @@ pub mod db_content;
 pub mod db_service;
 pub mod error;
 pub mod passkey_crypto;
-pub mod remote_storage;
 pub mod util;
 
 pub use crate::util as service_util;
