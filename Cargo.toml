@@ -76,7 +76,7 @@ getrandom = "0.4"
 
 
 [dependencies.passwords]
-version = "*"
+version = "3.1"
 features = ["common-password"]
 
 [features]
