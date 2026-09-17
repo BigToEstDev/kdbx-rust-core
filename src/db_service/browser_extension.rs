@@ -1,8 +1,4 @@
 // Browser extension credential lookup helpers (desktop only).
-//
-// Passkey types and functions have moved to [`super::passkey`] which is
-// compiled on all platforms.  This module re-exports the types that existing
-// desktop callers referenced via `browser_extension::`.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -11,7 +7,9 @@ use serde::Serialize;
 use crate::constants::entry_keyvalue_key::PASSWORD;
 use crate::constants::entry_keyvalue_key::USER_NAME;
 use crate::db_content::KeepassFile;
-use crate::db_service::{call_kdbx_context_mut_action, call_main_content_action, KdbxContext};
+use crate::db_service::{
+    call_kdbx_context_mut_action, call_main_content_action, get_db_name, KdbxContext,
+};
 use crate::error::Error;
 use crate::error::Result;
 use crate::form_data::EntrySummary;
@@ -23,16 +21,8 @@ use uuid::Uuid;
 // inside the macro expansion as well.
 use crate::main_content_action;
 
-// Re-export passkey types for backward compatibility with desktop callers that
-// previously imported them from this module.
-pub use super::passkey::{
-    create_and_store_passkey, find_matching_passkeys, get_db_groups, get_db_name,
-    get_group_entries, get_passkey_for_assertion, store_passkey_entry, EntryBasicInfo, GroupInfo,
-    PasskeyEntry, PasskeyStorageInfo, PasskeyStoreOutcome, PasskeySummary,
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Browser credential lookup (URL-based, non-passkey)
+// Browser credential lookup (URL-based)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Default, Serialize, Debug)]

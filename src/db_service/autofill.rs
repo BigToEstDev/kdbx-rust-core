@@ -158,8 +158,7 @@ fn has_usable_otp_field(entry: &Entry) -> bool {
 
 // An entry autofill can produce a TOTP for, together with the services it applies to.
 // iOS registers these with ASCredentialIdentityStore as one time code identities, which is
-// what makes the OS offer OneKeePass on a verification code field - see the parallel
-// passkey identity registration
+// what makes the OS offer OneKeePass on a verification code field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtpEntryIdentity {
     pub entry_uuid: String,
@@ -313,7 +312,8 @@ pub fn find_matching_entries(
 
 // Field names never matched by the manual autofill search. Notes and the one-time
 // password (OTP) are not site/identity search targets - OTP also holds a shared
-// secret - and passkey (KPEX_*) fields hold credential material. Protected fields
+// secret - and passkey (KPEX_*) fields, written by other clients, hold credential
+// material. Protected fields
 // (Password and any protected custom field) are excluded separately via the
 // KeyValue `protected` flag, so a search never keys off a secret value.
 fn is_search_excluded_field(key: &str) -> bool {

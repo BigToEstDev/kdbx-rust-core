@@ -5,9 +5,6 @@ mod attachment;
 mod custom_icon;
 mod io;
 
-// Passkey DB types and functions — compiled on all platforms (no cfg gate).
-pub mod passkey;
-
 // URL-based autofill entry matching — shared by the desktop browser extension
 // and the mobile autofill flows (no cfg gate).
 pub mod autofill;
@@ -204,16 +201,6 @@ fn main_store() -> &'static MainStore {
     &MAIN_STORE
 }
 
-// Inserts a `KdbxFile` directly into the in-memory cache.
-//
-// Intended **only** for unit tests that need to populate the cache without
-// going through the full disk-IO path (i.e. without calling `create_kdbx` or
-// `load_kdbx`).
-#[cfg(test)]
-pub(crate) fn insert_kdbx_for_test(kdbx_file: KdbxFile) {
-    KdbxContext::insert(kdbx_file);
-}
-
 // Gets a ref to the main keepass content
 #[macro_export]
 macro_rules! to_keepassfile {
@@ -390,8 +377,7 @@ pub fn all_kdbx_cache_keys() -> Result<Vec<String>> {
 }
 
 // Open db keys that are currently unlocked. Used to gate browser-extension access
-// so that a locked (but still open) database is not reachable for autofill or
-// passkeys.
+// so that a locked (but still open) database is not reachable for autofill.
 pub fn unlocked_kdbx_cache_keys() -> Result<Vec<String>> {
     let store = main_store().lock().unwrap();
     let mut vec = vec![];
@@ -572,6 +558,12 @@ pub fn unlock_kdbx(
     })
 }
 
+// Returns the human-readable name of the database identified by `db_key`.
+pub fn get_db_name(db_key: &str) -> Result<String> {
+    let action = |k: &KeepassFile| Ok(k.meta.database_name().clone());
+    main_content_action!(db_key, action, no_times)
+}
+
 // Gather all unique tags that are used in all groups and entries
 pub fn collect_entry_group_tags(db_key: &str) -> Result<AllTags> {
     main_content_action!(db_key, move |k: &KeepassFile| Ok(k.root.collect_tags()))
@@ -713,8 +705,8 @@ pub struct EntrySearchResult {
     pub entry_items: Vec<EntrySummary>,
 }
 
-// Returns true if entries of this type are offered for autofill candidate lists
-// (password or passkey). Login, Credit/Debit Card and Bank Account all carry a
+// Returns true if entries of this type are offered for autofill candidate lists.
+// Login, Credit/Debit Card and Bank Account all carry a
 // Login Details section (UserName/Password/URL/Additional URLs), so all three are
 // username/password candidates. This is the single source of truth for autofill
 // type eligibility, shared by the desktop browser extension and the mobile

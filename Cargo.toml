@@ -66,9 +66,7 @@ aes-gcm  = "0.11"
 chacha20 = "0.10"
 hmac     = "0.13"
 sha1     = "0.11"
-## Renamed: the direct `sha2` 0.10 below is still required by passkey code (rsa 0.9 needs
-## digest 0.10). Drop the alias once rsa/p256 move to digest 0.11.
-sha2_v011 = { package = "sha2", version = "0.11" }
+sha2     = "0.11"
 ## `parallel` computes Argon2 lanes on rayon threads — keeps the `parallelism` KDF parameter
 ## as fast as the former C implementation.
 argon2    = { version = "0.6", features = ["parallel"] }
@@ -76,12 +74,6 @@ getrandom = "0.4"
 ######## END KDBX crypto ########
 
 # Passkey / WebAuthn cryptography (shared across desktop and mobile)
-p256           = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
-ed25519-dalek  = { version = "2", features = ["pkcs8", "rand_core"] }
-rsa            = { version = "0.9", features = ["sha2"] }
-sha2           = "0.10"
-ciborium       = "0.2"
-rand_core      = { version = "0.6", features = ["getrandom"] }
 
 
 [dependencies.passwords]

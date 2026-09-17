@@ -20,7 +20,6 @@ pub mod async_service;
 pub mod db_content;
 pub mod db_service;
 pub mod error;
-pub mod passkey_crypto;
 pub mod util;
 
 pub use crate::util as service_util;
