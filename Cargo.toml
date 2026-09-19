@@ -8,7 +8,6 @@ edition = "2021"
 exclude = ["tools/", "tests/resources/", ".venv/"]
 
 [dependencies]
-secstr = "0.5.1"
 # Volatile, non-elidable zeroing of in-memory secrets. Used by the  
 # memory-security lock to wipe the decrypted content (transient serialization
 # buffers + the dropped entry object graph) when a database is locked.
@@ -27,13 +26,11 @@ psl = "2"
 
 uuid = { version = "1.18.1", features = ["serde", "v4","macro-diagnostics"] }
 chrono =  {version = "0.4.42", features = ["serde"]}
-chrono-tz = "0.9.0"
 
 flate2 = {version = "1.1", features = ["zlib"]} 
 
 slice_as_array = "1.1.0"
 log = "0.4.28"
-hex-literal = "0.3.4"
 hex = "0.4.3"
 once_cell = "1"
 thiserror = "2.0.17"
@@ -88,6 +85,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
 [dev-dependencies]
 env_logger = "0.11.8"
 test-context = "=0.4.1"
+## Used only by db_merge/merge_tests/common.rs
+secstr = "0.5.1"
+## Used only by one test in util.rs (chrono_tz::US::Pacific). Kept at 0.10+ on purpose:
+## chrono-tz-build 0.3 pulled phf_generator 0.11 -> rand 0.8.5 (RUSTSEC-2026-0097, unsound).
+## From chrono-tz 0.10 the chain is chrono-tz-build 0.5 -> phf_codegen 0.12 -> fastrand.
+chrono-tz = "0.10.4"
 
 ## Argon2 is memory-hard: unoptimized Rust (dev/test profile) makes every database open/save
 ## several times slower (db_file_reading_writing tests 9 s -> 37 s, debug Android builds suffer
