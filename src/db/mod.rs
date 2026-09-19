@@ -797,13 +797,11 @@ fn write_xml_to_file(xml_file_name: &str, xml_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-// TODO:
-// Expose export_as_xml and import_from_xml to UI through db_service module and/or through
-// some CLI
+// Exposed to the UI as db_service::export_as_xml. Import from xml was removed in Step 14 (p.5.5):
+// v1 imports Chrome CSV / KeePass CSV, not xml.
 
 /// Exports the keepass database content as xml using the same format used in KeePass's xml content
 /// All protected field values are decrypted and are in plain text format. No attachments data will be exported
-#[allow(dead_code)]
 pub fn export_as_xml(kdbx_file: &mut KdbxFile, xml_file_name: Option<&str>) -> Result<()> {
     let fname = xml_file_name.unwrap_or("xml_dump.xml");
     if let Some(ref mut kp) = kdbx_file.keepass_main_content {
@@ -826,33 +824,6 @@ pub fn export_db_main_content_as_xml(
     let data = xml_parse::write_xml_with_indent(keepass_main_content, None)?;
     write_xml_to_file(xml_file_name, &data)?;
     Ok(())
-}
-
-/// Imports any previously exported keepass xml content into a new database
-#[allow(dead_code)]
-pub fn import_from_xml(
-    xml_file_name: &str,
-    db_file_name: &str,
-    password: Option<&str>,
-    key_file_name: Option<&str>,
-) -> Result<KdbxFile> {
-    let file = File::open(xml_file_name)?;
-    let mut reader = BufReader::new(file);
-    let mut buf = vec![];
-    reader.read_to_end(&mut buf)?;
-
-    let kp = xml_parse::parse(&buf, None)?;
-    //println!("KeePassContet is {:?}", r);
-
-    let mut ndb = NewDatabase::default();
-    ndb.database_file_name = db_file_name.into();
-    ndb.password = password.map(|s| s.to_string());
-    ndb.key_file_name = key_file_name.map(|s| s.into());
-
-    let mut kdbx_file = ndb.create()?;
-    kdbx_file.keepass_main_content = Some(kp);
-
-    Ok(kdbx_file)
 }
 
 #[inline]

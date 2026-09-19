@@ -40,19 +40,6 @@ pub struct CategoryDetail {
     pub tag_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GroupCategory {
-    pub uuid: String,
-    pub category_detail: CategoryDetail,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct EntryCategoryInfo {
-    pub general_categories: Vec<CategoryDetail>,
-    pub group_categories: Vec<GroupCategory>,
-    pub type_categories: Vec<CategoryDetail>,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum EntryCategoryGrouping {
     AsGroupCategories,
@@ -159,100 +146,6 @@ pub(crate) fn entry_by_category<'a>(
             .filter(|e| split_tags(&e.tags).contains(&name))
             .map(|e| *e)
             .collect::<Vec<_>>(),
-    }
-}
-
-// Deprecate
-// Need to deprecated once we use 'combined_category_details' in all cases
-// Called in 'categories_to_show' fn to get EnteryCategoryInfo from KeePassFile
-impl From<&KeepassFile> for EntryCategoryInfo {
-    fn from(k: &KeepassFile) -> Self {
-        let all = k.collect_all_active_entries();
-
-        let (title, display_title) = EntryCategory::AllEntries.as_title_key();
-        let all_entries = CategoryDetail {
-            title,
-            display_title,
-            entries_count: all.len(),
-            groups_count: 0,
-            icon_id: 0,
-            icon_name: None,
-            entry_type_uuid: None,
-            group_uuid: None,
-            parent_group_uuid: None,
-            tag_id: None,
-        };
-
-        let (title, display_title) = EntryCategory::Favorites.as_title_key();
-        let favorite_entries = CategoryDetail {
-            title,
-            display_title,
-            entries_count: k.collect_favorite_entries().len(),
-            groups_count: 0,
-            icon_id: 0,
-            icon_name: None,
-            entry_type_uuid: None,
-            group_uuid: None,
-            parent_group_uuid: None,
-            tag_id: None,
-        };
-
-        let (title, display_title) = EntryCategory::Deleted.as_title_key();
-        let deleted = CategoryDetail {
-            title,
-            display_title,
-            entries_count: k.root.deleted_entries().len(),
-            groups_count: 0,
-            icon_id: 0,
-            icon_name: None,
-            entry_type_uuid: None,
-            group_uuid: None,
-            parent_group_uuid: None,
-            tag_id: None,
-        };
-
-        // Group category details
-        let mut group_categories: Vec<GroupCategory> = vec![];
-
-        // By calling get_all_groups with true we are excluding recycle bin group from category
-        for group in k.root.get_all_groups(true) {
-            if group.is_in_category() {
-                group_categories.push(GroupCategory {
-                    uuid: group.uuid.to_string(),
-                    category_detail: CategoryDetail {
-                        title: group.name.clone(),
-                        display_title: None,
-                        entries_count: group.entry_uuids.len(),
-                        groups_count: group.group_uuids.len(),
-                        icon_id: group.icon_id,
-                        icon_name: None,
-                        entry_type_uuid: None,
-                        group_uuid: None,
-                        parent_group_uuid: None,
-                        tag_id: None,
-                    },
-                })
-            }
-        }
-        // A simple sort by title of these group_categories
-        group_categories.sort_by(|a, b| a.category_detail.title.cmp(&b.category_detail.title));
-
-        // All entry type name based categories
-        let mut type_categories: Vec<CategoryDetail> =
-            type_name_categories(&all, &standard_type_uuids_names_ordered_by_id(), None);
-
-        type_categories.append(&mut type_name_categories(
-            &all,
-            &k.meta.custom_entry_type_names_by_id(),
-            Some(&k.meta),
-        ));
-
-        EntryCategoryInfo {
-            general_categories: vec![all_entries, favorite_entries, deleted],
-            group_categories,
-            // For now we send both Standard and Custom entry type names in one list
-            type_categories,
-        }
     }
 }
 
