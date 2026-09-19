@@ -65,7 +65,7 @@ pub use io::*;
 
 pub use crate::error::{self, Error, Result};
 
-pub use crate::password_passphrase_generator::{
+pub use crate::password_generator::{
     AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
 };
 
@@ -84,7 +84,7 @@ pub use crate::db_content::{
 
 pub use crate::form_data::{
     CategoryDetail, CurrentOtpTokenData, DbSettings, EntryCategories, EntryCategory,
-    EntryCategoryGrouping, EntryCategoryInfo, EntryFormData, EntryListOtpToken, EntrySummary,
+    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary,
     EntryTypeFormData, EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree,
     KdbxLoaded, KdbxSaved,
 };
@@ -841,13 +841,6 @@ pub fn groups_summary_data(db_key: &str) -> Result<GroupTree> {
     main_content_action!(db_key, create_groups_summary_data)
 }
 
-// Deprecate
-// All categories that can be shown in the UI layer including individual groups
-pub fn categories_to_show(db_key: &str) -> Result<EntryCategoryInfo> {
-    let action = |k: &KeepassFile| Ok(k.into());
-    main_content_action!(db_key, action)
-}
-
 // All categories that can be shown in the UI layer
 pub fn combined_category_details(
     db_key: &str,
@@ -918,9 +911,10 @@ pub fn get_entry_form_data_by_id(db_key: &str, entry_uuid: &Uuid) -> Result<Entr
     })
 }
 
-// deprecate?
-// Gets the current TOPT token for an entry's opt field
-pub fn entry_form_current_otp(
+// Gets the current TOTP token for one otp field of an entry.
+// Crate-internal: the only caller is async_service (form_first_reply / form_reply), the UI drives
+// otp polling through async_service. entry_list_current_otps is the list-side counterpart.
+pub(crate) fn entry_form_current_otp(
     db_key: &str,
     entry_uuid: &Uuid,
     otp_field_name: &str,
@@ -934,32 +928,6 @@ pub fn entry_form_current_otp(
                     otp_field_name
                 ))),
             },
-            None => Err(Error::NotFound(format!(
-                "No entry is found for the id {}",
-                entry_uuid
-            ))),
-        }
-    })
-}
-
-// deprecate?
-pub fn entry_form_current_otps(
-    db_key: &str,
-    entry_uuid: &Uuid,
-    otp_field_names: Vec<String>,
-) -> Result<HashMap<String, CurrentOtpTokenData>> {
-    main_content_action!(db_key, move |k: &KeepassFile| {
-        match k.root.entry_by_id(entry_uuid) {
-            Some(e) => {
-                let v: HashMap<String, CurrentOtpTokenData> = otp_field_names
-                    .iter()
-                    .filter_map(|s| match e.current_otp_token_data(s) {
-                        Some(d) => Some((s.clone(), d)),
-                        None => None,
-                    })
-                    .collect();
-                Ok(v)
-            }
             None => Err(Error::NotFound(format!(
                 "No entry is found for the id {}",
                 entry_uuid

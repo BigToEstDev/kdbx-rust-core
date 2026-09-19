@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::constants::entry_keyvalue_key::*;
 use crate::constants::entry_type_name::{CREDIT_DEBIT_CARD, SSH_KEY};
 use crate::constants::standard_in_section_names::ADDITIONAL_ONE_TIME_PASSWORDS;
-use crate::password_passphrase_generator::PasswordScore;
+use crate::password_generator::PasswordScore;
 
 use crate::util::{self, empty_str};
 

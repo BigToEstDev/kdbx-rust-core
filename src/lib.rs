@@ -12,7 +12,7 @@ mod db;
 mod db_merge;
 mod form_data;
 
-mod password_passphrase_generator;
+mod password_generator;
 mod searcher;
 mod xml_parse;
 

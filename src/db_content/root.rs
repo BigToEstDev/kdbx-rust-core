@@ -189,12 +189,9 @@ impl Root {
         }
     }
 
-    pub fn delete_all_history_entries(&mut self) {
-        for (_, entry) in self.all_entries.iter_mut() {
-            entry.delete_history_entries();
-        }
-    }
-
+    // Used by db_service::io::copy_and_write_autofill_ready_db, which is compiled only under
+    // #[cfg(target_os = "ios")] - hence dead_code on every other target
+    #[allow(dead_code)]
     pub fn remove_all_binary_kvs_and_history_entries(&mut self) {
         for (_, entry) in self.all_entries.iter_mut() {
             entry.delete_history_entries();
@@ -206,21 +203,12 @@ impl Root {
         self.all_entries.get_mut(entry_uuid)
     }
 
-    // Finds the first entry that has a matching value in a given key field
+    // Finds the first entry that has a matching value in a given key field.
+    // Used only by the db_merge tests
+    #[cfg(test)]
     pub fn entry_by_matching_kv(&self, key: &str, value: &str) -> Option<&Entry> {
         // First match is returned
         self.all_entries.values().find(|e| {
-            if let Some(ref v) = e.find_kv_field_value(key) {
-                v == value
-            } else {
-                false
-            }
-        })
-    }
-
-    pub fn entry_by_matching_kv_mut(&mut self, key: &str, value: &str) -> Option<&mut Entry> {
-        // First match is returned
-        self.all_entries.values_mut().find(|e| {
             if let Some(ref v) = e.find_kv_field_value(key) {
                 v == value
             } else {
@@ -249,6 +237,8 @@ impl Root {
         self.all_groups.values().find(|g| g.name == name)
     }
 
+    // Used only by the db_merge tests
+    #[cfg(test)]
     pub fn group_by_name_mut(&mut self, name: &str) -> Option<&mut Group> {
         // Returns the first matching group
         let g_opt = self
@@ -384,16 +374,6 @@ impl Root {
             let _r = self.insert_group(g);
         }
         self.all_groups.get(&self.recycle_bin_uuid)
-    }
-
-    /// Ensures that the special group such as recycle_bin_uuid is at the end of root's group listing
-    pub fn adjust_special_groups_order(&mut self) {
-        if let Some(root_grp) = self.all_groups.get_mut(&self.root_uuid) {
-            root_grp.group_uuids.retain(|x| x != &self.recycle_bin_uuid);
-            if self.recycle_bin_uuid != Uuid::default() {
-                root_grp.group_uuids.push(self.recycle_bin_uuid);
-            }
-        }
     }
 
     pub fn deleted_entries(&self) -> Vec<&Entry> {
