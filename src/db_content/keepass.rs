@@ -51,11 +51,6 @@ impl KeepassFile {
             .collect_favorite_entries(self.root.recycle_bin_uuid())
     }
 
-    fn deleted_entry_uuids(&self) -> Vec<Uuid> {
-        // TODO: Pass recycle bin group uuid from meta to root
-        self.root.deleted_entry_uuids()
-    }
-
     pub(crate) fn deleted_group_uuids(&self) -> Vec<Uuid> {
         // TODO: Pass recycle bin group uuid from meta to root
         self.root.deleted_group_uuids()
@@ -122,7 +117,6 @@ impl KeepassFile {
         // element of Meta element
         if self.meta.recycle_bin_uuid != Uuid::default() {
             self.root.set_recycle_bin_uuid(self.meta.recycle_bin_uuid);
-            //self.root.adjust_special_groups_order();
         }
 
         // This sets any relavant fields in the group based on the custom data

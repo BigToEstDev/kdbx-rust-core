@@ -97,19 +97,6 @@ pub(crate) fn create_entry(keepassfile: &mut KeepassFile, title: &str, group_uui
     entry
 }
 
-pub(crate) fn delete_entry_permanently(keepassfile: &mut KeepassFile, entry_uuid: &Uuid) {
-    // First move to recycle bin
-    keepassfile
-        .root
-        .move_entry_to_recycle_bin(*entry_uuid)
-        .unwrap();
-    // Delete the entry that is moved to recycle bin
-    keepassfile
-        .root
-        .remove_entry_permanently(*entry_uuid)
-        .unwrap();
-}
-
 pub(crate) fn delete_group_permanently(keepassfile: &mut KeepassFile, group_uuid: &Uuid) {
     // First move to recycle bin
     keepassfile
@@ -121,16 +108,6 @@ pub(crate) fn delete_group_permanently(keepassfile: &mut KeepassFile, group_uuid
         .root
         .remove_group_permanently(*group_uuid)
         .unwrap();
-}
-
-pub(crate) fn update_entry(
-    keepassfile: &mut KeepassFile,
-    entry: &mut Entry,
-    key: &str,
-    value: &str,
-) {
-    entry.entry_field.update_value(key, value);
-    keepassfile.root.update_entry(entry.clone()).unwrap();
 }
 
 pub(crate) fn find_update_entry(

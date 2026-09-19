@@ -145,14 +145,6 @@ impl EntryField {
         self.fields.values().find(|f| f.key == key)
     }
 
-    // Checks whether the entry's url field is meant to open as child kdbx database
-    pub fn has_kdbx_url(&self) -> bool {
-        self.fields
-            .values()
-            .find(|f| f.key == URL)
-            .map_or(false, |v| v.value.starts_with("kdbx://"))
-    }
-
     // finds a KeyValue from the 'fields' map and updates its 'value' field with the passed value
     // The update is done only if an entry is found
     pub fn update_value(&mut self, key: &str, value: &str) {
@@ -1165,26 +1157,6 @@ mod tests {
         // Title must remain unchanged and the missing key must not be inserted
         assert_eq!(ef.find_key_value("Title").unwrap().value, "Unchanged");
         assert!(ef.find_key_value("DoesNotExist").is_none());
-    }
-
-    #[test]
-    fn entry_field_has_kdbx_url_true() {
-        let mut ef = EntryField::default();
-        ef.insert_key_value(make_kv("URL", "kdbx://child.kdbx", false));
-        assert!(ef.has_kdbx_url());
-    }
-
-    #[test]
-    fn entry_field_has_kdbx_url_false_for_https() {
-        let mut ef = EntryField::default();
-        ef.insert_key_value(make_kv("URL", "https://example.com", false));
-        assert!(!ef.has_kdbx_url());
-    }
-
-    #[test]
-    fn entry_field_has_kdbx_url_false_when_no_url() {
-        let ef = EntryField::default();
-        assert!(!ef.has_kdbx_url());
     }
 
     #[test]
