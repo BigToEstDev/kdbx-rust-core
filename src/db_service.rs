@@ -65,7 +65,7 @@ pub use io::*;
 
 pub use crate::error::{self, Error, Result};
 
-pub use crate::password_passphrase_generator::{
+pub use crate::password_generator::{
     AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
 };
 

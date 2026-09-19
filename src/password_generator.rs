@@ -224,7 +224,7 @@ fn analyze_password(password: &str) -> AnalyzedPassword {
 #[cfg(test)]
 mod tests {
 
-    use crate::password_passphrase_generator::password_generator::*;
+    use crate::password_generator::*;
 
     // --- Non-ignored unit tests ---
 
