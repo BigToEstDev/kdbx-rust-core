@@ -5,9 +5,8 @@ use crate::{
     db::{KdbxFile, NewDatabase},
     db_content::{standard_type_uuid_by_name, Entry, Group, KeepassFile},
 };
-////
-#[allow(dead_code)]
 
+#[allow(dead_code)]
 pub(crate) fn create_test_dbs_4() -> (KdbxFile, KdbxFile) {
     let ndb = NewDatabase::default();
     let mut source = ndb.create().unwrap();
@@ -126,7 +125,6 @@ pub(crate) fn find_update_entry(
     entry
 }
 
-////
 
 // Copied from /onekeepass-core/tests/common/mod.rs
 pub(crate) mod dummy_key_store_service {

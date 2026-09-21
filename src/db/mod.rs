@@ -59,20 +59,16 @@ enum VariantDict {
     BYTEARRAY(String, Vec<u8>),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 #[serde(tag = "algorithm")]
 // This serializes this enum as {"algorithm":"Argon2d", "memory": 67108864, "iterations": 11, ...  }
 pub enum KdfAlgorithm {
     Argon2d(crypto::kdf::Argon2Kdf),
     Argon2id(crypto::kdf::Argon2Kdf),
+    #[default]
     NoValidKdfAvailable,
 }
 
-impl Default for KdfAlgorithm {
-    fn default() -> Self {
-        KdfAlgorithm::NoValidKdfAvailable
-    }
-}
 
 impl KdfAlgorithm {
     pub fn default_argon2() -> Self {
@@ -211,7 +207,7 @@ impl AttachmentSet {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct SecuredDatabaseKeys {
     // 32 bytes formed using sha256_hash
     password_hash: Option<Vec<u8>>,
@@ -230,20 +226,6 @@ pub(crate) struct SecuredDatabaseKeys {
     encrypted: bool,
 }
 
-impl Default for SecuredDatabaseKeys {
-    fn default() -> Self {
-        Self {
-            password_hash: None,
-            key_file_data_hash: None,
-            composite_key: vec![],
-            transformed_key: vec![],
-            hmac_part_key: vec![],
-            hmac_key: vec![],
-            master_key: vec![],
-            encrypted: false,
-        }
-    }
-}
 
 impl SecuredDatabaseKeys {
     // Hashes all incoming credentials data and creates an instance of SecuredDatabaseKeys

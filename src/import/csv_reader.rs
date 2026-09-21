@@ -167,7 +167,7 @@ impl CsvImportMapping {
             type_values: profile.map_or(&[], |p| p.type_values),
             favourite_column: column_index(profile.and_then(|p| p.favourite_column)),
             packed_fields_column: column_index(profile.and_then(|p| p.packed_fields_column)),
-            strip_root_folder: profile.map_or(false, |p| p.strip_root_folder),
+            strip_root_folder: profile.is_some_and(|p| p.strip_root_folder),
             skip_folders: profile.map_or(&[], |p| p.skip_folders),
             icon_column: column_index(profile.and_then(|p| p.icon_column)),
             extra_fields: profile.map_or_else(Vec::new, |p| {
@@ -252,7 +252,7 @@ impl CsvLookup {
 
         self.folder_path(csv_record)
             .first()
-            .map_or(false, |segment| {
+            .is_some_and(|segment| {
                 self.skip_folders
                     .iter()
                     .any(|skipped| skipped.eq_ignore_ascii_case(segment))
@@ -286,7 +286,7 @@ impl CsvLookup {
         let favourite = self
             .favourite_column
             .and_then(|i| csv_record.get(i))
-            .map_or(false, |v| transform::is_truthy(v));
+            .is_some_and(|v| transform::is_truthy(v));
 
         if favourite {
             transform::tags_append(tags, FAVORITES)
@@ -519,7 +519,7 @@ impl CsvImport {
         import_options: Option<CsvImportOptions>,
     ) -> Result<CvsHeaderInfo> {
         let import_options =
-            import_options.map_or_else(CsvImportOptions::default, |imp_opt| imp_opt);
+            import_options.unwrap_or_default();
         let mut csv_rdr = import_options.reader_builder().from_path(path.as_ref())?;
 
         let header_row = if csv_rdr.has_headers() {
@@ -562,8 +562,7 @@ impl CsvImport {
 
         let rows = csv_rdr
             .records()
-            .map(|r| r.ok())
-            .flatten()
+            .filter_map(|r| r.ok())
             .map(|r| r.iter().map(|f| f.to_string()).collect::<CsvDataRecord>())
             .collect::<Vec<_>>();
 

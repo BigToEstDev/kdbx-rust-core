@@ -97,7 +97,7 @@ impl CustomData {
     pub fn is_category(&self) -> bool {
         self.items
             .get(OKP_GROUP_AS_CATEGORY)
-            .map_or(true, |v| v.value == "No")
+            .is_none_or(|v| v.value == "No")
     }
 }
 

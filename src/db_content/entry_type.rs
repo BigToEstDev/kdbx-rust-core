@@ -385,8 +385,7 @@ impl VersionedEntryType {
         custom_entry_types: &HashMap<Uuid, EntryType>,
     ) -> Option<String> {
         VersionedEntryType::modify_entry_type_before_encoding(entry_type, custom_entry_types)
-            .map(|e| VersionedEntryType::RmpV1(e).serilaize())
-            .flatten()
+            .and_then(|e| VersionedEntryType::RmpV1(e).serilaize())
     }
 }
 
@@ -421,8 +420,9 @@ where
 // When we add a new variant, the FieldDef deserialization works with any previous version without
 // introducing FieldDef2. If we remove any variant, it may not work
 
-#[derive(PartialEq, Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub enum FieldDataType {
+    #[default]
     Text,
     Bool,
     Number,
@@ -433,11 +433,6 @@ pub enum FieldDataType {
     OneTimePassword,
 }
 
-impl Default for FieldDataType {
-    fn default() -> Self {
-        FieldDataType::Text
-    }
-}
 
 // impl FieldDataType {
 //     fn from_str(num_str: &str) -> Self {
@@ -653,7 +648,7 @@ mod tests {
 
         // Simulate adding a custom field to one of standard Section
         let first_section = et1.sections.first_mut();
-        first_section.map(|f| f.field_defs.push(fd1));
+        if let Some(f) = first_section { f.field_defs.push(fd1) }
 
         // Simulate some additional sections
         let mut add_sections = vec![

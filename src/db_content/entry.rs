@@ -338,7 +338,7 @@ impl Entry {
         // IMPORATNT: meta_share should have been set before calling this method so that
         // custom entry types can be considered
         if let Some(b64_uuid) = self.custom_data.get_item_value(OKP_ENTRY_TYPE) {
-            let uuid = util::decode_uuid(b64_uuid).map_or(Uuid::default(), |u| u);
+            let uuid = util::decode_uuid(b64_uuid).unwrap_or_default();
             debug!("Entry type uuid from custom data is {:?} ", uuid);
             debug!(
                 "And will look for entry type from the existing standard list or user generated custom entry type list"
@@ -602,10 +602,8 @@ impl Entry {
         // second flatten Option<Option<CurrentOtpTokenData>> -> Option<CurrentOtpTokenData>
         self.parsed_otp_values
             .as_ref()
-            .map(|m| m.get(otp_field_name))
-            .flatten()
-            .map(|pd| pd.current_otp_token_data().ok())
-            .flatten()
+            .and_then(|m| m.get(otp_field_name))
+            .and_then(|pd| pd.current_otp_token_data().ok())
     }
 
     // The one otp field whose token represents this entry in a list, with its current token
@@ -803,7 +801,7 @@ impl Entry {
                             if let Some(idx_s1) =
                                 he.custom_data.get_item_value(OKP_ENTRY_TYPE_DATA_INDEX)
                             {
-                                if let Some(n) = idx_s1.parse::<usize>().ok() {
+                                if let Ok(n) = idx_s1.parse::<usize>() {
                                     if n > idx as usize {
                                         he.custom_data.update_item_value(
                                             OKP_ENTRY_TYPE_DATA_INDEX,
@@ -896,7 +894,7 @@ impl Entry {
         if let Some(encoded_et) = history_entry
             .custom_data
             .get_item_value(OKP_ENTRY_TYPE_DATA_INDEX)
-            .and_then(|i: &str| entry_types.get(i.parse::<usize>().map_or(1000, |x| x)))
+            .and_then(|i: &str| entry_types.get(i.parse::<usize>().unwrap_or(1000)))
         {
             // This entry's OKP_ENTRY_TYPE_DATA is created for later use in the method
             // 'dserilalize_to_entry_type'

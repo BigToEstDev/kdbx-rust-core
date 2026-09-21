@@ -135,7 +135,7 @@ impl From<&String> for PasswordScore {
 
 impl From<f64> for PasswordScore {
     fn from(raw_value: f64) -> Self {
-        if raw_value >= 0.0 && raw_value <= 20.0 {
+        if (0.0..=20.0).contains(&raw_value) {
             PasswordScore::VeryDangerous {
                 raw_value,
                 score_text: "Very Dangerous".into(),

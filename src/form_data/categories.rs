@@ -166,8 +166,7 @@ fn type_name_categories(
             icon_id: 0,
             // Need to get the icon name from EntryType struct - mostly for Custom Entry Types
             icon_name: if let Some(meta) = meta_opt {
-                meta.get_custom_entry_type_by_id(uuid)
-                    .map_or(None, |e| e.icon_name)
+                meta.get_custom_entry_type_by_id(uuid).and_then(|e| e.icon_name)
             } else {
                 None
             },

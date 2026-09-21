@@ -248,7 +248,7 @@ macro_rules! main_content_mut_action {
         let r = call_main_content_mut_action($db_key, $closure_fn);
         // Update the write time
         call_kdbx_context_mut_action($db_key, |ctx: &mut KdbxContext| {
-            ctx.last_write_time = crate::util::now_utc();
+            ctx.last_write_time = $crate::util::now_utc();
             ctx.save_pending = true;
             Ok(())
         })?;
@@ -858,7 +858,8 @@ pub fn combined_category_details(
 pub fn mark_group_as_category(db_key: &str, group_id: &str) -> Result<()> {
     let gid = Uuid::parse_str(group_id)?;
     main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        Ok(k.root.mark_group_as_category(&gid))
+        k.root.mark_group_as_category(&gid);
+        Ok(())
     })
 }
 
@@ -1051,7 +1052,8 @@ pub fn clone_group(db_key: &str, group_uuid: &Uuid, new_name: Option<String>) ->
 
 pub fn update_group(db_key: &str, group: Group) -> Result<()> {
     main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        Ok(k.root.update_group(group.clone(), false))
+        k.root.update_group(group.clone(), false);
+        Ok(())
     })
 }
 
@@ -1208,11 +1210,11 @@ pub fn merge_databases(
         log::debug!("Got refs for source and target");
 
         let target_kdbx = &mut target
-            .ok_or_else(|| "Target database key is not found")?
+            .ok_or("Target database key is not found")?
             .kdbx_file;
         let source_kdbx = &source
             .as_ref()
-            .ok_or_else(|| "Source database key is not found")?
+            .ok_or("Source database key is not found")?
             .kdbx_file;
         let merge_result = db_merge::Merger::from_kdbx_file(source_kdbx, target_kdbx).merge()?;
         log::debug!("Dbs are merged");

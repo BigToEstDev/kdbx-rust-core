@@ -209,7 +209,7 @@ impl<'a> Merger<'a> {
             .source_db
             .root
             .group_by_id(&self.source_db.root.root_uuid())
-            .ok_or_else(|| "Root source group is not found")?;
+            .ok_or("Root source group is not found")?;
 
         // Read what we need from the target root group up front and drop the
         // mutable borrow before calling self.merge_meta() — Meta::merge needs
@@ -220,7 +220,7 @@ impl<'a> Merger<'a> {
                 .target_db
                 .root
                 .group_by_id(&self.target_db.root.root_uuid())
-                .ok_or_else(|| "Root target group is not found")?;
+                .ok_or("Root target group is not found")?;
             (
                 target_root_group.get_uuid(),
                 target_root_group.last_modification_time(),
@@ -368,7 +368,7 @@ impl<'a> Merger<'a> {
                 .source_db
                 .root
                 .group_by_id(source_child_group_uuid)
-                .ok_or_else(|| "Source group is not found")?;
+                .ok_or("Source group is not found")?;
 
             let source_parent_group_uuid = self.parent_group_uuid_of_group(source_child_group);
 

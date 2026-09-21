@@ -434,7 +434,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
                     // Here we parse right side now and then return the combined string
                     let right_val = self
                         .parse(right.to_string(), depth_counter + 1)
-                        .unwrap_or(String::default());
+                        .unwrap_or_default();
                     let next_val = format!("{}{}{}", left, ref_value, right_val);
                     Ok(next_val)
                 } else {
@@ -601,7 +601,7 @@ fn parse_place_holder_name<'a>(input: &'a str) -> IResult<&'a str, PlaceHolderTy
 
 // Checks whether the string input contains any place holder variable
 pub(crate) fn place_holder_marker_found(input: &str) -> bool {
-    check_place_holder_marker(input).map_or(false, |x| x.1)
+    check_place_holder_marker(input).is_ok_and(|x| x.1)
 }
 
 //////////////////////////

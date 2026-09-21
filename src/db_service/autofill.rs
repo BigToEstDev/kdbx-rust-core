@@ -509,7 +509,7 @@ pub fn autofill_search_term_url_only(db_key: &str, term: &str) -> Result<EntrySe
 pub fn associate_app_to_entry(db_key: &str, entry_uuid: &Uuid, app_uri: &str) -> Result<bool> {
     let mut form_data = super::get_entry_form_data_by_id(db_key, entry_uuid)?;
 
-    let already_present = form_data.additional_urls().map_or(false, |urls| {
+    let already_present = form_data.additional_urls().is_some_and(|urls| {
         urls.split_whitespace().any(|t| url_matched(app_uri, t))
     });
 

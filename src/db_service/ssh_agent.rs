@@ -146,7 +146,7 @@ fn private_key_attachment_candidate(
         .find(|bkv| {
             attachment_content(&bkv.data_hash)
                 .as_deref()
-                .map_or(false, bytes_look_like_private_key)
+                .is_some_and(bytes_look_like_private_key)
         })
         .map(|bkv| (bkv.key.clone(), bkv.data_hash))
 }

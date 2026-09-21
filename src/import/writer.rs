@@ -162,7 +162,7 @@ fn child_group_or_create(
         let matched = keepass_file
             .root
             .group_by_id(&child_uuid)
-            .map_or(false, |child| child.name == name);
+            .is_some_and(|child| child.name == name);
         if matched {
             return Ok(child_uuid);
         }

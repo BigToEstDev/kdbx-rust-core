@@ -36,18 +36,14 @@ impl OtpSettings {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OtpAlgorithm {
+    #[default]
     SHA1,
     SHA256,
     SHA512,
 }
 
-impl std::default::Default for OtpAlgorithm {
-    fn default() -> Self {
-        OtpAlgorithm::SHA1
-    }
-}
 
 impl fmt::Display for OtpAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

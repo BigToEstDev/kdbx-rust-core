@@ -713,7 +713,7 @@ impl EntrySummary {
                     .map_or(val, |s| Some(s.to_string()))
             }
         };
-        let non_empty = |o: &Option<String>| o.as_ref().map_or(false, |s| !s.trim().is_empty());
+        let non_empty = |o: &Option<String>| o.as_ref().is_some_and(|s| !s.trim().is_empty());
 
         if entry.entry_field.entry_type.name == CREDIT_DEBIT_CARD {
             entry.entry_field.find_key_value(NUMBER).map(|f| {
@@ -770,8 +770,7 @@ impl EntrySummary {
                         .nth(0) // Get the first fieldDef
                         .map_or("", |f| &f.name)
                 }) // First field's name
-                .map(|n| entry.entry_field.find_key_value(n))
-                .flatten() // To get Option<Option<&KeyValue>> to Option<&KeyValue>
+                .and_then(|n| entry.entry_field.find_key_value(n)) // To get Option<Option<&KeyValue>> to Option<&KeyValue>
                 .and_then(|kv| {
                     if parsed_fields.is_empty() {
                         Some(kv.value.clone())

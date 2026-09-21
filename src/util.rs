@@ -103,14 +103,8 @@ pub fn now_utc_milli_seconds() -> i64 {
 #[allow(dead_code)]
 pub fn format_utc_now(format_str: Option<&str>) -> String {
     let now: NaiveDateTime = now_utc(); // 2024-11-05 20:01:42
-    let fmt_str = if let Some(s) = format_str {
-        s
-    } else {
-        // "%d %b %Y %H:%M:%S" This will print 05 Nov 2024
-
-        // Formatted string is of form 2024-11-05 20:05:18
-        "%Y-%m-%d %H:%M:%S"
-    };
+    // Default gives 2024-11-05 20:05:18; "%d %b %Y %H:%M:%S" would give 05 Nov 2024 20:05:18
+    let fmt_str = format_str.unwrap_or("%Y-%m-%d %H:%M:%S");
     now.format(fmt_str).to_string()
 }
 
@@ -146,7 +140,7 @@ pub fn _format_utc_naivedatetime_to_local(
     let utc_date_time: DateTime<Utc> = Utc
         .from_local_datetime(naive)
         .single()
-        .map_or(Utc::now(), |d| d);
+        .unwrap_or(Utc::now());
 
     let local_date_time: DateTime<Local> = utc_date_time.with_timezone(&Local);
     // another way of getting the same local time - Local.from_utc_datetime(&utc_date_time.naive_local());

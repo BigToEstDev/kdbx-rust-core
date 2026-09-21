@@ -415,7 +415,7 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {
                 UUID => (|content:String, _,  _| icon.uuid = content_to_uuid(&content)),
                 DATA => (|content:String, _,  _| {
-                    if let Some(d) = util::base64_decode(&content).ok() {
+                    if let Ok(d) = util::base64_decode(&content) {
                         icon.data = d;
                     }
                 }),
@@ -851,8 +851,8 @@ fn attachment_ref_index(attributes: &mut Attributes) -> i32 {
                 //debug!("!!!!!! in fn attributes of Value are {:?}",v);
                 if let std::borrow::Cow::Borrowed(a) = x {
                     //debug!("@@@@ a is {:?}",std::str::from_utf8(a).ok());
-                    if let Some(i) = std::str::from_utf8(a).ok() {
-                        if let Some(i) = i.parse::<i32>().ok() {
+                    if let Ok(i) = std::str::from_utf8(a) {
+                        if let Ok(i) = i.parse::<i32>() {
                             ref_index = i;
                         }
                     }

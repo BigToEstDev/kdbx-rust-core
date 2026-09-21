@@ -80,7 +80,7 @@ impl DeletedObject {
     pub(crate) fn with_uuid(uuid: Uuid, deletion_time: Option<NaiveDateTime>) -> Self {
         Self {
             uuid,
-            deletion_time: deletion_time.map_or_else(util::now_utc, |d| d),
+            deletion_time: deletion_time.unwrap_or_else(util::now_utc),
         }
     }
 }
@@ -225,7 +225,7 @@ impl Root {
         Ok(self
             .all_groups
             .get(group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?)
+            .ok_or("The group is not found in All groups")?)
     }
 
     pub fn group_by_id_mut(&mut self, group_uuid: &Uuid) -> Option<&mut Group> {
@@ -247,7 +247,7 @@ impl Root {
             .find(|g| g.name == name)
             .map(|g| g.uuid);
 
-        g_opt.map(|id| self.all_groups.get_mut(&id)).flatten()
+        g_opt.and_then(|id| self.all_groups.get_mut(&id))
     }
 
     // pub(crate) fn is_group_empty(&self, group_uuid: &Uuid) -> Result<bool> {
@@ -685,7 +685,7 @@ impl Root {
         let group = self
             .all_groups
             .get(&group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?;
+            .ok_or("The group is not found in All groups")?;
 
         if !group.entry_uuids.is_empty() || !group.group_uuids.is_empty() {
             return Err(Error::DataError(
@@ -697,7 +697,7 @@ impl Root {
         let group = self
             .all_groups
             .remove(&group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?;
+            .ok_or("The group is not found in All groups")?;
 
         // Remove this group id from group_uuids of its parent group.
         if let Some(old_parent) = self.all_groups.get_mut(&group.parent_group_uuid) {
@@ -740,7 +740,7 @@ impl Root {
         let entry = self
             .all_entries
             .remove(&entry_uuid)
-            .ok_or_else(|| "The entry is not found in All entries")?;
+            .ok_or("The entry is not found in All entries")?;
 
         // Remove this entry id from entry_uuids of its parent group.
         if let Some(old_parent) = self.all_groups.get_mut(&entry.parent_group_uuid) {
