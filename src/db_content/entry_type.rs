@@ -690,7 +690,7 @@ mod tests {
         let d = VersionedEntryType::decode_entry_type(&s, &HashMap::default());
         //println!("d is {:?}", &d);
 
-        assert_eq!(et1 == d, true);
+        assert!(et1 == d);
 
         // let vd = VersionedEntryType::RmpV1(et1.clone());
         // let s = vd.into_name_prefixed_string().unwrap();
@@ -717,7 +717,7 @@ mod tests {
         //println!("Serialized RmpV1 str size is {} and Serialized data {:?}",s.len(),&s);
         let vd: EntryType = VersionedEntryType::from_encoded(&s);
         //println!("Deserialized RmpV1 type {:?}", vd);
-        assert_eq!(et1 == vd, true);
+        assert!(et1 == vd);
 
         let vd = VersionedEntryType::RmpKeyedV1(entry_types.clone());
         //println!(" vd is {:?}",vd);
@@ -728,6 +728,6 @@ mod tests {
         //let vd = VersionedEntryType::into_latest_entry_types(vd.name(), &s);
         let vd: HashMap<Uuid, EntryType> = VersionedEntryType::from_encoded(&s);
         //println!("Deserialized types {:?}", vd);
-        assert_eq!(entry_types == vd, true);
+        assert!(entry_types == vd);
     }
 }

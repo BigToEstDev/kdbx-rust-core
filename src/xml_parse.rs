@@ -1913,7 +1913,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
         println!(" Kp is {:?}", r.unwrap());
     }
     #[test]
@@ -1933,7 +1933,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_err(), true);
+        assert!(r.is_err());
     }
 
     // KeePass-XML sample used by `read_sample_xml` / `read_write_sample_xml`, embedded
@@ -2066,7 +2066,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
         let kp = r.unwrap();
         println!(" Kp is {:?}", kp);
 
@@ -2110,7 +2110,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
 
         let cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
         let kp = r.unwrap();
@@ -2119,7 +2119,7 @@ mod tests {
         if let Err(e) = &write_result {
             println!("Error is {:?}", e);
         }
-        assert_eq!(write_result.is_ok(), true);
+        assert!(write_result.is_ok());
 
         // Re-parse what was just written and compare against the original values -
         // guards the write path the same way `read_sample_xml` guards the read path

@@ -736,7 +736,7 @@ mod tests {
         );
 
         // No field value is changed
-        assert_eq!(ef.modified_fields.is_empty(), true);
+        assert!(ef.modified_fields.is_empty());
         // TITLE and USERNAME remains the same because of maxium recursive calls went geyond limit
         assert_eq!(
             ef.entry_fields.get("TITLE").unwrap(),
@@ -769,8 +769,8 @@ mod tests {
         //println!("\n parsed ef {:?} \n\n modified fields {:?}",&ef.entry_fields, &ef.modified_fields);
 
         assert_eq!(ef.modified_fields.len(), 2);
-        assert_eq!(ef.modified_fields.contains(&"TITLE".into()), true);
-        assert_eq!(ef.modified_fields.contains(&"PASSWORD".into()), true);
+        assert!(ef.modified_fields.contains(&"TITLE".into()));
+        assert!(ef.modified_fields.contains(&"PASSWORD".into()));
 
         assert_eq!(
             ef.entry_fields.get("PASSWORD").unwrap(),

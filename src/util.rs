@@ -514,7 +514,7 @@ mod tests {
         init_test_logging();
         let b64_str = "3aBY+AcLQmiPas0vjK2zng==";
         let u = decode_uuid(b64_str);
-        assert_eq!(u.is_some(), true);
+        assert!(u.is_some());
         println!("Uuid is {}", u.unwrap());
         assert_eq!(
             u.unwrap().to_string(),
@@ -529,7 +529,7 @@ mod tests {
         let b64_str = "3aBY+AcLQmiPas0vjK2zng==";
         let decoded = BASE64.decode(b64_str.as_bytes()).unwrap();
         let u = Uuid::from_slice(&decoded).ok();
-        assert_eq!(u.is_some(), true);
+        assert!(u.is_some());
         println!("Uuid is {}", u.unwrap());
         assert_eq!(
             u.unwrap().to_string(),
@@ -541,25 +541,25 @@ mod tests {
     fn decode_uuid_to_none_sample() {
         let s = "dda058f8-070b-4268-8f6a-cd2f8cadb39e";
         let u = decode_uuid(s);
-        assert_eq!(u.is_none(), true);
+        assert!(u.is_none());
         //println!("Uuid is {}", u.unwrap());
     }
 
     #[test]
     fn encode_uuid_to_b64() {
         let ur = Uuid::parse_str("dda058f8-070b-4268-8f6a-cd2f8cadb39e");
-        assert_eq!(ur.is_ok(), true);
+        assert!(ur.is_ok());
         let u = encode_uuid(&ur.unwrap());
-        assert_eq!(u == "3aBY+AcLQmiPas0vjK2zng==", true);
+        assert!(u == "3aBY+AcLQmiPas0vjK2zng==");
     }
 
     #[test]
     fn encode_uuid_to_b64_1() {
         use data_encoding::BASE64;
         let ur = Uuid::parse_str("dda058f8-070b-4268-8f6a-cd2f8cadb39e");
-        assert_eq!(ur.is_ok(), true);
+        assert!(ur.is_ok());
         let u = BASE64.encode(ur.unwrap().as_bytes());
-        assert_eq!(u == "3aBY+AcLQmiPas0vjK2zng==", true);
+        assert!(u == "3aBY+AcLQmiPas0vjK2zng==");
     }
 
     #[allow(dead_code)]
@@ -632,7 +632,7 @@ mod tests {
 
         //println!("New Dt2 {:?}", n2);
 
-        assert_eq!(dt == parsed_dt, true);
+        assert!(dt == parsed_dt);
     }
 
     #[test]
@@ -716,7 +716,7 @@ mod tests {
         let c_v1 = compress(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
-        assert_eq!(d_v1 == v1, true);
+        assert!(d_v1 == v1);
 
         // gzip adds timestamp. As a result c_v1 != c_v2
         // use std::{thread, time};
@@ -732,14 +732,14 @@ mod tests {
         let c_v1 = compress_with_fixed_timestamp(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
-        assert_eq!(d_v1 == v1, true);
+        assert!(d_v1 == v1);
 
         // gzip adds fixed timestamp. As a result c_v1 == c_v2
         use std::{thread, time};
         let ten_millis = time::Duration::from_millis(1000);
         thread::sleep(ten_millis);
         let c_v2 = compress_with_fixed_timestamp(v1).unwrap();
-        assert_eq!(c_v1 == c_v2, true);
+        assert!(c_v1 == c_v2);
     }
 
     #[test]
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(s1, "ba3r2J45");
 
         let s2 = "";
-        assert_eq!(strip_spaces(s2).is_empty(), true);
+        assert!(strip_spaces(s2).is_empty());
     }
 }
 

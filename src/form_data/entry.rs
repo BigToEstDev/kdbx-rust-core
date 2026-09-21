@@ -1003,18 +1003,16 @@ mod tests {
         let json_str = serde_json::to_string_pretty(&de).unwrap();
         println!("{}", json_str);
 
-        assert_eq!(
-            de.section_fields.get("Custom Fields").unwrap().len() == 3,
-            true
+        assert!(
+            de.section_fields.get("Custom Fields").unwrap().len() == 3
         );
-        assert_eq!(
+        assert!(
             de.section_fields
                 .get("Custom Fields")
                 .unwrap()
                 .iter()
                 .find(|kv| kv.key == "Custom First Name")
-                .is_some(),
-            true
+                .is_some()
         );
     }
 }

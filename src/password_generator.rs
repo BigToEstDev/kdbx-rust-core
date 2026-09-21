@@ -362,7 +362,7 @@ mod tests {
         let pwd = po.generate().unwrap();
         let result = analyze_password(&pwd);
         println!("result is {:?}", result);
-        assert_eq!(result.lowercase_letters_count > 1, true);
+        assert!(result.lowercase_letters_count > 1);
 
         // let s = 4.5f64;
         // let r = s <= 4.5 && s >= 3.0;
