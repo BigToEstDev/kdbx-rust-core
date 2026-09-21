@@ -258,28 +258,21 @@ pub fn to_hex_string_with_space(data: &[u8]) -> String {
         .join(" ")
 }
 
+// try_into() on a slice succeeds only for an exact length, so shorter and longer
+// header fields are both rejected
 pub fn to_u64(d: &[u8]) -> std::result::Result<u64, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 8]) {
-        Ok(u64::from_le_bytes(*n))
-    } else {
-        Err("Conversion to u64 failed")
-    }
+    let n: [u8; 8] = d.try_into().map_err(|_| "Conversion to u64 failed")?;
+    Ok(u64::from_le_bytes(n))
 }
 
 pub fn to_i32(d: &[u8]) -> std::result::Result<i32, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 4]) {
-        Ok(i32::from_le_bytes(*n))
-    } else {
-        Err("Conversion to i32 failed")
-    }
+    let n: [u8; 4] = d.try_into().map_err(|_| "Conversion to i32 failed")?;
+    Ok(i32::from_le_bytes(n))
 }
 
 pub fn to_u32(d: &[u8]) -> std::result::Result<u32, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 4]) {
-        Ok(u32::from_le_bytes(*n))
-    } else {
-        Err("Conversion to u32 failed")
-    }
+    let n: [u8; 4] = d.try_into().map_err(|_| "Conversion to u32 failed")?;
+    Ok(u32::from_le_bytes(n))
 }
 
 // Removes all contents of a dir including sub dirs

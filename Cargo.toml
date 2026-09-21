@@ -30,7 +30,6 @@ chrono =  {version = "0.4.42", features = ["serde"]}
 ## Без фичи "zlib": бэкенд miniz_oxide (чистый Rust). Фича тянула libz-sys, последнюю C-зависимость.
 flate2 = "1.1"
 
-slice_as_array = "1.1.0"
 log = "0.4.28"
 hex = "0.4.3"
 once_cell = "1"

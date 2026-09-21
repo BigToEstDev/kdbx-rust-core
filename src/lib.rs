@@ -1,4 +1,8 @@
-﻿// pub mod callback_service;
+﻿// No unsafe in this crate. forbid (not deny) cannot be overridden by a local #[allow],
+// so unsafe coming back through our code or a macro expanded here fails the build
+#![forbid(unsafe_code)]
+
+// pub mod callback_service;
 
 // For now import feature is supported only in desktop app
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -24,7 +28,5 @@ pub mod util;
 
 pub use crate::util as service_util;
 
-#[macro_use]
-extern crate slice_as_array;
 extern crate lazy_static;
 extern crate log;
