@@ -14,6 +14,14 @@ pub(crate) struct KeepassFile {
 }
 
 impl KeepassFile {
+    // Applies this database's history limits to every entry (KeePass PwDatabase.MaintainBackups).
+    // Called after the limits change in the db settings and at the end of a merge
+    pub(crate) fn maintain_all_histories(&mut self) -> bool {
+        let max_items = self.meta.meta_share.history_max_items();
+        let max_size = self.meta.meta_share.history_max_size();
+        self.root.maintain_all_histories(max_items, max_size)
+    }
+
     pub(crate) fn new() -> KeepassFile {
         KeepassFile {
             meta: Meta::new(),

@@ -294,6 +294,10 @@ impl<'a> Merger<'a> {
             self.merge_deleted_objects()?;
         }
 
+        // KeePass trims every entry's history to the target limits at the end of MergeIn: the union
+        // of both histories can exceed them
+        self.target_db.maintain_all_histories();
+
         self.merge_result.finalize_merge_done();
 
         Ok(self.merge_result.clone())

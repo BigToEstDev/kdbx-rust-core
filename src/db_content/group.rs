@@ -305,3 +305,68 @@ mod tests {
         assert!(g.sub_group_uuids().is_empty());
     }
 }
+
+// Category flag <-> custom data marker OKP_GROUP_AS_CATEGORY ("OKP_K2"): a group is a category unless
+// the marker says "No" (groups from other clients have no marker and are categories by design)
+#[cfg(test)]
+mod category_marker_tests {
+    use super::Group;
+    use crate::constants::custom_data_key::OKP_GROUP_AS_CATEGORY;
+
+    // Saving writes the flag into custom data, loading reads it back
+    fn save_and_load(g: &mut Group) {
+        g.group_to_custom_data();
+        g.custom_data_to_group();
+    }
+
+    #[test]
+    fn unmarked_category_survives_save_and_load() {
+        let mut g = Group::new_with_id();
+        g.marked_category = false;
+        save_and_load(&mut g);
+        assert!(
+            !g.is_in_category(),
+            "unmarked group came back as a category"
+        );
+    }
+
+    #[test]
+    fn marked_category_survives_save_and_load_without_a_marker() {
+        let mut g = Group::new_with_id();
+        g.marked_category = true;
+        save_and_load(&mut g);
+        assert!(g.is_in_category());
+        assert!(g.custom_data.get_item(OKP_GROUP_AS_CATEGORY).is_none());
+    }
+
+    // A group read from a KeePassXC / KeePassDX file has no marker
+    #[test]
+    fn group_without_marker_is_a_category() {
+        let mut g = Group::new_with_id();
+        g.marked_category = false;
+        g.custom_data_to_group();
+        assert!(g.is_in_category());
+    }
+
+    // The marker is written only when missing, so its modification time is kept across saves
+    #[test]
+    fn existing_no_marker_is_not_rewritten_on_save() {
+        let mut g = Group::new_with_id();
+        g.marked_category = false;
+        g.group_to_custom_data();
+        let first = g
+            .custom_data
+            .get_item(OKP_GROUP_AS_CATEGORY)
+            .cloned()
+            .unwrap();
+        g.custom_data_to_group();
+        g.group_to_custom_data();
+        let second = g
+            .custom_data
+            .get_item(OKP_GROUP_AS_CATEGORY)
+            .cloned()
+            .unwrap();
+        assert_eq!(second.value, "No");
+        assert_eq!(first.last_modification_time, second.last_modification_time);
+    }
+}

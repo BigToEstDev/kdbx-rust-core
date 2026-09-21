@@ -29,7 +29,8 @@ use super::Item;
 #[derive(Debug, PartialEq)]
 pub(crate) struct HistoryItemsMeta {
     pub(crate) history_max_items: i32,
-    pub(crate) history_max_size: i32,
+    // Bytes, -1 = no limit. i64 like KeePass (long): 4096 MB set in KeePass does not fit into i32
+    pub(crate) history_max_size: i64,
 }
 
 // This is a shared data from Meta to Groups and Entries and is stored in a Arc struct for the sharing.
@@ -67,11 +68,11 @@ impl MetaShare {
         self.history_items_meta.lock().unwrap().history_max_items = max_no;
     }
 
-    pub fn history_max_size(&self) -> i32 {
+    pub fn history_max_size(&self) -> i64 {
         self.history_items_meta.lock().unwrap().history_max_size
     }
 
-    pub fn set_history_max_size(&self, max_size: i32) {
+    pub fn set_history_max_size(&self, max_size: i64) {
         self.history_items_meta.lock().unwrap().history_max_size = max_size;
     }
 
@@ -154,7 +155,10 @@ impl Meta {
         &self.database_name
     }
 
-    // The incoming Meta instance 'other' is partially filled from db_service::MetaFormData and passed it here
+    // The incoming Meta instance 'other' is partially filled from db_service::MetaFormData and passed it here.
+    // Only the fields the settings form carries are copied: name, description and the two history limits.
+    // Everything else in 'other' is a Meta::new() default, and copying it would reset values read from the
+    // file (e.g. RecycleBinEnabled, MaintenanceHistoryDays set in KeePass)
     pub fn update(&mut self, other: Meta) -> Result<()> {
         let current_time = util::now_utc();
 
@@ -169,10 +173,12 @@ impl Meta {
             self.database_description_changed = current_time;
         }
 
-        self.recycle_bin_enabled = other.recycle_bin_enabled;
-        //self.history_max_items = other.history_max_items;
-        //self.history_max_size = other.history_max_size;
-        self.maintenance_history_days = other.maintenance_history_days;
+        // 'other' has its own MetaShare; entries read the limits through self.meta_share, so the values
+        // are copied into it instead of replacing the Arc
+        self.meta_share
+            .set_history_max_items(other.meta_share.history_max_items());
+        self.meta_share
+            .set_history_max_size(other.meta_share.history_max_size());
         self.settings_changed = current_time;
         Ok(())
     }

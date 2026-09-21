@@ -154,6 +154,21 @@ fn content_to_int(content: String) -> i32 {
     }
 }
 
+// HistoryMaxSize is a long in KeePass (bytes); content_to_int would turn values above i32::MAX
+// (e.g. 4096 MB set in KeePass) into -1, i.e. "no limit", and that -1 would be written back to the file
+#[inline]
+fn content_to_i64(content: String) -> i64 {
+    if let Ok(i) = content.parse::<i64>() {
+        i
+    } else {
+        error!(
+            "Parsing of content {} as i64 failed and returning -1",
+            content
+        );
+        -1
+    }
+}
+
 #[inline]
 fn content_to_bool(content: String) -> bool {
     content.to_lowercase() == "true"
@@ -311,7 +326,7 @@ impl<'a> XmlReader<'a> {
                     |content:String, _,  _| meta.meta_share.set_history_max_items(content_to_int(content))
                 ),
                 HISTORY_MAX_SIZE => (
-                    |content:String, _,  _| meta.meta_share.set_history_max_size(content_to_int(content))
+                    |content:String, _,  _| meta.meta_share.set_history_max_size(content_to_i64(content))
                 ),
                 MAINTENANCE_HISTORY_DAYS=> (
                     |content:String, _,  _| meta.maintenance_history_days = content_to_int(content)

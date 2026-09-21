@@ -245,6 +245,60 @@ fn verify_entry_simple_update(_ctx: &mut MergeTestContext) {
     assert!(target_entry_after_histories.len() == 1);
 }
 
+// KeePass trims the history of every entry to the target's limits at the end of MergeIn
+// (PwDatabase.MaintainBackups); the merged union of both histories must not exceed them
+#[test_context(MergeTestContext)]
+#[test]
+fn verify_merged_history_respects_target_limits(_ctx: &mut MergeTestContext) {
+    let (mut source, mut target) = create_test_dbs_4();
+
+    let e1_uuid = {
+        let source_db = source.keepass_main_content.as_mut().unwrap();
+        let mut e1_uuid = None;
+        for i in 1..=3 {
+            util::test_clock::advance_by(1);
+            let e = find_update_entry(
+                source_db,
+                if i == 1 { "entry1" } else { "src" },
+                TITLE,
+                "src",
+            );
+            e1_uuid = Some(e.get_uuid());
+        }
+        e1_uuid.unwrap()
+    };
+    {
+        let target_db = target.keepass_main_content.as_mut().unwrap();
+        for i in 1..=3 {
+            util::test_clock::advance_by(1);
+            find_update_entry(
+                target_db,
+                if i == 1 { "entry1" } else { "tgt" },
+                TITLE,
+                "tgt",
+            );
+        }
+        target_db.meta.meta_share.set_history_max_items(4);
+    }
+
+    Merger::from_kdbx_file(&source, &mut target)
+        .merge()
+        .unwrap();
+
+    let target_db = target.keepass_main_content.as_ref().unwrap();
+    let histories = target_db
+        .root
+        .entry_by_id(&e1_uuid)
+        .unwrap()
+        .histories()
+        .clone();
+    assert!(
+        histories.len() <= 4,
+        "merged history has {} versions, the target limit is 4",
+        histories.len()
+    );
+}
+
 #[test_context(MergeTestContext)]
 #[test]
 fn verify_meta_add_custom_icon(_ctx: &mut MergeTestContext) {

@@ -724,6 +724,95 @@ impl Entry {
 // For example, if all history entries of the same as the main entry, we need not keep a separate EntryType data
 // for each history entries. Instead it uses the same EntryType info from the main entry
 impl Entry {
+    // Size of the entry as KeePass computes it (KeePassLib PwEntry.GetSize): an in-memory estimate,
+    // 2 bytes per UTF-16 char plus fixed per-item overheads. Used for HistoryMaxSize so that the same
+    // database is trimmed the same way here and in KeePass. Attachments count in every version that
+    // references them, although the file stores each attachment once
+    pub(crate) fn keepass_size(&self) -> u64 {
+        fn chars(s: &str) -> u64 {
+            s.encode_utf16().count() as u64
+        }
+
+        let mut bytes: u64 = 276;
+        let mut char_count: u64 = 0;
+
+        bytes += self.entry_field.fields.len() as u64 * 40;
+        for kv in self.entry_field.fields.values() {
+            char_count += chars(&kv.key) + chars(&kv.value);
+        }
+
+        bytes += self.binary_key_values.len() as u64 * 65;
+        for bkv in &self.binary_key_values {
+            char_count += chars(&bkv.key);
+            bytes += bkv.data_size as u64;
+        }
+
+        char_count += self.auto_type.default_sequence.as_deref().map_or(0, chars);
+        bytes += self.auto_type.associations.len() as u64 * 24;
+        for a in &self.auto_type.associations {
+            char_count += chars(&a.window) + a.key_stroke_sequence.as_deref().map_or(0, chars);
+        }
+
+        bytes += self.history.entries.len() as u64 * 8;
+        for h in &self.history.entries {
+            bytes += h.keepass_size();
+        }
+
+        let tags = crate::db_content::split_tags(&self.tags);
+        bytes += tags.len() as u64 * 8;
+        for t in &tags {
+            char_count += chars(t);
+        }
+
+        let items = self.custom_data.get_items();
+        bytes += items.len() as u64 * 16;
+        for item in items {
+            char_count += chars(&item.key) + chars(&item.value);
+        }
+
+        bytes + char_count * 2
+    }
+
+    // Applies history limits to this entry's current history (KeePass PwEntry.MaintainBackups).
+    // The limits are passed in: entries brought in by a merge may still share the source's MetaShare.
+    // Returns true if versions were removed
+    pub(crate) fn maintain_history(&mut self, max_items: i32, max_size: i64) -> bool {
+        let before = self.history.entries.len();
+        Self::trim_histories(&mut self.history.entries, max_items, max_size);
+        self.history.entries.len() != before
+    }
+
+    // KeePass semantics: a negative limit means no limit; the count is applied first, then the size;
+    // the version removed is the one with the oldest last modification time, not the first in the list
+    // (after a merge the list is not in time order)
+    fn trim_histories(histories: &mut Vec<Entry>, max_items: i32, max_size: i64) {
+        let remove_oldest = |histories: &mut Vec<Entry>| {
+            let oldest = histories
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, e)| e.times.last_modification_time)
+                .map(|(i, _)| i);
+            if let Some(i) = oldest {
+                histories.remove(i);
+            }
+        };
+
+        let before = histories.len();
+        if max_items >= 0 {
+            while histories.len() > max_items as usize {
+                remove_oldest(histories);
+            }
+        }
+        if max_size >= 0 {
+            while histories.iter().map(Entry::keepass_size).sum::<u64>() > max_size as u64 {
+                remove_oldest(histories);
+            }
+        }
+        if histories.len() != before {
+            debug!("Removed {} history items", before - histories.len());
+        }
+    }
+
     // Called to recreate the history entries. The existing entry before update is
     // added to the history and returned
     pub(crate) fn create_histories(&mut self) -> Vec<Entry> {
@@ -738,22 +827,19 @@ impl Entry {
 
         // Make a copy of the existing history entries
         let mut histories: Vec<Entry> = existing_entry_copy.history.entries;
-        // We keep the max_items histories only
-        let max_items_allowed = self.meta_share.history_max_items() as usize;
-        if histories.len() >= max_items_allowed {
-            let remove_count = histories.len() - max_items_allowed + 1; // +1 used as we will adding the existing_entry_copy
-            histories = histories.into_iter().skip(remove_count).collect();
-            debug!("Removed {} history items", { remove_count });
-        }
-
-        // TODO: Should we add removing all history entries that exceeds certain size ?
-        // Or just do not add to the history any entry that exceeds certain size ?
 
         // The existing_entry_copy should not have any history entries before adding to h
         existing_entry_copy.history.entries = vec![];
 
         // Add the existing_entry_copy as last item in the history list
         histories.push(existing_entry_copy);
+
+        // Like KeePass: add the backup first, then trim (PwEntry.CreateBackup + MaintainBackups)
+        Self::trim_histories(
+            &mut histories,
+            self.meta_share.history_max_items(),
+            self.meta_share.history_max_size(),
+        );
 
         // This histories will set to the new updated entry
         histories
@@ -1344,3 +1430,136 @@ fn parse_all_otp_fields(&mut self) {
     }
 
 */
+
+// History limits (HistoryMaxItems / HistoryMaxSize) applied the way KeePass does it
+// (KeePassLib PwEntry.MaintainBackups / GetSize)
+#[cfg(test)]
+mod history_limit_tests {
+    use super::{AutoType, BinaryKeyValue, Entry, KeyValue};
+    use crate::db_content::entry::Association;
+    use crate::db_content::entry_type::FieldDataType;
+    use crate::db_content::{CustomData, Item};
+    use chrono::{Duration, NaiveDate};
+
+    fn at(minute: i64) -> chrono::NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            + Duration::minutes(minute)
+    }
+
+    // A history version modified at the given minute, optionally with an attachment of that size
+    fn version(minute: i64, attachment_size: usize) -> Entry {
+        let mut e = Entry::new();
+        e.times.last_modification_time = at(minute);
+        if attachment_size > 0 {
+            e.binary_key_values.push(BinaryKeyValue {
+                key: "a.bin".into(),
+                value: String::default(),
+                index_ref: 0,
+                data_hash: minute as u64,
+                data_size: attachment_size,
+            });
+        }
+        e
+    }
+
+    fn entry_with_history(versions: Vec<Entry>, max_items: i32, max_size: i64) -> Entry {
+        let mut e = version(1000, 0);
+        e.history.entries = versions;
+        e.meta_share.set_history_max_items(max_items);
+        e.meta_share.set_history_max_size(max_size);
+        e
+    }
+
+    fn minutes(histories: &[Entry]) -> Vec<i64> {
+        histories
+            .iter()
+            .map(|h| (h.times.last_modification_time - at(0)).num_minutes())
+            .collect()
+    }
+
+    // KeePass: HistoryMaxItems = 0 means no history at all (we used to keep one version)
+    #[test]
+    fn zero_max_items_keeps_no_history() {
+        let mut e = entry_with_history(vec![version(10, 0), version(20, 0)], 0, -1);
+        assert!(e.create_histories().is_empty());
+    }
+
+    #[test]
+    fn unlimited_limits_keep_every_version() {
+        let versions = (0..15).map(|m| version(m, 0)).collect();
+        let mut e = entry_with_history(versions, -1, -1);
+        assert_eq!(e.create_histories().len(), 16);
+    }
+
+    // KeePass removes the version with the oldest LastModificationTime, not the first in the list
+    // (after a merge the list is not in time order)
+    #[test]
+    fn max_items_removes_oldest_by_modification_time() {
+        let versions = vec![version(30, 0), version(10, 0), version(20, 0)];
+        let mut e = entry_with_history(versions, 2, -1);
+        assert_eq!(minutes(&e.create_histories()), vec![30, 1000]);
+    }
+
+    #[test]
+    fn max_size_removes_oldest_until_history_fits() {
+        let versions = vec![
+            version(10, 10_000),
+            version(20, 10_000),
+            version(30, 10_000),
+        ];
+        // ~31 KB of history (3 attachments + the new version) against a 25 KB limit
+        let mut e = entry_with_history(versions, -1, 25_000);
+        assert_eq!(minutes(&e.create_histories()), vec![20, 30, 1000]);
+    }
+
+    #[test]
+    fn max_items_is_applied_before_max_size() {
+        let versions = vec![version(10, 0), version(20, 10_000), version(30, 0)];
+        let mut e = entry_with_history(versions, 2, 5_000);
+        // items: keep 30 and the new version (20 with the attachment is dropped by count already)
+        assert_eq!(minutes(&e.create_histories()), vec![30, 1000]);
+    }
+
+    // Same number KeePass' PwEntry.GetSize gives for this entry: 2 bytes per UTF-16 char plus
+    // fixed per-item overheads
+    #[test]
+    fn keepass_size_matches_the_keepass_formula() {
+        let mut e = Entry::new();
+        for (k, v) in [("Title", "Bank"), ("Password", "pässwörd")] {
+            e.entry_field.insert_key_value(KeyValue {
+                key: k.into(),
+                value: v.into(),
+                protected: false,
+                data_type: FieldDataType::default(),
+            });
+        }
+        e.binary_key_values.push(BinaryKeyValue {
+            key: "f.txt".into(),
+            value: String::default(),
+            index_ref: 0,
+            data_hash: 1,
+            data_size: 100,
+        });
+        e.auto_type = AutoType {
+            enabled: true,
+            default_sequence: Some("{USERNAME}".into()),
+            associations: vec![Association {
+                window: "Win".into(),
+                key_stroke_sequence: Some("{PASSWORD}".into()),
+            }],
+        };
+        e.tags = "a;bb".into();
+        e.custom_data = CustomData::default();
+        e.custom_data.insert_item(Item::from_kv("k", "vv"));
+
+        // bytes: 276 + 2 fields * 40 + 1 attachment * 65 + 100 + 1 association * 24 + 2 tags * 8 + 1 item * 16
+        let bytes = 276 + 2 * 40 + 65 + 100 + 24 + 2 * 8 + 16;
+        // chars: Title+Bank, Password+pässwörd (8 UTF-16 units, 10 UTF-8 bytes), f.txt,
+        // {USERNAME}, Win+{PASSWORD}, a+bb, k+vv
+        let chars = (5 + 4) + (8 + 8) + 5 + 10 + (3 + 10) + (1 + 2) + (1 + 2);
+        assert_eq!(e.keepass_size(), bytes + chars * 2);
+    }
+}

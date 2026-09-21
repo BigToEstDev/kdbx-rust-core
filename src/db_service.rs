@@ -694,6 +694,12 @@ pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
 
         ctx.kdbx_file.set_kdf_algorithm(db_settings.kdf)?;
         ctx.kdbx_file.set_content_cipher_id(db_settings.cipher_id)?;
+
+        // Like KeePass after its settings dialog: new history limits apply to all entries now, not
+        // only to entries edited later. Done last, after every validation above has passed
+        if let Some(kp) = ctx.kdbx_file.keepass_main_content.as_mut() {
+            kp.maintain_all_histories();
+        }
         Ok(())
     })
 }

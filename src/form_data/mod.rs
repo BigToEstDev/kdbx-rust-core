@@ -25,8 +25,10 @@ pub use self::db_setting::*;
 pub struct MetaFormData {
     pub(crate) database_name: String,
     pub(crate) database_description: String,
+    // -1 = no limit for both
     pub(crate) history_max_items: i32,
-    pub(crate) history_max_size: i32,
+    // Bytes (KeePass shows it in MB)
+    pub(crate) history_max_size: i64,
 }
 
 impl From<&Meta> for MetaFormData {
@@ -35,11 +37,12 @@ impl From<&Meta> for MetaFormData {
             database_name: meta.database_name.clone(),
             database_description: meta.database_description.clone(),
             history_max_items: meta.meta_share.history_max_items(),
-            history_max_size: meta.meta_share.history_max_items(),
+            history_max_size: meta.meta_share.history_max_size(),
         }
     }
 }
 
+// Only the form fields are set; the result is passed to Meta::update, which copies just these
 impl From<&MetaFormData> for Meta {
     fn from(form_data: &MetaFormData) -> Self {
         let mut meta = Meta::new();
@@ -48,6 +51,8 @@ impl From<&MetaFormData> for Meta {
         meta.database_description = form_data.database_description.clone();
         meta.meta_share
             .set_history_max_items(form_data.history_max_items);
+        meta.meta_share
+            .set_history_max_size(form_data.history_max_size);
 
         meta
     }
@@ -112,4 +117,52 @@ pub struct GroupSummary {
     pub custom_icon_uuid: Option<String>,
     pub group_uuids: Vec<String>,
     pub entry_uuids: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MetaFormData;
+    use crate::db_content::Meta;
+
+    fn form(meta: &Meta) -> MetaFormData {
+        MetaFormData::from(meta)
+    }
+
+    // The settings form carries only name, description and the two history limits. Saving it must not
+    // reset Meta fields the form does not have - they come from the file (KeePass, KeePassXC)
+    #[test]
+    fn update_from_settings_form_keeps_fields_not_in_the_form() {
+        let mut meta = Meta::new();
+        meta.recycle_bin_enabled = true;
+        meta.maintenance_history_days = 30;
+
+        let mut settings = form(&meta);
+        settings.database_name = "Renamed".into();
+        meta.update((&settings).into()).unwrap();
+
+        assert_eq!(meta.database_name, "Renamed");
+        assert!(
+            meta.recycle_bin_enabled,
+            "RecycleBinEnabled reset by the settings form"
+        );
+        assert_eq!(
+            meta.maintenance_history_days, 30,
+            "MaintenanceHistoryDays reset"
+        );
+    }
+
+    // Entries read the limits through the shared MetaShare, so update must write into self.meta_share
+    #[test]
+    fn update_from_settings_form_sets_both_history_limits_in_shared_meta() {
+        let mut meta = Meta::new();
+        let shared = std::sync::Arc::clone(&meta.meta_share);
+
+        let mut settings = form(&meta);
+        settings.history_max_items = 3;
+        settings.history_max_size = 4096_i64 * 1024 * 1024;
+        meta.update((&settings).into()).unwrap();
+
+        assert_eq!(shared.history_max_items(), 3);
+        assert_eq!(shared.history_max_size(), 4096_i64 * 1024 * 1024);
+    }
 }
