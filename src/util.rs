@@ -55,7 +55,6 @@ pub(crate) fn decode_datetime_b64(b64date: &str) -> Option<NaiveDateTime> {
     for i in 0..usize::min(bytes.len(), decoded.len()) {
         bytes[i] = decoded[i];
     }
-    //println!("====== dat bytes {:?}", u8_arr_to_i8_arr(&bytes));
     let timestamp = Duration::seconds(i64::from_le_bytes(bytes));
     datetime_epoch().checked_add_signed(timestamp)
 }
@@ -257,42 +256,6 @@ pub fn to_hex_string_with_space(data: &[u8]) -> String {
         .map(|b| format!("{:02x}", b).to_string())
         .collect::<Vec<String>>()
         .join(" ")
-}
-
-#[allow(dead_code)]
-pub fn as_hex_array_formatted(data: &[u8]) -> String {
-    // Upper case
-    // [ 0x68, 0x65,0x6C,0x6C, 0x6F,..]
-    // format!("{:#04X?}", data)
-
-    // Lower case
-    // gives something like [ 0x68, 0x65,0x6C,0x6C,0x6F,]
-    format!("{:#04X?}", data)
-}
-
-#[allow(dead_code)]
-pub fn u8_arr_to_i8_arr(data: &[u8]) -> Vec<i8> {
-    let v1: Vec<i8> = data.iter().map(|x| *x as i8).collect();
-    v1
-}
-
-//Need to use some generic type
-#[allow(dead_code)]
-pub fn u8_32arr_to_i8_32arr(data: &[u8]) -> [i8; 32] {
-    use std::mem;
-    let d1 = slice_as_array!(data, [u8; 32]).expect("error");
-    let ir = unsafe { mem::transmute::<[u8; 32], [i8; 32]>(*d1) };
-    ir
-}
-
-//Need to work not on these
-#[allow(dead_code)]
-pub fn to_i64(d: &[u8]) -> std::result::Result<i64, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 8]) {
-        Ok(i64::from_le_bytes(*n))
-    } else {
-        Err("Conversion to i64 failed")
-    }
 }
 
 pub fn to_u64(d: &[u8]) -> std::result::Result<u64, &'static str> {
