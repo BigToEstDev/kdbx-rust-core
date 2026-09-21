@@ -1,4 +1,3 @@
-use passwords;
 
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
@@ -377,7 +376,7 @@ mod tests {
         // to remove its control characters (control characters like BS, LF, CR, etc). And after analyzing,
         // the analyzer will return the filtered password.
         let pwd = "ZYX[$BCkQB中文}%A_3456]  H(\rg";
-        let result = analyze_password(&pwd);
+        let result = analyze_password(pwd);
         println!("result is {:?}", result);
         assert_eq!("ZYX[$BCkQB中文}%A_3456]  H(g", result.analyzed_password); // "\r" was filtered
     }

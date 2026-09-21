@@ -89,7 +89,7 @@ mod tests {
         });
 
         // Matches part of BOA
-        let found = term_search_all_entry_fields("BO".into(), &e).unwrap();
+        let found = term_search_all_entry_fields("BO", &e).unwrap();
         assert_eq!(found, true);
 
         // Casesensitive search and will not match any field
@@ -97,14 +97,14 @@ mod tests {
         // assert_eq!(found, false);
 
         // Matching in Tags field
-        let found = term_search_all_entry_fields("Banks".into(), &e).unwrap();
+        let found = term_search_all_entry_fields("Banks", &e).unwrap();
         assert_eq!(found, true);
 
-        let found = term_search_all_entry_fields(" ".into(), &e).unwrap();
+        let found = term_search_all_entry_fields(" ", &e).unwrap();
         //println!("found is {}", found );
         assert_eq!(found, false);
 
-        let found = term_search_all_entry_fields("user\\".into(), &e);
+        let found = term_search_all_entry_fields("user\\", &e);
         assert_eq!(found.is_err(), true);
         if let Err(e) = found {
             println!("found is {}", e);

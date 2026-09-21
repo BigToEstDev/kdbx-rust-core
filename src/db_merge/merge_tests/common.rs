@@ -15,12 +15,12 @@ pub(crate) fn create_test_dbs_4() -> (KdbxFile, KdbxFile) {
     let source_db = source.keepass_main_content.as_mut().unwrap();
 
     let mut group1 = Group::with_parent(&source_db.root.root_uuid());
-    let group1_uuid = group1.get_uuid().clone();
+    let group1_uuid = group1.get_uuid();
     group1.set_name("group1");
     source_db.root.insert_group(group1).unwrap();
 
     let mut group2 = Group::with_parent(&source_db.root.root_uuid());
-    let group2_uuid = group2.get_uuid().clone();
+    let group2_uuid = group2.get_uuid();
     group2.set_name("group2");
     source_db.root.insert_group(group2).unwrap();
 
@@ -46,12 +46,12 @@ pub(crate) fn create_test_dbs_5() -> (KdbxFile, KdbxFile) {
     let source_db = source.keepass_main_content.as_mut().unwrap();
 
     let mut group1 = Group::with_parent(&source_db.root.root_uuid());
-    let group1_uuid = group1.get_uuid().clone();
+    let group1_uuid = group1.get_uuid();
     group1.set_name("group1");
     source_db.root.insert_group(group1).unwrap();
 
     let mut group2 = Group::with_parent(&source_db.root.root_uuid());
-    let group2_uuid = group2.get_uuid().clone();
+    let group2_uuid = group2.get_uuid();
     group2.set_name("group2");
     source_db.root.insert_group(group2).unwrap();
 
@@ -71,7 +71,7 @@ pub(crate) fn create_test_dbs_5() -> (KdbxFile, KdbxFile) {
     let target_db = target.keepass_main_content.as_mut().unwrap();
 
     let mut group1 = Group::with_parent(&target_db.root.root_uuid());
-    let _group1_uuid = group1.get_uuid().clone();
+    let _group1_uuid = group1.get_uuid();
     group1.set_name("group11");
     target_db.root.insert_group(group1).unwrap();
 
@@ -91,7 +91,7 @@ pub(crate) fn create_group(
 
 pub(crate) fn create_entry(keepassfile: &mut KeepassFile, title: &str, group_uuid: &Uuid) -> Entry {
     let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(&group_uuid));
+    let mut entry = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(group_uuid));
     entry.entry_field.update_value(TITLE, title);
     keepassfile.root.insert_entry(entry.clone()).unwrap();
     entry

@@ -519,7 +519,7 @@ impl CsvImport {
         import_options: Option<CsvImportOptions>,
     ) -> Result<CvsHeaderInfo> {
         let import_options =
-            import_options.map_or_else(|| CsvImportOptions::default(), |imp_opt| imp_opt);
+            import_options.map_or_else(CsvImportOptions::default, |imp_opt| imp_opt);
         let mut csv_rdr = import_options.reader_builder().from_path(path.as_ref())?;
 
         let header_row = if csv_rdr.has_headers() {
@@ -530,7 +530,7 @@ impl CsvImport {
                 .map(|(idx, r)| {
                     if r.is_empty() {
                         //"Column" + " " + &idx.to_string()
-                        vec!["Column", &idx.to_string()].join(" ")
+                        ["Column", &idx.to_string()].join(" ")
                     } else {
                         r.to_string()
                     }
@@ -549,7 +549,7 @@ impl CsvImport {
             let v = headers
                 .iter()
                 .enumerate()
-                .map(|(idx, _s)| vec!["Column", &idx.to_string()].join(" "))
+                .map(|(idx, _s)| ["Column", &idx.to_string()].join(" "))
                 .collect::<Vec<_>>();
             // let v = headers.iter().map(|r| r.to_string()).collect::<Vec<_>>();
             // A file without a header row has only generated "Column n" names, so there
@@ -572,7 +572,7 @@ impl CsvImport {
         // v.extend(rows);
 
         let mut mv = NON_HEADER_RECORDS
-            .get_or_init(|| Default::default())
+            .get_or_init(Default::default)
             .lock()
             .unwrap();
         // Wipe any records left over from a previous import before replacing them
@@ -620,7 +620,7 @@ impl CsvImport {
         if let Some(m) = NON_HEADER_RECORDS.get() {
             let data_wows = m.lock().unwrap();
             for r in data_wows.iter() {
-                println!("Data row is {:?}", &r);
+                println!("Data row is {:?}", r);
             }
         }
     }

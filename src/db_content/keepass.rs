@@ -36,17 +36,17 @@ impl KeepassFile {
     // See 'empty_trash' method for additional comments
 
     // TODO: For now we are just delegating to 'root' and need to pass excluded group ids (recycle group id and template group id )
-    pub(crate) fn get_all_entries<'a>(&'a self, exclude: bool) -> Vec<&'a Entry> {
+    pub(crate) fn get_all_entries(&self, exclude: bool) -> Vec<&Entry> {
         self.root.get_all_entries(exclude)
     }
 
     // Collects all entries that are not in recycle bin
-    pub(crate) fn collect_all_active_entries<'a>(&'a self) -> Vec<&'a Entry> {
+    pub(crate) fn collect_all_active_entries(&self) -> Vec<&Entry> {
         self.root
             .collect_all_active_entries(self.root.recycle_bin_uuid())
     }
 
-    pub(crate) fn collect_favorite_entries<'a>(&'a self) -> Vec<&'a Entry> {
+    pub(crate) fn collect_favorite_entries(&self) -> Vec<&Entry> {
         self.root
             .collect_favorite_entries(self.root.recycle_bin_uuid())
     }
@@ -70,16 +70,14 @@ impl KeepassFile {
         &mut self,
         entry_type_uuid: &Uuid,
     ) -> Result<Option<EntryType>> {
-        if self
+        if !self
             .root
-            .custom_entry_type_entries_by_id(entry_type_uuid)
-            .len()
-            != 0
+            .custom_entry_type_entries_by_id(entry_type_uuid).is_empty()
         {
             //error::Error::DataError("Entry type can not be deleted as some entries are of this type")
-            return Err(error::Error::CustomEntryTypeInUse);
+            Err(error::Error::CustomEntryTypeInUse)
         } else {
-            return Ok(self.meta.delete_custom_entry_type_by_id(entry_type_uuid));
+            Ok(self.meta.delete_custom_entry_type_by_id(entry_type_uuid))
         }
     }
 

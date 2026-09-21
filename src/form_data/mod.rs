@@ -87,14 +87,14 @@ impl From<&KdbxFile> for KdbxLoaded {
             }
         }
 
-        let kdbx_loaded = KdbxLoaded {
+        
+
+        KdbxLoaded {
             db_key,
             database_name,
             file_name,
             key_file_name,
-        };
-
-        kdbx_loaded
+        }
     }
 }
 

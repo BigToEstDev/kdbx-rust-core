@@ -38,12 +38,12 @@ impl EntryTypeV1 {
     pub(crate) fn standard_type_by_id(type_id: &Uuid) -> &EntryType {
         match UUID_TO_ENTRY_TYPE_MAP.get(type_id) {
             Some(t) => t,
-            None => &*DEFAULT_ENTRY_TYPE,
+            None => &DEFAULT_ENTRY_TYPE,
         }
     }
 
     pub(crate) fn default_type<'a>() -> &'a EntryType {
-        &*DEFAULT_ENTRY_TYPE
+        &DEFAULT_ENTRY_TYPE
     }
 
     /// Gets all builtin standard section names if the entry type is a standard one. Otherwise an empty vec
@@ -64,7 +64,6 @@ impl EntryTypeV1 {
             et.sections
                 .iter()
                 .flat_map(|s| &s.field_defs)
-                .map(|x| x)
                 .collect::<Vec<&FieldDefV1>>()
         } else {
             vec![]
@@ -256,13 +255,13 @@ impl VersionedEntryType {
                 }
             }
             // As we have removed the built-in fields, a section may be empty and drop them from storing
-            incoming_et.sections.retain(|sec| sec.field_defs.len() != 0);
+            incoming_et.sections.retain(|sec| !sec.field_defs.is_empty());
 
             Some(incoming_et)
         } else {
             // Should not happen. Need to return default to be safe
             // log error
-            Some((&*DEFAULT_ENTRY_TYPE).clone())
+            Some((*DEFAULT_ENTRY_TYPE).clone())
         }
     }
 
@@ -297,7 +296,7 @@ impl VersionedEntryType {
 
                     built_in_section
                         .field_defs
-                        .extend(incoming_section.field_defs.clone().into_iter());
+                        .extend(incoming_section.field_defs.clone());
                 } else {
                     // section is a custom section and move that to the built_in_et (clone of predefined Entrytype)
                     built_in_et.sections.push(incoming_section.clone());
@@ -308,8 +307,8 @@ impl VersionedEntryType {
         } else {
             // Should not happen. Need to return default to be safe
             // log error
-            error!("Unexpected error: The call 'modify_entry_type_after_decoding' failed for the entry type {}", &incoming_entry_type.name);
-            Some((&*DEFAULT_ENTRY_TYPE).clone())
+            error!("Unexpected error: The call 'modify_entry_type_after_decoding' failed for the entry type {}", incoming_entry_type.name);
+            Some((*DEFAULT_ENTRY_TYPE).clone())
         }
     }
 
@@ -415,7 +414,7 @@ where
 {
     let buf = util::base64_decode(input)?;
     let buf = util::decompress(&buf)?;
-    Ok(decoder(&buf)?)
+    decoder(&buf)
 }
 
 // For 'rmp' serialization to work, add any new variant at the end though adding in any place may work
@@ -627,17 +626,17 @@ mod tests {
                 },
             ],
         };
-        entry_types.insert(et3.uuid.clone(), et3);
+        entry_types.insert(et3.uuid, et3);
 
         //let et4 = ENTRY_TYPE_MAP.get(CREDIT_DEBIT_CARD).unwrap();
         let et4 = UUID_TO_ENTRY_TYPE_MAP
             .get(&build_uuid!(entry_type_uuid::CREDIT_DEBIT_CARD))
             .unwrap();
-        entry_types.insert(et4.uuid.clone(), et4.clone());
+        entry_types.insert(et4.uuid, et4.clone());
         entry_types.insert(Uuid::new_v4(), et4.clone());
 
-        entry_types.insert(et1.uuid.clone(), et1);
-        entry_types.insert(et2.uuid.clone(), et2);
+        entry_types.insert(et1.uuid, et1);
+        entry_types.insert(et2.uuid, et2);
 
         entry_types
     }
@@ -691,7 +690,7 @@ mod tests {
         let d = VersionedEntryType::decode_entry_type(&s, &HashMap::default());
         //println!("d is {:?}", &d);
 
-        assert_eq!(&et1 == &d, true);
+        assert_eq!(et1 == d, true);
 
         // let vd = VersionedEntryType::RmpV1(et1.clone());
         // let s = vd.into_name_prefixed_string().unwrap();

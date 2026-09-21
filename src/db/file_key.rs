@@ -125,19 +125,19 @@ impl KeyFileData {
             //     .map(|s| s)
             //     .collect::<Vec<_>>()
             //     .join("");
-            let data_vec = hex::decode(&data)?;
+            let data_vec = hex::decode(data)?;
             let d = crypto::sha256_hash_from_slice(&data_vec)?;
             let h = hex::decode(hash)?;
             // First 4 bytes of hash of the decoded key data should match the checksum hash bytes
-            if &d[..4] != &h {
+            if d[..4] != h {
                 return Err(Error::DataError("Key file checksum failed"));
             }
             debug!(
                 "File key verify_checksum is called for xml based file key and found valid hash"
             );
-            return Ok(data_vec);
+            Ok(data_vec)
         } else {
-            return Err(Error::DataError("Key file invalid key data"));
+            Err(Error::DataError("Key file invalid key data"))
         }
     }
 

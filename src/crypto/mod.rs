@@ -31,7 +31,7 @@ impl ContentCipherId {
         match self {
             ContentCipherId::Aes256 => Ok((constants::uuid::AES256.to_vec(), rn16)),
             ContentCipherId::ChaCha20 => Ok((constants::uuid::CHACHA20.to_vec(), rn12)),
-            _ => return Err(Error::UnsupportedCipher(vec![])),
+            _ => Err(Error::UnsupportedCipher(vec![])),
         }
     }
 
@@ -41,7 +41,7 @@ impl ContentCipherId {
         match self {
             ContentCipherId::Aes256 => Ok((rn32, rn16)),
             ContentCipherId::ChaCha20 => Ok((rn32, rn12)),
-            _ => return Err(Error::UnsupportedCipher(vec![])),
+            _ => Err(Error::UnsupportedCipher(vec![])),
         }
     }
 }

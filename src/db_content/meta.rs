@@ -56,7 +56,7 @@ impl Default for MetaShare {
 impl MetaShare {
     pub fn get_entry_type_by_id(&self, uuid: &Uuid) -> Option<EntryType> {
         let t = self.custom_entry_types_by_id.lock().unwrap();
-        t.get(uuid).map(|e| e.clone())
+        t.get(uuid).cloned()
     }
 
     pub fn history_max_items(&self) -> i32 {
@@ -195,7 +195,7 @@ impl Meta {
             let etypes: HashMap<Uuid, EntryType> =
                 VersionedEntryType::decode_entry_types_by_id(data);
             let mut s = self.meta_share.custom_entry_types_by_id.lock().unwrap();
-            s.extend(etypes.iter().map(|(k, v)| (k.clone(), v.clone())));
+            s.extend(etypes.iter().map(|(k, v)| (*k, v.clone())));
             debug!("Found custom entry types loaded and size is {}", s.len());
         }
     }
@@ -220,14 +220,14 @@ impl Meta {
     }
     pub fn insert_or_update_custom_entry_type(&mut self, entry_type: EntryType) {
         let mut types = self.meta_share.custom_entry_types_by_id.lock().unwrap();
-        types.insert(entry_type.uuid.clone(), entry_type);
+        types.insert(entry_type.uuid, entry_type);
     }
 
     pub fn custom_entry_type_names_by_id(&self) -> Vec<(Uuid, String)> {
         let types = self.meta_share.custom_entry_types_by_id.lock().unwrap();
         types
             .iter()
-            .map(|(k, v)| (k.clone(), v.name.clone()))
+            .map(|(k, v)| (*k, v.name.clone()))
             .collect()
     }
 
@@ -236,7 +236,7 @@ impl Meta {
         F: FnOnce(Vec<&EntryType>) -> R,
     {
         let t = self.meta_share.custom_entry_types_by_id.lock().unwrap();
-        let vals = t.values().map(|v| v).collect();
+        let vals = t.values().collect();
         action(vals)
     }
 
@@ -308,7 +308,7 @@ impl Meta {
             }
 
             if self.maintenance_history_days != other.maintenance_history_days {
-                self.maintenance_history_days = other.maintenance_history_days.clone();
+                self.maintenance_history_days = other.maintenance_history_days;
                 // debug!("-- META: maintenance_history_days is changed");
                 modified = true;
             }
@@ -320,13 +320,13 @@ impl Meta {
             }
 
             if self.entry_template_group != other.entry_template_group {
-                self.entry_template_group = other.entry_template_group.clone();
+                self.entry_template_group = other.entry_template_group;
                 // debug!("-- META: entry_template_group is changed");
                 modified = true;
             }
 
             if self.master_key_changed != other.master_key_changed {
-                self.master_key_changed = other.master_key_changed.clone();
+                self.master_key_changed = other.master_key_changed;
                 // debug!("-- META: master_key_changed is changed");
                 modified = true;
             }

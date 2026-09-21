@@ -111,7 +111,7 @@ impl MainAsyncData {
         let mut timers = self.periodic_timers.lock().unwrap();
 
         // false indicates the timer is not yet cancelled
-        timers.insert(id.clone(), false);
+        timers.insert(id, false);
         id
     }
 
@@ -145,7 +145,7 @@ impl MainAsyncData {
 
     fn sender(&self) -> Option<EntryOtpTx> {
         let t = self.sender.lock().unwrap();
-        (&*t).clone()
+        (*t).clone()
     }
 
     fn remove_sender(&self) {
@@ -200,7 +200,7 @@ impl MainAsyncData {
             }
         }
         EntryOtpTokenReply {
-            entry_uuid: entry_uuid.clone(),
+            entry_uuid: *entry_uuid,
             reply_field_tokens,
         }
     }
@@ -250,7 +250,7 @@ impl MainAsyncData {
             }
         }
         EntryOtpTokenReply {
-            entry_uuid: entry_uuid.clone(),
+            entry_uuid: *entry_uuid,
             reply_field_tokens,
         }
     }
@@ -293,7 +293,7 @@ pub fn start_polling_entry_otp_fields(
     if !main_async_data_store().is_entry_polling_stopped(entry_uuid) {
         error!(
             "Already an otp poll thread is running for the entry uuid {}. No new polling started",
-            &entry_uuid
+            entry_uuid
         );
         return;
     }
@@ -303,7 +303,7 @@ pub fn start_polling_entry_otp_fields(
     // spawn expects a aeg of type : Future + Send + 'static
     async_runtime().spawn(poll_token_generation(
         db_key.to_string(),
-        entry_uuid.clone(),
+        *entry_uuid,
     ));
 }
 
@@ -320,7 +320,7 @@ pub fn stop_polling_entry_otp_fields(entry_uuid: &Uuid) {
 // Called to create a repeat timer that sends a periodic tick
 pub fn start_periodic_timer(period_in_milli_seconds: u64, timer_id: Option<TimerID>) -> TimerID {
     let id = main_async_data_store().init_timer_id(timer_id);
-    async_runtime().spawn(run_periodic_timer(period_in_milli_seconds, id.clone()));
+    async_runtime().spawn(run_periodic_timer(period_in_milli_seconds, id));
     id
 }
 
@@ -328,11 +328,11 @@ pub fn start_periodic_timer(period_in_milli_seconds: u64, timer_id: Option<Timer
 pub fn set_timeout(period_in_milli_seconds: u64, timer_id: Option<TimerID>) -> TimerID {
     debug!(
         "In coming set_timeout period {}, timer_id {:?}",
-        &period_in_milli_seconds, &timer_id
+        period_in_milli_seconds, timer_id
     );
     let id = main_async_data_store().init_timer_id(timer_id);
     // Spawn the timeout
-    async_runtime().spawn(run_specified_timeout(period_in_milli_seconds, id.clone()));
+    async_runtime().spawn(run_specified_timeout(period_in_milli_seconds, id));
 
     id
 }
@@ -381,11 +381,11 @@ async fn send_timer_reply(timer_id: &TimerID) {
     if let Some(tx) = main_async_data_store().sender() {
         let r = tx
             .send(AsyncResponse::Tick(TickReply {
-                timer_id: timer_id.clone(),
+                timer_id: *timer_id,
             }))
             .await;
         if r.is_err() {
-            error!("Unexpected error in sending timer id {}", &timer_id);
+            error!("Unexpected error in sending timer id {}", timer_id);
         }
     }
 }
@@ -414,7 +414,7 @@ async fn run_periodic_timer(period_in_milli_seconds: u64, timer_id: TimerID) {
         time::sleep(time::Duration::from_millis(period_in_milli_seconds)).await;
 
         if main_async_data_store().is_timer_cancelled(&timer_id) {
-            debug!("Timer with id {} is cancelled ", &timer_id);
+            debug!("Timer with id {} is cancelled ", timer_id);
             break;
         }
 
@@ -426,14 +426,14 @@ async fn run_periodic_timer(period_in_milli_seconds: u64, timer_id: TimerID) {
 // async fn is a future
 // await call asynchronously waits for the completion of another operation and doesn’t block the current thread
 async fn poll_token_generation(db_key: String, entry_uuid: Uuid) {
-    debug!("Started polling for entry_uuid {}", &entry_uuid);
+    debug!("Started polling for entry_uuid {}", entry_uuid);
 
     let sender;
     // Lock needs to be dropped by using a block
     // Otherwise, we see the error - future is not `Send` as this value is used across an await
     {
         let tx = main_async_data_store().sender.lock().unwrap();
-        sender = (&*tx).clone();
+        sender = (*tx).clone();
     }
 
     let replys = main_async_data_store().form_first_reply(&db_key, &entry_uuid);
@@ -457,7 +457,7 @@ async fn poll_token_generation(db_key: String, entry_uuid: Uuid) {
         if main_async_data_store().is_entry_polling_stopped(&entry_uuid) {
             debug!(
                 "Polling is stopped for entry {} and exiting the loop",
-                &entry_uuid
+                entry_uuid
             );
             break;
         }
@@ -494,7 +494,7 @@ pub fn start_runtime() {
     if let Err(e) = OKP_TOKIO_RUNTIME.set(Arc::new(runtime)) {
         error!(
             "Setting new tokio runtime in global var resulted in error: {:?}",
-            &e
+            e
         );
     }
 }

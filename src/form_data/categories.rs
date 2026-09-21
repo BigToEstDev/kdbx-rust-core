@@ -124,7 +124,7 @@ pub(crate) fn entry_by_category<'a>(
             if let Ok(group_uuid) = Uuid::parse_str(uuid) {
                 if let Some(g) = kp.root.group_by_id(&group_uuid) {
                     for entry_uuid in &g.entry_uuids {
-                        if let Some(e) = kp.root.entry_by_id(&entry_uuid) {
+                        if let Some(e) = kp.root.entry_by_id(entry_uuid) {
                             entries.push(e);
                         }
                     }
@@ -136,15 +136,13 @@ pub(crate) fn entry_by_category<'a>(
         EntryCategory::EntryTypeUuid(uuid) => kp
             .collect_all_active_entries()
             .iter()
-            .filter(|e| &e.entry_field.entry_type.uuid == uuid)
-            .map(|e| *e)
+            .filter(|e| &e.entry_field.entry_type.uuid == uuid).copied()
             .collect::<Vec<_>>(),
 
         EntryCategory::Tag(name) => kp
             .collect_all_active_entries()
             .iter()
-            .filter(|e| split_tags(&e.tags).contains(&name))
-            .map(|e| *e)
+            .filter(|e| split_tags(&e.tags).contains(name)).copied()
             .collect::<Vec<_>>(),
     }
 }
@@ -168,12 +166,12 @@ fn type_name_categories(
             icon_id: 0,
             // Need to get the icon name from EntryType struct - mostly for Custom Entry Types
             icon_name: if let Some(meta) = meta_opt {
-                meta.get_custom_entry_type_by_id(&uuid)
+                meta.get_custom_entry_type_by_id(uuid)
                     .map_or(None, |e| e.icon_name)
             } else {
                 None
             },
-            entry_type_uuid: Some(uuid.clone()),
+            entry_type_uuid: Some(*uuid),
             group_uuid: None,
             parent_group_uuid: None,
             tag_id: None,
@@ -249,7 +247,7 @@ fn group_category_details(keepass_file: &KeepassFile) -> Vec<CategoryDetail> {
                 icon_id: group.icon_id,
                 icon_name: None,
                 entry_type_uuid: None,
-                group_uuid: Some(group.uuid.clone()),
+                group_uuid: Some(group.uuid),
                 parent_group_uuid: Some(group.parent_group_uuid()),
                 tag_id: None,
             })
@@ -286,7 +284,7 @@ fn tag_category_details(keepass_file: &KeepassFile) -> Vec<CategoryDetail> {
                     continue;
                 }
                 if let Some(c) = acc.get_mut(&t) {
-                    c.entries_count = c.entries_count + 1;
+                    c.entries_count += 1;
                     //acc.insert(t, c + 1);
                 } else {
                     let d = CategoryDetail {

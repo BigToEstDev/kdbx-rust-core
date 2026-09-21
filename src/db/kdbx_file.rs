@@ -93,7 +93,7 @@ impl KdbxFile {
     pub fn set_file_key(&mut self, key_file_name: Option<&str>) -> Result<()> {
         debug!(
             "set_file_key is called with key_file_name: {:?}",
-            &key_file_name
+            key_file_name
         );
 
         // We need not do anything if the current db does not use key file and the no file name is selected
@@ -139,7 +139,7 @@ impl KdbxFile {
         debug!(
             "set_credentials is called with password nil?: {}, key_file_name: {:?}",
             password.is_none(),
-            &key_file_name
+            key_file_name
         );
 
         self.file_key = FileKey::from(key_file_name)?;
@@ -268,7 +268,7 @@ impl KdbxFile {
             // the dropped object graph (Rust does not zero on drop).
             framed.zeroize();
             xml_bytes.zeroize();
-            for (_h, data) in attachments.iter_mut() {
+            for data in attachments.values_mut() {
                 data.zeroize();
             }
             kp.zeroize_sensitive_content();
@@ -587,9 +587,7 @@ impl MainHeader {
             }
 
             _ => {
-                return Err(Error::UnsupportedKdfAlgorithm(format!(
-                    "Found invalid KdfAlgorithm during writing"
-                )));
+                return Err(Error::UnsupportedKdfAlgorithm("Found invalid KdfAlgorithm during writing".to_string()));
             }
         }
         //IMPORTANT: Need to mark the end of Variant Dict with just END type byte
@@ -600,7 +598,7 @@ impl MainHeader {
     pub(crate) fn write_bytes<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
         write_header_with_size!(writer, header_type::CIPHER_ID, &self.cipher_id);
         writer.write_all(&[header_type::COMPRESSION_FLAGS])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
+        writer.write_all(&4_u32.to_le_bytes())?;
         writer.write_all(&self.compression_flag.to_le_bytes())?;
 
         write_header_with_size!(writer, header_type::MASTER_SEED, &self.master_seed);
@@ -629,8 +627,8 @@ impl MainHeader {
 
         //End of header [13, 10, 13, 10]
         writer.write_all(&[header_type::END_OF_HEADER])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
-        writer.write_all(&vec![13, 10, 13, 10])?; //End Data
+        writer.write_all(&4_u32.to_le_bytes())?;
+        writer.write_all(&[13, 10, 13, 10])?; //End Data
 
         Ok(())
     }
@@ -689,7 +687,7 @@ impl InnerHeader {
         writer: &mut W,
     ) -> Result<()> {
         writer.write_all(&[inner_header_type::STREAM_ID])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
+        writer.write_all(&4_u32.to_le_bytes())?;
         writer.write_all(&self.stream_cipher_id.to_le_bytes())?;
 
         write_header_with_size!(
@@ -716,7 +714,7 @@ impl InnerHeader {
                 self.entry_attachments
                     .hash_index_ref
                     .insert(h, writen_index);
-                writen_index = writen_index + 1;
+                writen_index += 1;
             }
             // else {
             //     println!("Hash {} is already found at index {:?} and skipping writing to binary data", &h, hidx);
@@ -727,7 +725,7 @@ impl InnerHeader {
         writer.write_all(&[inner_header_type::END_OF_HEADER])?;
 
         // [0, 0, 0, 0] => 0 bytes size - No inner header data for end marker
-        writer.write_all(&vec![0u8; 4])?;
+        writer.write_all(&[0u8; 4])?;
 
         Ok(())
     }

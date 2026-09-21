@@ -67,11 +67,11 @@ pub fn encode_datetime(date: &NaiveDateTime) -> String {
 
 #[allow(dead_code)]
 pub fn now_local() -> NaiveDateTime {
-    let now = chrono::Local::now()
+    
+    chrono::Local::now()
         .naive_local()
         .with_nanosecond(0)
-        .unwrap();
-    now
+        .unwrap()
 }
 
 pub fn now_utc() -> NaiveDateTime {
@@ -144,7 +144,7 @@ pub fn _format_utc_naivedatetime_to_local(
 ) -> String {
     // First we need to convert the NaiveDateTime to represent UTC datetime
     let utc_date_time: DateTime<Utc> = Utc
-        .from_local_datetime(&naive)
+        .from_local_datetime(naive)
         .single()
         .map_or(Utc::now(), |d| d);
 
@@ -162,7 +162,7 @@ pub fn _format_utc_naivedatetime_to_local(
 pub fn add_years<DateTime: Datelike>(old_dt: DateTime, year: i32) -> DateTime {
     let dt = old_dt.with_year(old_dt.year() + year);
     if let Some(d) = dt {
-        return d;
+        d
     } else {
         old_dt
     }
@@ -179,13 +179,13 @@ pub fn add_months<DateTime: Datelike>(old_dt: DateTime, months: u32) -> DateTime
         let years = total_months / 12;
         let rem_months = total_months % 12;
         let ndt = add_years(old_dt, years as i32);
-        return add_months(ndt, rem_months);
+        add_months(ndt, rem_months)
     } else {
         let dt = old_dt.with_month(total_months);
         if let Some(d) = dt {
-            return d;
+            d
         } else {
-            return old_dt;
+            old_dt
         }
     }
 }
@@ -193,7 +193,7 @@ pub fn add_months<DateTime: Datelike>(old_dt: DateTime, months: u32) -> DateTime
 pub fn decompress(compressed_data: &[u8]) -> Result<Vec<u8>> {
     let mut writer = Vec::new();
     let mut decoder = flate2::write::GzDecoder::new(writer);
-    decoder.write_all(&compressed_data)?;
+    decoder.write_all(compressed_data)?;
     decoder.try_finish()?;
     writer = decoder.finish()?;
 
@@ -696,13 +696,13 @@ mod tests {
     fn verify_system_time_secs() {
         use std::time::SystemTime;
         let s1 = SystemTime::now();
-        println!("S1 is  {:?}", &s1);
+        println!("S1 is  {:?}", s1);
 
         let secs = system_time_to_seconds(s1);
-        println!("Secs {}", &secs);
+        println!("Secs {}", secs);
 
         let s2 = super::seconds_to_system_time(secs);
-        println!("S2 is  {:?}", &s2);
+        println!("S2 is  {:?}", s2);
 
         assert_eq!(
             s1.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn verify_compress_decompress() {
         let v1 = "Test message ".as_bytes();
-        let c_v1 = compress(&v1).unwrap();
+        let c_v1 = compress(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
         assert_eq!(d_v1 == v1, true);
@@ -729,7 +729,7 @@ mod tests {
     #[test]
     fn verify_compress_with_options() {
         let v1 = "Test message ".as_bytes();
-        let c_v1 = compress_with_fixed_timestamp(&v1).unwrap();
+        let c_v1 = compress_with_fixed_timestamp(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
         assert_eq!(d_v1 == v1, true);
@@ -738,7 +738,7 @@ mod tests {
         use std::{thread, time};
         let ten_millis = time::Duration::from_millis(1000);
         thread::sleep(ten_millis);
-        let c_v2 = compress_with_fixed_timestamp(&v1).unwrap();
+        let c_v2 = compress_with_fixed_timestamp(v1).unwrap();
         assert_eq!(c_v1 == c_v2, true);
     }
 
@@ -746,7 +746,7 @@ mod tests {
     fn hex_str_test() {
         let b: Vec<u8> = vec![12, 3, 44, 7, 6, 22, 34];
         use hex;
-        println!("{:x?}", &b);
+        println!("{:x?}", b);
         assert_eq!("0c032c07061622", hex::encode(&b));
         assert_eq!(&b, &hex::decode("0c032c07061622").unwrap());
     }

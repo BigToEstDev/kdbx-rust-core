@@ -128,7 +128,7 @@ impl ReferenceFieldParsed {
         entry_place_holder_parser.depth_counter = depth_counter;
 
         // Find the wanted field in the passed entry
-        let Some(kv) = entry.find_kv_field_value(&self.wanted_field.field_name()) else {
+        let Some(kv) = entry.find_kv_field_value(self.wanted_field.field_name()) else {
             return None;
         };
 
@@ -171,9 +171,9 @@ impl ReferenceFieldParsed {
 
         format!(
             "{{REF:{}@{}:{}}}", //"REF:{}@{}:{}",
-            &self.wanted_field.as_char(),
-            &self.search_in_field.as_char(),
-            &self.text_or_uuid
+            self.wanted_field.as_char(),
+            self.search_in_field.as_char(),
+            self.text_or_uuid
         )
     }
 
@@ -225,7 +225,7 @@ impl ReferenceFieldParsed {
         } else {
             // This happens if the uuid string extracted is not a valid Uuid
             log::error!("Invalid UUID found in the reference");
-            format!("Invalid-{}", &self.text_or_uuid)
+            format!("Invalid-{}", self.text_or_uuid)
         }
     }
 }
@@ -290,11 +290,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
 
             entry_fields_with_place_holders.retain(
                 |k, _v| {
-                    if modified.contains(k) {
-                        true
-                    } else {
-                        false
-                    }
+                    modified.contains(k)
                 },
             );
         }
@@ -320,7 +316,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
                 }
             }
         }
-        return (parsed_fields, kvs);
+        (parsed_fields, kvs)
     }
 
     pub(crate) fn modified_fields(&self) -> Vec<String> {
@@ -353,7 +349,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
                     }
                     Err(e) => {
                         // If there is any parsing error,just log it
-                        log::error!("Parsing failed for the entry field {} with error {}", &k, e);
+                        log::error!("Parsing failed for the entry field {} with error {}", k, e);
                     }
                 }
             }
@@ -367,7 +363,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
         if depth_counter > MAX_RECURSIVE_DEPTHS {
             log::debug!(
                 "Parse depth counter exceed and returning {} for current field {:?}",
-                &input,
+                input,
                 self.current_field_name
             );
             return Ok(input);
@@ -388,7 +384,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
                 log::debug!("Parsing error {}", e);
                 Err(error::Error::UnexpectedError(format!(
                     "Parsing of string {} failed: error {} ",
-                    &input, e
+                    input, e
                 )))
             }
         }
@@ -411,7 +407,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
         } else {
             // As no hashmap entry is found, we continue parse the right side
             if let Ok(parsed_right_val) = self.parse(right.to_string(), depth_counter + 1) {
-                Ok(format!("{}{{{}}}{}", left, name, &parsed_right_val))
+                Ok(format!("{}{{{}}}{}", left, name, parsed_right_val))
             } else {
                 Ok(format!("{}{{{}}}{}", left, name, right))
             }
@@ -439,7 +435,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
                     let right_val = self
                         .parse(right.to_string(), depth_counter + 1)
                         .unwrap_or(String::default());
-                    let next_val = format!("{}{}{}", left, &ref_value, right_val);
+                    let next_val = format!("{}{}{}", left, ref_value, right_val);
                     Ok(next_val)
                 } else {
                     Ok(format!("{}{}{}", left, name, right))
@@ -538,11 +534,11 @@ fn field_parser<'a>() -> impl FnMut(&'a str) -> IResult<&'a str, FieldNameResolv
 
 // Returns a parser which returns 'Completed' enum variant when there is no {...} in the passed str
 fn no_field_parser<'a>() -> impl FnMut(&'a str) -> IResult<&'a str, FieldNameResolver<'a>> {
-    map(rest, |x| FieldNameResolver::Completed(x))
+    map(rest, FieldNameResolver::Completed)
 }
 
 // Parses the input string which starts with REF
-fn parse_reference_holder<'a>(input: &'a str) -> IResult<&'a str, ReferenceFieldParsed> {
+fn parse_reference_holder(input: &str) -> IResult<&str, ReferenceFieldParsed> {
     let r = map(
         tuple((
             delimited(
@@ -563,7 +559,7 @@ fn parse_reference_holder<'a>(input: &'a str) -> IResult<&'a str, ReferenceField
 
 // Parses a string input for '{' and '}'
 // Returns true if there is a match {..}
-fn check_place_holder_marker<'a>(input: &'a str) -> IResult<&'a str, bool> {
+fn check_place_holder_marker(input: &str) -> IResult<&str, bool> {
     map(
         tuple((take_until("{"), tag("{"), take_until("}"), tag("}"), rest)),
         |_| true,
@@ -736,7 +732,7 @@ mod tests {
 
         println!(
             "\n parsed ef {:?} \n\n modified fields {:?}",
-            &ef.entry_fields, &ef.modified_fields
+            ef.entry_fields, ef.modified_fields
         );
 
         // No field value is changed
@@ -815,7 +811,7 @@ mod tests {
 
         println!(
             "\n parsed ef {:?} \n\n modified fields {:?}",
-            &ef.entry_fields, &ef.modified_fields
+            ef.entry_fields, ef.modified_fields
         );
 
         assert_eq!(
@@ -839,7 +835,7 @@ mod tests {
 
         println!(
             "\n parsed ef {:?} \n\n modified fields {:?}",
-            &ef.entry_fields, &ef.modified_fields
+            ef.entry_fields, ef.modified_fields
         );
 
         // USERNAME includes value from 'CUSTOM FIELD1' which is 'Value of one'
@@ -865,7 +861,7 @@ mod tests {
 
         println!(
             "\n parsed ef {:?} \n\n modified fields {:?}",
-            &ef.entry_fields, &ef.modified_fields
+            ef.entry_fields, ef.modified_fields
         );
 
         // The standard field's own value is substituted in for {URL}

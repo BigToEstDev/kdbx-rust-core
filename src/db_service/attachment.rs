@@ -35,7 +35,7 @@ pub fn upload_entry_attachment(db_key: &str, full_file_name: &str) -> Result<Att
         .and_then(|x| x.to_str())
         .unwrap_or("No Attachment Name");
 
-    read_entry_attachment(db_key, &name, &mut file)
+    read_entry_attachment(db_key, name, &mut file)
 
     // call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
     //     let mut buf = vec![];
@@ -90,7 +90,7 @@ pub fn save_attachment_as_temp_file(
     // TODO: Generate some random file name ?
     path.push(name);
 
-    debug!("Temp file for attachment is {:?}", &path);
+    debug!("Temp file for attachment is {:?}", path);
 
     let mut file = std::fs::File::create(path.clone())?;
 
@@ -143,9 +143,9 @@ pub fn save_attachment_to_writter<W: Write>(
 
     if let Some(v) = data {
         writer.write_all(&v)?;
-        return Ok(());
+        Ok(())
     } else {
-        return Err(Error::UnexpectedError("No valid data found".into()));
+        Err(Error::UnexpectedError("No valid data found".into()))
     }
 }
 
@@ -154,6 +154,6 @@ pub fn remove_app_temp_dir_content() -> Result<()> {
     let mut path = env::temp_dir();
     path.push("okp_cache");
     let r = util::remove_dir_contents(&path);
-    log::info!("Removed the cache dir {:?}", &path.to_string_lossy());
+    log::info!("Removed the cache dir {:?}", path.to_string_lossy());
     r
 }

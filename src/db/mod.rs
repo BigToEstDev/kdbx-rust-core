@@ -174,7 +174,7 @@ impl AttachmentSet {
 
     fn insert_or_update_with_attachmentset(&mut self, other: &AttachmentSet) {
         other.attachments.iter().for_each(|(k, v)| {
-            self.attachments.insert(k.clone(), v.clone());
+            self.attachments.insert(*k, v.clone());
         });
     }
 
@@ -302,7 +302,7 @@ impl SecuredDatabaseKeys {
         // Encrypt all previously calculated hashes
 
         if let Some(pw) = &self.password_hash {
-            self.password_hash = Some(kc.encrypt(&pw)?);
+            self.password_hash = Some(kc.encrypt(pw)?);
         }
 
         if let Some(file_data) = &self.key_file_data_hash {
@@ -407,8 +407,8 @@ impl SecuredDatabaseKeys {
                 let phash = crypto::sha256_hash_from_slice(p.as_bytes())?;
                 let fhash = f.content_hash();
                 let data = vec![&phash, &fhash];
-                let final_hash = crypto::sha256_hash_vec_vecs(&data)?;
-                final_hash
+                
+                crypto::sha256_hash_vec_vecs(&data)?
             }
             (Some(p), None) => {
                 let phash = crypto::sha256_hash_from_slice(p.as_bytes())?;
@@ -575,7 +575,7 @@ impl SecureKeyInfo {
 // }
 
 pub fn open_db_file(db_file_name: &str) -> Result<BufReader<File>> {
-    let file = match File::open(&db_file_name) {
+    let file = match File::open(db_file_name) {
         Ok(f) => f,
         Err(e) => {
             return Err(Error::DbFileIoError(
@@ -649,7 +649,7 @@ pub fn write_db<W: Write + Read + Seek>(buff: &mut W, kdbx_file: &mut KdbxFile) 
         return Err(Error::DbLocked);
     }
     let mut w = KdbxFileWriter::new(buff, kdbx_file);
-    let _wr = w.write()?;
+    w.write()?;
     Ok(())
 }
 
@@ -784,7 +784,7 @@ pub fn write_kdbx_file_with_backup_file(
             read_and_verify_db_file(kdbx_file)?;
         }
 
-        std::fs::copy(&b, kdbx_file.get_database_file_name())?;
+        std::fs::copy(b, kdbx_file.get_database_file_name())?;
 
         // New checksum for the next time use
         kdbx_file.checksum_hash = calculate_db_file_checksum(&mut backup_file)?;

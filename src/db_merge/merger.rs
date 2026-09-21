@@ -116,7 +116,7 @@ impl<'a> Merger<'a> {
         target_kdbx.insert_or_update_with_attachmentset(other);
 
         Self::from(
-            &source_kdbx.keepass_main_content.as_ref().unwrap(),
+            source_kdbx.keepass_main_content.as_ref().unwrap(),
             target_kdbx.keepass_main_content.as_mut().unwrap(),
         )
     }
@@ -253,8 +253,8 @@ impl<'a> Merger<'a> {
                 self.target_db.root.update_group(g, true);
 
                 self.record_group_updated(
-                    &source_root_group.name(),
-                    source_root_group.get_uuid().clone(),
+                    source_root_group.name(),
+                    source_root_group.get_uuid(),
                 );
             }
 
@@ -418,7 +418,7 @@ impl<'a> Merger<'a> {
                     self.target_db.root.insert_group(group)?;
 
                     self.record_group_added(
-                        &source_child_group.name(),
+                        source_child_group.name(),
                         source_child_group.get_uuid(),
                     );
                 }
@@ -448,7 +448,7 @@ impl<'a> Merger<'a> {
         self.remap_group_icon(&mut g);
         self.target_db.root.update_group(g, true);
 
-        self.record_group_updated(&source_group.name(), source_group.get_uuid());
+        self.record_group_updated(source_group.name(), source_group.get_uuid());
 
         Ok(())
     }
@@ -479,7 +479,7 @@ impl<'a> Merger<'a> {
                     // && !self.different_databases
                     {
                         let (title, entry_uuid) =
-                            (target_entry.title(), target_entry.get_uuid().clone());
+                            (target_entry.title(), target_entry.get_uuid());
 
                         self.target_db
                             .root
@@ -662,12 +662,12 @@ impl<'a> Merger<'a> {
 
         for deleted @ DeletedObject { uuid, .. } in merged_deleted_objects_m.values() {
             // Collect all groups in DeletedObject that are also found in the merged target db
-            if let Some(group) = self.target_db.root.group_by_id(&uuid) {
+            if let Some(group) = self.target_db.root.group_by_id(uuid) {
                 deleted_object_groups.push((group.get_uuid(), group.last_modification_time()));
                 continue;
             }
             // Collect all entries in DeletedObject that are also found in the merged target db
-            if let Some(entry) = self.target_db.root.entry_by_id(&uuid) {
+            if let Some(entry) = self.target_db.root.entry_by_id(uuid) {
                 deleted_object_entries.push((entry.get_uuid(), entry.last_modification_time()));
                 continue;
             }

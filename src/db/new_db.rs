@@ -46,7 +46,7 @@ impl NewDatabase {
     // Creates a blank database with some intial values. The database is not yet saved
     pub fn create(&self) -> Result<KdbxFile> {
         let file_key = match &self.key_file_name {
-            Some(n) if !n.trim().is_empty() => Some(FileKey::open(&n)?),
+            Some(n) if !n.trim().is_empty() => Some(FileKey::open(n)?),
             Some(_) | None => None,
         };
 
@@ -86,7 +86,7 @@ impl NewDatabase {
         debug!(
             "New database create: password nil? {}, file name {:?}",
             self.password.is_none(),
-            &self.key_file_name
+            self.key_file_name
         );
 
         let mut secured_database_keys =

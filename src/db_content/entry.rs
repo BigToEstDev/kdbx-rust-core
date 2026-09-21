@@ -51,7 +51,7 @@ impl EntryField {
             kvs.push(KeyValue {
                 key: f.into(),
                 value: String::default(),
-                protected: if f == PASSWORD { true } else { false }, // make it true for Password
+                protected: f == PASSWORD, // make it true for Password
                 data_type: FieldDataType::default(),
             });
         }
@@ -339,7 +339,7 @@ impl Entry {
         // custom entry types can be considered
         if let Some(b64_uuid) = self.custom_data.get_item_value(OKP_ENTRY_TYPE) {
             let uuid = util::decode_uuid(b64_uuid).map_or(Uuid::default(), |u| u);
-            debug!("Entry type uuid from custom data is {:?} ", &uuid);
+            debug!("Entry type uuid from custom data is {:?} ", uuid);
             debug!(
                 "And will look for entry type from the existing standard list or user generated custom entry type list"
             );
@@ -347,7 +347,7 @@ impl Entry {
                 debug!("Found user created custom entry type {:?} ", et);
                 et
             } else {
-                debug!("No user created entry type found and looking for a standard type with uuid {} in builtin standard types ", &uuid);
+                debug!("No user created entry type found and looking for a standard type with uuid {} in builtin standard types ", uuid);
                 EntryType::standard_type_by_id(&uuid).clone()
             }
         } else if let Some(data) = self.custom_data.get_item_value(OKP_ENTRY_TYPE_DATA) {
@@ -440,9 +440,9 @@ impl Entry {
             } else {
                 // It is a custom entry type, but no new field added and just the custom entry type uuid is inserted in the custom data
                 let b64_uuid = &util::encode_uuid(&self.entry_field.entry_type.uuid);
-                log::debug!("As there is no change to custom entry type info, only type's uuid as b64 str {} is saved", &b64_uuid);
+                log::debug!("As there is no change to custom entry type info, only type's uuid as b64 str {} is saved", b64_uuid);
                 self.custom_data
-                    .insert_item(Item::from_kv(OKP_ENTRY_TYPE, &b64_uuid));
+                    .insert_item(Item::from_kv(OKP_ENTRY_TYPE, b64_uuid));
             }
         } else if self
             .entry_field
@@ -460,7 +460,7 @@ impl Entry {
             if EntryType::default_type().uuid != self.entry_field.entry_type.uuid {
                 log::debug!(
                     "The entry uses a standard entry type which is not Login and the uuid b64 {} is saved",
-                    &util::encode_uuid(&self.entry_field.entry_type.uuid)
+                    util::encode_uuid(&self.entry_field.entry_type.uuid)
                 );
                 self.custom_data.insert_item(Item::from_kv(
                     OKP_ENTRY_TYPE,
@@ -515,7 +515,7 @@ impl Entry {
                 bv.index_ref = *idx;
             } else {
                 println!("Error: Index ref for the attachment with hash {} and name {} of entry uuuid {:?} is not found after writing to inner header", 
-                &bv.data_hash, &bv.key, &self.uuid);
+                bv.data_hash, bv.key, self.uuid);
             }
         }
         // We call also the histories entries.
@@ -745,7 +745,6 @@ impl Entry {
             histories = histories
                 .into_iter()
                 .skip(remove_count)
-                .map(|e| e)
                 .collect();
             debug!("Removed {} history items", { remove_count });
         }
@@ -768,7 +767,7 @@ impl Entry {
         let he = self.history.entries.get(index as usize).cloned();
         he.map(|mut e1| {
             // Need to set the appropriate group uuid to the history entry
-            e1.parent_group_uuid = self.parent_group_uuid.clone();
+            e1.parent_group_uuid = self.parent_group_uuid;
             e1.meta_share = Arc::clone(&self.meta_share);
             // Set the history entry's entry_type
             Entry::replace_entry_type_index_by_type_data(&mut e1, &self.encoded_entry_types(true));
@@ -782,7 +781,7 @@ impl Entry {
             let e = self.history.entries.remove(idx); // e is the deleted history entry
             let idx_opt = e.custom_data.get_item_value(OKP_ENTRY_TYPE_DATA_INDEX);
             if let Some(idx_s) = idx_opt {
-                let mut encoded_ets = Entry::encoded_entry_types(&self, false);
+                let mut encoded_ets = Entry::encoded_entry_types(self, false);
                 // Do the following if there is no other history entry has the same entry type index and
                 // the index is not the same as the current entry index
                 if Some(encoded_ets.len().to_string().as_str()) != idx_opt
@@ -932,8 +931,7 @@ impl Entry {
                 // Create new encoded_entry_types without the current entry type
                 let mut encoded_entry_types: Vec<String> = types_list
                     .iter()
-                    .filter(|s| *s != et)
-                    .map(|s| s.clone())
+                    .filter(|s| *s != et).cloned()
                     .collect(); //vec![];
 
                 self.history.entries.iter_mut().for_each(|he| {
@@ -962,7 +960,7 @@ impl Entry {
                 // unwrap will not fail as he_encoded_et_str is found in encoded_entry_types
                 let index = encoded_entry_types
                     .iter()
-                    .position(|x| x == &he_encoded_et_str)
+                    .position(|x| x == he_encoded_et_str)
                     .unwrap();
                 //debug!("Index of history type data is {} and will be set as value of  OKP_ENTRY_TYPE_DATA_INDEX", index);
                 hist_entry

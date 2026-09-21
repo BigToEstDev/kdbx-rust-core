@@ -162,8 +162,7 @@ impl OtpData {
     pub fn from_key(encoded_secret: &str) -> Result<OtpData> {
         let space_removed = strip_spaces(encoded_secret).to_uppercase();
         if space_removed.is_empty() {
-            return Err(Error::UnexpectedError(format!(
-                "Decoding failed as secret code entered is empty. Requires US-ASCII uppercase letters and digits"))) ;
+            return Err(Error::UnexpectedError("Decoding failed as secret code entered is empty. Requires US-ASCII uppercase letters and digits".to_string())) ;
         }
 
         Ok(OtpData {
@@ -275,7 +274,7 @@ impl OtpData {
                     let param_issuer: String = value.into();
 
                     if issuer.is_some() && param_issuer.as_str() != issuer.as_ref().unwrap() {
-                        return Err(Error::OtpUrlParseError(format!("Issuer mismatch")));
+                        return Err(Error::OtpUrlParseError("Issuer mismatch".to_string()));
                     }
                     issuer = Some(param_issuer);
                 }
@@ -515,7 +514,7 @@ mod tests {
         init_test_logging();
         let data = test_rfc_values();
 
-        for v in data.get("SHA1").unwrap().iter().into_iter() {
+        for v in data.get("SHA1").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA1, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),
@@ -530,7 +529,7 @@ mod tests {
     fn verify_totp_sha256_with_test_vectors() {
         let data = test_rfc_values();
 
-        for v in data.get("SHA256").unwrap().iter().into_iter() {
+        for v in data.get("SHA256").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA256, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),
@@ -545,7 +544,7 @@ mod tests {
     fn verify_totp_sha512_with_test_vectors() {
         let data = test_rfc_values();
 
-        for v in data.get("SHA512").unwrap().iter().into_iter() {
+        for v in data.get("SHA512").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA512, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),

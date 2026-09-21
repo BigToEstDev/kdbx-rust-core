@@ -209,10 +209,9 @@ fn main() {
     common::init_key_main_store();
 
     println!(
-        "runs: {} warmup + {} measured | flate2 zlib feature: {}",
+        "runs: {} warmup + {} measured | flate2 zlib feature: см. Cargo.toml",
         WARMUP_RUNS,
-        MEASURED_RUNS,
-        "см. Cargo.toml"
+        MEASURED_RUNS
     );
     println!();
 
