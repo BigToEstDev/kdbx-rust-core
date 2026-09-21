@@ -11,7 +11,7 @@
 
 mod common;
 
-use onekeepass_core::db_service::{self, DbSettings, NewDatabase};
+use onekeepass_core::db_service::{self, DbSettings, Error, NewDatabase};
 
 const PASSWORD: &str = "save-truncates-1234";
 // Несжимаемое имя такого размера делает старый файл заметно больше нового
@@ -171,4 +171,39 @@ fn save_as_over_existing_file_truncates_it() {
 
     assert_no_tail(&target, expected, big_len);
     cleanup(&target, &[&db_key, &target]);
+}
+
+// Генерация ключевого файла поверх существующего молча уничтожала старый ключ — база,
+// закрытая им, больше не открывалась. Теперь существующий файл не трогается, решение
+// о перезаписи — за UI.
+#[test]
+fn generate_key_file_refuses_to_overwrite_existing_file() {
+    common::init();
+    let key_file = temp_path("key_exists", "keyx");
+    let old_key = b"existing key file content that must survive";
+    std::fs::write(&key_file, old_key).unwrap();
+
+    let result = db_service::generate_key_file(&key_file);
+
+    let kind = match result {
+        Err(Error::Io(e)) => e.kind(),
+        other => panic!("ожидалась ошибка ввода-вывода, получено {:?}", other),
+    };
+    let content = std::fs::read(&key_file).unwrap();
+    let _ = std::fs::remove_file(&key_file);
+    assert_eq!(kind, std::io::ErrorKind::AlreadyExists);
+    assert_eq!(content, old_key, "существующий ключевой файл изменён");
+}
+
+#[test]
+fn generate_key_file_creates_new_file() {
+    common::init();
+    let key_file = temp_path("key_new", "keyx");
+    let _ = std::fs::remove_file(&key_file);
+
+    db_service::generate_key_file(&key_file).unwrap();
+
+    let content = std::fs::read_to_string(&key_file).unwrap();
+    let _ = std::fs::remove_file(&key_file);
+    assert!(content.contains("<KeyFile>"), "не XML-ключ: {}", content);
 }

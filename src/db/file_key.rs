@@ -55,10 +55,13 @@ impl FileKey {
         self.content_hash.clone()
     }
 
+    // Never overwrites: an existing file may be the key of another database, and replacing it
+    // locks that database for good. Fails with io::ErrorKind::AlreadyExists; asking the user
+    // to confirm an overwrite is up to the UI
     pub fn create_xml_key_file(key_file_name: &str) -> Result<()> {
         let mut file_buf = OpenOptions::new()
             .write(true)
-            .create(true)
+            .create_new(true)
             .open(key_file_name)?;
 
         Self::write_xml(&mut file_buf)
