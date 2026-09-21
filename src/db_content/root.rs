@@ -189,6 +189,15 @@ impl Root {
         }
     }
 
+    // Trims the history of every entry to the given limits. Returns true if any version was removed
+    pub(crate) fn maintain_all_histories(&mut self, max_items: i32, max_size: i64) -> bool {
+        let mut removed = false;
+        for entry in self.all_entries.values_mut() {
+            removed |= entry.maintain_history(max_items, max_size);
+        }
+        removed
+    }
+
     // Used by db_service::io::copy_and_write_autofill_ready_db, which is compiled only under
     // #[cfg(target_os = "ios")] - hence dead_code on every other target
     #[allow(dead_code)]

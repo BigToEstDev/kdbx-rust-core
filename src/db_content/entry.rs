@@ -773,6 +773,15 @@ impl Entry {
         bytes + char_count * 2
     }
 
+    // Applies history limits to this entry's current history (KeePass PwEntry.MaintainBackups).
+    // The limits are passed in: entries brought in by a merge may still share the source's MetaShare.
+    // Returns true if versions were removed
+    pub(crate) fn maintain_history(&mut self, max_items: i32, max_size: i64) -> bool {
+        let before = self.history.entries.len();
+        Self::trim_histories(&mut self.history.entries, max_items, max_size);
+        self.history.entries.len() != before
+    }
+
     // KeePass semantics: a negative limit means no limit; the count is applied first, then the size;
     // the version removed is the one with the oldest last modification time, not the first in the list
     // (after a merge the list is not in time order)

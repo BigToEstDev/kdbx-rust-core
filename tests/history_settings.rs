@@ -7,7 +7,9 @@
 
 mod common;
 
+use onekeepass_core::db_content;
 use onekeepass_core::db_service::{self, DbSettings, NewDatabase};
+use uuid::Uuid;
 
 const PASSWORD: &str = "history-settings-1234";
 
@@ -130,4 +132,50 @@ fn unlimited_history_limits_survive_save_and_reopen() {
 
     cleanup(&db_key);
     assert_eq!(after_reopen, (-1, -1));
+}
+
+// Login entry in the root group; returns its uuid
+fn add_entry(db_key: &str, title: &str) -> Uuid {
+    let root_uuid = db_service::groups_summary_data(db_key).unwrap().root_uuid;
+    let login = db_content::standard_type_uuid_by_name("Login");
+    let form = db_service::new_entry_form_data_by_id(db_key, login, Some(&root_uuid)).unwrap();
+    let mut v = serde_json::to_value(&form).unwrap();
+    let uuid = Uuid::parse_str(v["uuid"].as_str().unwrap()).unwrap();
+    v["title"] = serde_json::json!(title);
+    db_service::insert_entry_from_form_data(db_key, serde_json::from_value(v).unwrap()).unwrap();
+    uuid
+}
+
+// Every update puts the previous state into the entry history
+fn update_title(db_key: &str, entry_uuid: &Uuid, title: &str) {
+    let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
+    let mut v = serde_json::to_value(&form).unwrap();
+    v["title"] = serde_json::json!(title);
+    db_service::update_entry_from_form_data(db_key, serde_json::from_value(v).unwrap()).unwrap();
+}
+
+fn history_len(db_key: &str, entry_uuid: &Uuid) -> usize {
+    db_service::history_entries_summary(db_key, entry_uuid)
+        .unwrap()
+        .len()
+}
+
+// KeePass applies new limits to all entries right away (PwDatabase.MaintainBackups after the
+// settings dialog), not only to entries edited later
+#[test]
+fn lowering_history_limit_trims_existing_entries() {
+    let db_key = temp_path("trim");
+    create_db(&db_key);
+    let entry = add_entry(&db_key, "v0");
+    for i in 1..=5 {
+        update_title(&db_key, &entry, &format!("v{}", i));
+    }
+    let before = history_len(&db_key, &entry);
+
+    set_history_limits(&db_key, 2, DEFAULT_MAX_SIZE);
+    let after = history_len(&db_key, &entry);
+
+    cleanup(&db_key);
+    assert_eq!(before, 5);
+    assert_eq!(after, 2);
 }
