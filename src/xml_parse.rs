@@ -173,11 +173,9 @@ fn content_to_dt(content: String) -> chrono::NaiveDateTime {
 }
 
 #[inline]
-fn content_to_uuid(content: &String) -> uuid::Uuid {
-    match util::decode_uuid(content) {
-        Some(u) => u,
-        None => uuid::Uuid::default(), //TODO: Log the uuid conversion error
-    }
+fn content_to_uuid(content: &str) -> uuid::Uuid {
+    //TODO: Log the uuid conversion error
+    util::decode_uuid(content).unwrap_or_default()
 }
 
 #[inline]

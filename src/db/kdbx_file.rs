@@ -384,9 +384,12 @@ fn frame_locked_content(
     buf
 }
 
+// Decrypted content bytes and the attachment blobs taken out of the db while it is locked
+type UnframedLockedContent = (Vec<u8>, HashMap<AttachmentHashValue, Vec<u8>>);
+
 fn unframe_locked_content(
     framed: &[u8],
-) -> Result<(Vec<u8>, HashMap<AttachmentHashValue, Vec<u8>>)> {
+) -> Result<UnframedLockedContent> {
     let corrupt = || Error::UnexpectedError("Corrupt locked content frame".into());
 
     let mut pos = 0usize;
@@ -488,10 +491,10 @@ impl MainHeader {
 
             match vd_t[0] {
                 vd_type::UINT64 => {
-                    vds.push(VariantDict::UINT64(name, util::to_u64(&bytes_buf)?));
+                    vds.push(VariantDict::UInt64(name, util::to_u64(&bytes_buf)?));
                 }
                 vd_type::UINT32 => {
-                    vds.push(VariantDict::UINT32(name, util::to_u32(&bytes_buf)?));
+                    vds.push(VariantDict::UInt32(name, util::to_u32(&bytes_buf)?));
                 }
                 vd_type::BYTEARRAY => {
                     if name.as_str() == "$UUID" {
@@ -501,7 +504,7 @@ impl MainHeader {
                             kdf = KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::default());
                         }
                     } else {
-                        vds.push(VariantDict::BYTEARRAY(name, bytes_buf.clone()));
+                        vds.push(VariantDict::ByteArray(name, bytes_buf.clone()));
                     }
                 }
                 _ => {
@@ -531,18 +534,18 @@ impl MainHeader {
 
     fn update_argon2_with_vds(
         &self,
-        vds: &Vec<VariantDict>,
+        vds: &[VariantDict],
         argon2_kdf: crypto::kdf::Argon2Kdf,
     ) -> crypto::kdf::Argon2Kdf {
         let kf = vds.iter().fold(argon2_kdf, |mut acc, vd| {
             match vd {
-                VariantDict::UINT64(name, val) if *name == "I".to_string() => acc.iterations = *val,
-                VariantDict::UINT64(name, val) if *name == "M".to_string() => acc.memory = *val,
-                VariantDict::UINT32(name, val) if *name == "P".to_string() => {
+                VariantDict::UInt64(name, val) if name == "I" => acc.iterations = *val,
+                VariantDict::UInt64(name, val) if name == "M" => acc.memory = *val,
+                VariantDict::UInt32(name, val) if name == "P" => {
                     acc.parallelism = *val
                 }
-                VariantDict::UINT32(name, val) if *name == "V".to_string() => acc.version = *val,
-                VariantDict::BYTEARRAY(name, val) if *name == "S".to_string() => {
+                VariantDict::UInt32(name, val) if name == "V" => acc.version = *val,
+                VariantDict::ByteArray(name, val) if name == "S" => {
                     acc.salt = val.clone()
                 }
                 _ => (),

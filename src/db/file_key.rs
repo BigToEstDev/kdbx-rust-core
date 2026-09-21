@@ -101,7 +101,7 @@ impl FileKey {
         Ok(content_hash)
     }
 
-    fn try_parse_xml(buf: &Vec<u8>) -> Result<KeyFileData> {
+    fn try_parse_xml(buf: &[u8]) -> Result<KeyFileData> {
         let mut reader = FileKeyXmlReader::new(buf as &[u8]);
         let r = reader.parse()?;
         Ok(r)

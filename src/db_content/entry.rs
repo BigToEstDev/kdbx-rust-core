@@ -106,8 +106,10 @@ impl EntryField {
         // Applies  KeyValues for these field definitions
         let kvs = EntryField::field_defs_to_keyvalues(fields);
 
-        let mut entry_field = EntryField::default();
-        entry_field.entry_type = etype.clone();
+        let mut entry_field = EntryField {
+            entry_type: etype.clone(),
+            ..Default::default()
+        };
         //entry_field.entry_type.uuid = Uuid::new_v4(); // Should this be done in EntryType::default() ?
         entry_field.insert_key_values(kvs);
         entry_field
@@ -279,8 +281,8 @@ impl Entry {
 
     #[allow(unused)]
     #[inline]
-    pub(crate) fn set_histories(&mut self, history_entries: &Vec<Entry>) -> &mut Self {
-        self.history.entries = history_entries.clone();
+    pub(crate) fn set_histories(&mut self, history_entries: &[Entry]) -> &mut Self {
+        self.history.entries = history_entries.to_owned();
         self
     }
 
@@ -646,14 +648,14 @@ impl Entry {
         self.replace_index_by_entry_types_data(histories)
     }
 
-    pub(crate) fn set_merged_histories(&mut self, history_entries: &Vec<Entry>) {
+    pub(crate) fn set_merged_histories(&mut self, history_entries: &[Entry]) {
         // Collect all entry type data from the passed history_entries of merged one
         let encoded_entry_types = Self::collect_history_entry_types_data(history_entries);
 
         // This entry's OKP_ENTRY_TYPE_LIST_DATA is set
         self.update_encoded_entry_type_list_data(encoded_entry_types);
 
-        self.history.entries = history_entries.clone();
+        self.history.entries = history_entries.to_owned();
 
         let mut encoded_entry_types = self.encoded_entry_types(false);
         let current_entry_type = self.custom_data.get_item_value(OKP_ENTRY_TYPE_DATA);
@@ -697,7 +699,7 @@ impl Entry {
         histories_with_et_data
     }
 
-    fn collect_history_entry_types_data(histories: &Vec<Entry>) -> Vec<String> {
+    fn collect_history_entry_types_data(histories: &[Entry]) -> Vec<String> {
         histories.iter().fold(vec![], |mut acc, e| {
             if let Some(s) = e.custom_data.get_item_value(OKP_ENTRY_TYPE_DATA) {
                 let name = s.to_string();
@@ -884,7 +886,7 @@ impl Entry {
 
     // Gets the EntryType for a history entry of an entry from the previously
     // serialized entry types list data by using the index reference of that data.
-    fn replace_entry_type_index_by_type_data(history_entry: &mut Entry, entry_types: &Vec<String>) {
+    fn replace_entry_type_index_by_type_data(history_entry: &mut Entry, entry_types: &[String]) {
         // Need to form any required OKP_ENTRY_TYPE using the index found in
         // OKP_ENTRY_TYPE_DATA_INDEX and the arg 'entry_types' for each history entry here
 

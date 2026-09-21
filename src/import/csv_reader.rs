@@ -236,7 +236,7 @@ struct CsvLookup {
 }
 
 impl CsvLookup {
-    fn to_imported_items(&self, records: &Vec<CsvDataRecord>) -> Vec<ImportedItem> {
+    fn to_imported_items(&self, records: &[CsvDataRecord]) -> Vec<ImportedItem> {
         records
             .iter()
             .filter(|r| !self.is_skipped(r))
@@ -965,7 +965,7 @@ mod tests {
         lookup.folder_separator = Some('/');
         lookup.skip_folders = &["Recycle Bin"];
 
-        let items = lookup.to_imported_items(&vec![record(&["Recycle Bin Notes"])]);
+        let items = lookup.to_imported_items(&[record(&["Recycle Bin Notes"])]);
         assert_eq!(items.len(), 1);
     }
 
@@ -1073,8 +1073,10 @@ mod tests {
         )
         .unwrap();
 
-        let mut opt = CsvImportOptions::default();
-        opt.has_headers = true;
+        let opt = CsvImportOptions {
+            has_headers: true,
+            ..Default::default()
+        };
         let imp = CsvImport::read_from_path(&path, Some(opt)).unwrap();
 
         std::fs::remove_file(&path).unwrap();

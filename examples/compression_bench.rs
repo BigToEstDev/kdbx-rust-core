@@ -41,7 +41,7 @@ fn millis(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
 
-fn median(samples: &mut Vec<Duration>) -> Duration {
+fn median(samples: &mut [Duration]) -> Duration {
     samples.sort();
     samples[samples.len() / 2]
 }

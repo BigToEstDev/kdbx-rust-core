@@ -183,8 +183,10 @@ impl KdbxContext {
     // Add the newly created KdbxFile to cache for UI use
     fn insert(kdbx_file: KdbxFile) {
         let db_key = kdbx_file.get_database_file_name().to_string();
-        let mut kdbx_context = KdbxContext::default();
-        kdbx_context.kdbx_file = kdbx_file;
+        let kdbx_context = KdbxContext {
+            kdbx_file,
+            ..Default::default()
+        };
         let mut store = main_store().lock().unwrap();
         store.insert(db_key, kdbx_context);
     }

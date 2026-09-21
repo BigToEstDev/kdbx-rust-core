@@ -46,7 +46,7 @@ pub struct BasicEntryCredentialInfo {
 }
 
 pub fn find_matching_in_enabled_db_entries(
-    enabled_db_keys: &Vec<String>,
+    enabled_db_keys: &[String],
     input_url: &str,
 ) -> Result<Vec<MatchedDbEntries>> {
     Ok(enabled_db_keys

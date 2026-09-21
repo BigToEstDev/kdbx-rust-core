@@ -52,9 +52,8 @@ fn datetime_epoch() -> NaiveDateTime {
 pub(crate) fn decode_datetime_b64(b64date: &str) -> Option<NaiveDateTime> {
     let decoded = base64_decode(b64date).ok()?;
     let mut bytes = [0u8; 8];
-    for i in 0..usize::min(bytes.len(), decoded.len()) {
-        bytes[i] = decoded[i];
-    }
+    let n = bytes.len().min(decoded.len());
+    bytes[..n].copy_from_slice(&decoded[..n]);
     let timestamp = Duration::seconds(i64::from_le_bytes(bytes));
     datetime_epoch().checked_add_signed(timestamp)
 }
@@ -604,7 +603,7 @@ mod tests {
     #[allow(deprecated)]
     #[test]
     fn verify_utc_parsing() {
-        let dt = Utc.ymd(2022, 01, 04).and_hms_milli(1, 37, 8, 811);
+        let dt = Utc.ymd(2022, 1, 4).and_hms_milli(1, 37, 8, 811);
 
         //The Javascript Date fn creates datetime  in UTC timezone
         //(.toISOString (js/Date.)) returns UTC time 2022-01-04T01:37:08.811Z
@@ -640,9 +639,9 @@ mod tests {
         assert_eq!(ndt.month(), 1);
         //Day remains the same
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //Let us add few months to an existing date
         //Added 23 months to the currrent month 1
@@ -650,9 +649,9 @@ mod tests {
         assert_eq!(ndt.year(), 2024);
         assert_eq!(ndt.month(), 1);
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //This will add 24 months to the current month 1
         //Year and month will change and all other components will remain the same
@@ -660,9 +659,9 @@ mod tests {
         assert_eq!(ndt.year(), 2024); //
         assert_eq!(ndt.month(), 2);
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //Adding weeks and days
         let ndt = parsed_dt.checked_add_signed(Duration::weeks(52)).unwrap();
@@ -670,18 +669,18 @@ mod tests {
         assert_eq!(ndt.year(), 2023); //Year changed
         assert_eq!(ndt.month(), 1); //Same month
         assert_eq!(ndt.day(), 3); //Day changed from 04 to 03
-        assert_eq!(ndt.hour(), 01); //Same
+        assert_eq!(ndt.hour(), 1); //Same
         assert_eq!(ndt.minute(), 37); //Same
-        assert_eq!(ndt.second(), 08); //Same
+        assert_eq!(ndt.second(), 8); //Same
 
         let ndt = parsed_dt.checked_add_signed(Duration::days(365)).unwrap();
         println!("New ndt {:?}", ndt);
         assert_eq!(ndt.year(), 2023); //Year changed
         assert_eq!(ndt.month(), 1); //Same month
         assert_eq!(ndt.day(), 4); // Same
-        assert_eq!(ndt.hour(), 01); //Same
+        assert_eq!(ndt.hour(), 1); //Same
         assert_eq!(ndt.minute(), 37); //Same
-        assert_eq!(ndt.second(), 08); //Same
+        assert_eq!(ndt.second(), 8); //Same
     }
 
     use super::system_time_to_seconds;

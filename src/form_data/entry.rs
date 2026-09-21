@@ -356,12 +356,14 @@ impl EntryFormData {
                         }
 
                         // debug!("Not found in KV - Field Def {:?}", fd);
-                        let mut kvd: KeyValueData = KeyValueData::default();
-                        kvd.data_type = fd.data_type;
-                        kvd.required = fd.required;
-                        kvd.helper_text = fd.helper_text(); //fd.helper_text.clone();
-                        kvd.standard_field = standard_field_names.contains(&fd.name.as_str());
-                        kvd.key = fd.name.clone();
+                        let kvd = KeyValueData {
+                            data_type: fd.data_type,
+                            required: fd.required,
+                            helper_text: fd.helper_text(),
+                            standard_field: standard_field_names.contains(&fd.name.as_str()),
+                            key: fd.name.clone(),
+                            ..Default::default()
+                        };
 
                         // Completed the combining of this field with its definition to create KVD
                         field_names_done.push(kvd.key.clone());
@@ -886,16 +888,17 @@ impl From<&EntryTypeFormData> for EntryType {
                     v.push(section);
                     v
                 });
-        let mut et = EntryType::default();
-        // IMPORTANT:
-        // Need to generate a new uuid for this new custom entry type
-        // In case, we change the custom type creation flow and the incoming entry_type_form_data has uuid already set
-        // then we need to use that instead of creating a new one
-        et.uuid = Uuid::new_v4();
-        et.name = entry_type_form_data.entry_type_name.clone();
-        et.sections = section_fields;
-        et.icon_name = entry_type_form_data.entry_type_icon_name.clone();
-        et
+        EntryType {
+            // IMPORTANT:
+            // Need to generate a new uuid for this new custom entry type
+            // In case, we change the custom type creation flow and the incoming entry_type_form_data has uuid already set
+            // then we need to use that instead of creating a new one
+            uuid: Uuid::new_v4(),
+            name: entry_type_form_data.entry_type_name.clone(),
+            sections: section_fields,
+            icon_name: entry_type_form_data.entry_type_icon_name.clone(),
+            ..Default::default()
+        }
     }
 }
 

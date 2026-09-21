@@ -513,11 +513,13 @@ impl Meta {
 
     #[allow(unused)]
     #[cfg(test)]
-    pub(crate) fn add_custom_icon(&mut self, icon_data: &Vec<u8>) {
-        let mut icon = super::Icon::default();
-        icon.uuid = Uuid::new_v4();
-        icon.data = icon_data.clone();
-        icon.last_modification_time = util::now_utc();
+    pub(crate) fn add_custom_icon(&mut self, icon_data: &[u8]) {
+        let icon = super::Icon {
+            uuid: Uuid::new_v4(),
+            data: icon_data.to_owned(),
+            last_modification_time: util::now_utc(),
+            ..Default::default()
+        };
         self.custom_icons.icons.push(icon);
     }
 

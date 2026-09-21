@@ -128,9 +128,7 @@ impl ReferenceFieldParsed {
         entry_place_holder_parser.depth_counter = depth_counter;
 
         // Find the wanted field in the passed entry
-        let Some(kv) = entry.find_kv_field_value(self.wanted_field.field_name()) else {
-            return None;
-        };
+        let kv = entry.find_kv_field_value(self.wanted_field.field_name())?;
 
         // First we check to whether we need to do the place holder resolving for the retrived value
         if place_holder_marker_found(&kv) {
@@ -211,7 +209,7 @@ impl ReferenceFieldParsed {
             let out = entry_place_holder_parser
                 .root
                 .entry_by_id(&entry_uuid)
-                .map(|entry_found| {
+                .and_then(|entry_found| {
                     // depth_counter is incremented as we are looking for 'wanted_field' in the next entry
                     self.parse_matched_entry(
                         entry_place_holder_parser,
@@ -219,7 +217,6 @@ impl ReferenceFieldParsed {
                         depth_counter + 1,
                     )
                 })
-                .flatten()
                 .unwrap_or(self.default_unparsed());
             out
         } else {

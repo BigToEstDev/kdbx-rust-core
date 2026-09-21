@@ -65,9 +65,11 @@ impl NewDatabase {
             kdf_algorithm: self.kdf.clone(),
         };
 
-        let mut ih = InnerHeader::default();
-        ih.stream_cipher_id = inner_header_type::CHACHA20_STREAM;
-        ih.inner_stream_key = rn64;
+        let ih = InnerHeader {
+            stream_cipher_id: inner_header_type::CHACHA20_STREAM,
+            inner_stream_key: rn64,
+            ..Default::default()
+        };
         let mut kc = KeepassFile::new();
         kc.meta.generator = GENERATOR_NAME.into();
         kc.meta.database_name = self.database_name.clone();

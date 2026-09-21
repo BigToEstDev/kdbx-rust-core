@@ -68,7 +68,7 @@ impl OtpAlgorithm {
 
 macro_rules! verify_period {
     ($period:expr) => {
-        if $period < 1 || $period > 60 {
+        if !(1..=60).contains(&$period) {
             return Err(Error::UnexpectedError(format!(
                 "Period should be in the range 1 - 60"
             )));
@@ -78,7 +78,7 @@ macro_rules! verify_period {
 
 macro_rules! verify_digits {
     ($digits:expr) => {
-        if $digits < 6 || $digits > 10 {
+        if !(6..=10).contains(&$digits) {
             return Err(Error::UnexpectedError(format!(
                 "Digits should be in the range 6 - 10"
             )));
@@ -194,8 +194,8 @@ impl OtpData {
         }
 
         match parsed_url.host_str() {
-            Some(x) if x == "totp" => {}
-            Some(x) if x == "hotp" => {
+            Some("totp") => {}
+            Some("hotp") => {
                 return Err(Error::OtpUrlParseError("HOTP is not supported".into()));
             }
             _ => {

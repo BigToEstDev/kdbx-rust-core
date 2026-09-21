@@ -193,8 +193,8 @@ impl VersionedEntryType {
         VersionedEntryType::RmpV1(entry_type.clone())
     }
 
-    fn from_entry_type_list(entry_types: &Vec<EntryType>) -> VersionedEntryType {
-        VersionedEntryType::RmpListV1(entry_types.clone())
+    fn from_entry_type_list(entry_types: &[EntryType]) -> VersionedEntryType {
+        VersionedEntryType::RmpListV1(entry_types.to_owned())
     }
 
     fn deserialize_data(base64_str: &str) -> Result<VersionedEntryType> {
@@ -339,7 +339,7 @@ impl VersionedEntryType {
     }
 
     pub fn _encode_entry_type_list(
-        entry_types: &Vec<EntryType>,
+        entry_types: &[EntryType],
         custom_entry_types: &HashMap<Uuid, EntryType>,
     ) -> Option<String> {
         let modified_ets: Vec<Option<EntryType>> = entry_types

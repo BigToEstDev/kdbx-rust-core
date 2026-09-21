@@ -50,13 +50,13 @@ macro_rules! write_header_with_size {
 #[allow(dead_code)]
 #[derive(Debug)]
 enum VariantDict {
-    UINT32(String, u32),
-    UINT64(String, u64),
-    BOOL(String, bool),
-    INT32(String, i32),
-    INT64(String, i64),
-    STRING(String, String),
-    BYTEARRAY(String, Vec<u8>),
+    UInt32(String, u32),
+    UInt64(String, u64),
+    Bool(String, bool),
+    Int32(String, i32),
+    Int64(String, i64),
+    String(String, String),
+    ByteArray(String, Vec<u8>),
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]

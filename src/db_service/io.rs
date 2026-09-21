@@ -196,8 +196,10 @@ pub fn read_kdbx<R: Read + Seek>(
         file_name: file_name.map(|s| s.to_string()),
     };
 
-    let mut kdbx_context = KdbxContext::default();
-    kdbx_context.kdbx_file = kdbx_file;
+    let kdbx_context = KdbxContext {
+        kdbx_file,
+        ..Default::default()
+    };
 
     // Arc<T> automatically dereferences to T (via the Deref trait),
     // so you can call T’s methods on a value of type Arc<T>
@@ -399,8 +401,10 @@ pub fn create_and_write_to_writer<W: Read + Write + Seek>(
     // main_store lock to be released
     {
         // Add the newly created db to cache for UI use
-        let mut kdbx_context = KdbxContext::default();
-        kdbx_context.kdbx_file = kdbx_file;
+        let kdbx_context = KdbxContext {
+            kdbx_file,
+            ..Default::default()
+        };
 
         let mut store = main_store().lock().unwrap();
         store.insert(new_db.database_file_name.clone(), kdbx_context);
