@@ -232,6 +232,10 @@ pub fn save_kdbx_with_backup(
 /// Converts all data from memory structs to kdbx database formatted data and
 /// writes the final complete db content to the supplied writer. The writer may be in memory or a file
 /// Returns the result of saving in KdbxSaved struct to the client
+///
+/// The writer must be empty or truncated by the caller: a generic writer can't be cut here,
+/// so writing a shorter database over an existing file leaves the old tail after its end.
+/// On Android open the stream in a truncating mode ("wt" / "rwt"), not "w".
 pub fn save_kdbx_to_writer<W: Read + Write + Seek>(
     writer: &mut W,
     db_key: &str,

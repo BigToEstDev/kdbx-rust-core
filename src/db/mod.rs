@@ -702,10 +702,12 @@ pub fn write_kdbx_file(kdbx_file: &mut KdbxFile, overwrite: bool) -> Result<()> 
         }
     }
 
+    // Not truncated on open: see set_len after write_db
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(kdbx_file.get_database_file_name())?;
 
     if !overwrite {
@@ -716,6 +718,11 @@ pub fn write_kdbx_file(kdbx_file: &mut KdbxFile, overwrite: bool) -> Result<()> 
     }
 
     write_db(&mut file, kdbx_file)?;
+    // The file can't be opened with truncate: without overwrite the old content is read
+    // above to verify the checksum. Cut it here instead, otherwise a shorter database
+    // leaves the tail of the previous one after its end
+    let written_len = file.stream_position()?;
+    file.set_len(written_len)?;
     file.sync_all()?;
 
     // New checksum for the next time use
@@ -744,6 +751,7 @@ pub fn write_kdbx_content_to_file(kdbx_file: &mut KdbxFile, full_file_name: &str
         .read(true)
         .write(true)
         .create(true)
+        .truncate(true)
         .open(full_file_name)?;
 
     write_db(&mut file, kdbx_file)?;
@@ -759,10 +767,13 @@ pub fn write_kdbx_file_with_backup_file(
     overwrite: bool,
 ) -> Result<()> {
     if let Some(b) = backup_file_name {
+        // The backup file is reused on every save: truncate, or a shorter database keeps the
+        // previous tail and fs::copy below carries it into the db file
         let mut backup_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(b)?;
 
         write_db(&mut backup_file, kdbx_file)?;
