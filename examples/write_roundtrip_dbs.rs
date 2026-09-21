@@ -131,7 +131,13 @@ fn build_db(out_dir: &str, file_name: &str, cipher_id: &str, kdf: &str, with_key
     let root_uuid = tree.root_uuid;
 
     add_entry(&db_key, &root_uuid, "GitHub", "octocat", "gh-secret-1");
-    add_entry(&db_key, &root_uuid, "Email", "user@example.com", "mail-secret-2");
+    add_entry(
+        &db_key,
+        &root_uuid,
+        "Email",
+        "user@example.com",
+        "mail-secret-2",
+    );
 
     // Второй аргумент — mark_as_category; имя задаётся отдельно, uuid читаем через serde
     // (поле pub(crate), а Group сериализуется)

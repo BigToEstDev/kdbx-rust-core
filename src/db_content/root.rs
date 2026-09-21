@@ -80,7 +80,7 @@ impl DeletedObject {
     pub(crate) fn with_uuid(uuid: Uuid, deletion_time: Option<NaiveDateTime>) -> Self {
         Self {
             uuid,
-            deletion_time: deletion_time.map_or_else(|| util::now_utc(), |d| d),
+            deletion_time: deletion_time.unwrap_or_else(util::now_utc),
         }
     }
 }
@@ -193,7 +193,7 @@ impl Root {
     // #[cfg(target_os = "ios")] - hence dead_code on every other target
     #[allow(dead_code)]
     pub fn remove_all_binary_kvs_and_history_entries(&mut self) {
-        for (_, entry) in self.all_entries.iter_mut() {
+        for entry in self.all_entries.values_mut() {
             entry.delete_history_entries();
             entry.binary_key_values = vec![];
         }
@@ -225,7 +225,7 @@ impl Root {
         Ok(self
             .all_groups
             .get(group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?)
+            .ok_or("The group is not found in All groups")?)
     }
 
     pub fn group_by_id_mut(&mut self, group_uuid: &Uuid) -> Option<&mut Group> {
@@ -247,7 +247,7 @@ impl Root {
             .find(|g| g.name == name)
             .map(|g| g.uuid);
 
-        g_opt.map(|id| self.all_groups.get_mut(&id)).flatten()
+        g_opt.and_then(|id| self.all_groups.get_mut(&id))
     }
 
     // pub(crate) fn is_group_empty(&self, group_uuid: &Uuid) -> Result<bool> {
@@ -264,17 +264,13 @@ impl Root {
 
     // Gets all entries. The flag exclude determines whether to include or exclude entries from the special groups in the list
     // TODO: intead of 'exclude', accept the list of group ids to exclude. See comments in 'KeepassFile'
-    pub(crate) fn get_all_entries<'a>(&'a self, exclude: bool) -> Vec<&'a Entry> {
+    pub(crate) fn get_all_entries(&self, exclude: bool) -> Vec<&Entry> {
         self.all_entries
             .values()
             .filter(|x| {
                 if exclude {
                     // For now only entries from recycle group is excluded
-                    if &x.parent_group_uuid == &self.recycle_bin_uuid {
-                        false
-                    } else {
-                        true
-                    }
+                    x.parent_group_uuid != self.recycle_bin_uuid
                 } else {
                     true
                 }
@@ -283,10 +279,7 @@ impl Root {
     }
 
     // Collects all entries that are not in recycle bin
-    pub(crate) fn collect_all_active_entries<'a>(
-        &'a self,
-        recycle_group_uuid: Uuid,
-    ) -> Vec<&'a Entry> {
+    pub(crate) fn collect_all_active_entries(&self, recycle_group_uuid: Uuid) -> Vec<&Entry> {
         let mut excluded_group_ids = self.deleted_group_uuids();
         excluded_group_ids.push(recycle_group_uuid);
         let v: Vec<&Entry> = self
@@ -301,10 +294,7 @@ impl Root {
     }
 
     /// Collects all entries that are not in recycle bin and has tag 'Favorites'
-    pub(crate) fn collect_favorite_entries<'a>(
-        &'a self,
-        recycle_group_uuid: Uuid,
-    ) -> Vec<&'a Entry> {
+    pub(crate) fn collect_favorite_entries(&self, recycle_group_uuid: Uuid) -> Vec<&Entry> {
         // TODO: Need to merge commonality between this method and 'collect_all_active_entries'
         let mut excluded_group_ids = self.deleted_group_uuids();
         excluded_group_ids.push(recycle_group_uuid);
@@ -431,7 +421,7 @@ impl Root {
         }
     }
 
-    pub fn get_all_groups<'a>(&'a self, exclude_spl_groups: bool) -> Vec<&'a Group> {
+    pub fn get_all_groups(&self, exclude_spl_groups: bool) -> Vec<&Group> {
         self.all_groups
             .values()
             .filter(|x| {
@@ -445,7 +435,7 @@ impl Root {
     }
 
     #[inline]
-    fn _root_group<'a>(&'a self) -> Option<&'a Group> {
+    fn _root_group(&self) -> Option<&Group> {
         self.all_groups.get(&self.root_uuid)
     }
 
@@ -479,7 +469,7 @@ impl Root {
 
         // Adds the new group to its parent
         self.all_groups
-            .entry(group.parent_group_uuid.clone())
+            .entry(group.parent_group_uuid)
             .and_modify(|g| g.group_uuids.push(group.uuid));
 
         //self.adjusted_push_to_parent(group.parent_group_uuid, group.uuid);
@@ -563,7 +553,7 @@ impl Root {
 
             // The group's child group list is updated with the sorted list
             self.all_groups
-                .entry(group_uuid.clone())
+                .entry(*group_uuid)
                 .and_modify(|g| g.group_uuids = sub_group_ids.clone());
         }
 
@@ -659,7 +649,7 @@ impl Root {
                 .remove(&gid)
                 .ok_or(Error::UnexpectedError(format!(
                     "The group {} is not found in All Groups map",
-                    &gid
+                    gid
                 )))?;
         }
 
@@ -689,7 +679,7 @@ impl Root {
         let group = self
             .all_groups
             .get(&group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?;
+            .ok_or("The group is not found in All groups")?;
 
         if !group.entry_uuids.is_empty() || !group.group_uuids.is_empty() {
             return Err(Error::DataError(
@@ -701,7 +691,7 @@ impl Root {
         let group = self
             .all_groups
             .remove(&group_uuid)
-            .ok_or_else(|| "The group is not found in All groups")?;
+            .ok_or("The group is not found in All groups")?;
 
         // Remove this group id from group_uuids of its parent group.
         if let Some(old_parent) = self.all_groups.get_mut(&group.parent_group_uuid) {
@@ -744,7 +734,7 @@ impl Root {
         let entry = self
             .all_entries
             .remove(&entry_uuid)
-            .ok_or_else(|| "The entry is not found in All entries")?;
+            .ok_or("The entry is not found in All entries")?;
 
         // Remove this entry id from entry_uuids of its parent group.
         if let Some(old_parent) = self.all_groups.get_mut(&entry.parent_group_uuid) {
@@ -798,7 +788,7 @@ impl Root {
         // }
 
         self.all_groups
-            .entry(new_parent_id.clone())
+            .entry(new_parent_id)
             .and_modify(|g| g.group_uuids.push(group_uuid));
 
         //self.adjusted_push_to_parent(new_parent_id, group_uuid);
@@ -840,7 +830,7 @@ impl Root {
 
         // Add this entry id to the new parent entry uuids. For now it is added to the end
         self.all_groups
-            .entry(new_parent_id.clone())
+            .entry(new_parent_id)
             .and_modify(|g| g.entry_uuids.push(entry_uuid));
 
         // Remove this entry id from entry_uuids of previous parent group
@@ -1267,7 +1257,7 @@ impl Root {
             ids: vec![],
             entry_ids_wanted: false,
         };
-        self.group_visitor_action(&group_uuid, &mut acc);
+        self.group_visitor_action(group_uuid, &mut acc);
         acc.ids
     }
 
@@ -1278,7 +1268,7 @@ impl Root {
             ids: vec![],
             entry_ids_wanted: true,
         };
-        self.group_visitor_action(&group_uuid, &mut acc);
+        self.group_visitor_action(group_uuid, &mut acc);
         acc.ids
     }
 

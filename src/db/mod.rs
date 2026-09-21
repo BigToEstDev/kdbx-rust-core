@@ -50,28 +50,23 @@ macro_rules! write_header_with_size {
 #[allow(dead_code)]
 #[derive(Debug)]
 enum VariantDict {
-    UINT32(String, u32),
-    UINT64(String, u64),
-    BOOL(String, bool),
-    INT32(String, i32),
-    INT64(String, i64),
-    STRING(String, String),
-    BYTEARRAY(String, Vec<u8>),
+    UInt32(String, u32),
+    UInt64(String, u64),
+    Bool(String, bool),
+    Int32(String, i32),
+    Int64(String, i64),
+    String(String, String),
+    ByteArray(String, Vec<u8>),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 #[serde(tag = "algorithm")]
 // This serializes this enum as {"algorithm":"Argon2d", "memory": 67108864, "iterations": 11, ...  }
 pub enum KdfAlgorithm {
     Argon2d(crypto::kdf::Argon2Kdf),
     Argon2id(crypto::kdf::Argon2Kdf),
+    #[default]
     NoValidKdfAvailable,
-}
-
-impl Default for KdfAlgorithm {
-    fn default() -> Self {
-        KdfAlgorithm::NoValidKdfAvailable
-    }
 }
 
 impl KdfAlgorithm {
@@ -174,7 +169,7 @@ impl AttachmentSet {
 
     fn insert_or_update_with_attachmentset(&mut self, other: &AttachmentSet) {
         other.attachments.iter().for_each(|(k, v)| {
-            self.attachments.insert(k.clone(), v.clone());
+            self.attachments.insert(*k, v.clone());
         });
     }
 
@@ -211,7 +206,7 @@ impl AttachmentSet {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct SecuredDatabaseKeys {
     // 32 bytes formed using sha256_hash
     password_hash: Option<Vec<u8>>,
@@ -228,21 +223,6 @@ pub(crate) struct SecuredDatabaseKeys {
     // 32 bytes formed using sha256_hash  - see compute_keys
     master_key: Vec<u8>,
     encrypted: bool,
-}
-
-impl Default for SecuredDatabaseKeys {
-    fn default() -> Self {
-        Self {
-            password_hash: None,
-            key_file_data_hash: None,
-            composite_key: vec![],
-            transformed_key: vec![],
-            hmac_part_key: vec![],
-            hmac_key: vec![],
-            master_key: vec![],
-            encrypted: false,
-        }
-    }
 }
 
 impl SecuredDatabaseKeys {
@@ -302,7 +282,7 @@ impl SecuredDatabaseKeys {
         // Encrypt all previously calculated hashes
 
         if let Some(pw) = &self.password_hash {
-            self.password_hash = Some(kc.encrypt(&pw)?);
+            self.password_hash = Some(kc.encrypt(pw)?);
         }
 
         if let Some(file_data) = &self.key_file_data_hash {
@@ -407,8 +387,8 @@ impl SecuredDatabaseKeys {
                 let phash = crypto::sha256_hash_from_slice(p.as_bytes())?;
                 let fhash = f.content_hash();
                 let data = vec![&phash, &fhash];
-                let final_hash = crypto::sha256_hash_vec_vecs(&data)?;
-                final_hash
+
+                crypto::sha256_hash_vec_vecs(&data)?
             }
             (Some(p), None) => {
                 let phash = crypto::sha256_hash_from_slice(p.as_bytes())?;
@@ -575,7 +555,7 @@ impl SecureKeyInfo {
 // }
 
 pub fn open_db_file(db_file_name: &str) -> Result<BufReader<File>> {
-    let file = match File::open(&db_file_name) {
+    let file = match File::open(db_file_name) {
         Ok(f) => f,
         Err(e) => {
             return Err(Error::DbFileIoError(
@@ -649,7 +629,7 @@ pub fn write_db<W: Write + Read + Seek>(buff: &mut W, kdbx_file: &mut KdbxFile) 
         return Err(Error::DbLocked);
     }
     let mut w = KdbxFileWriter::new(buff, kdbx_file);
-    let _wr = w.write()?;
+    w.write()?;
     Ok(())
 }
 
@@ -702,10 +682,12 @@ pub fn write_kdbx_file(kdbx_file: &mut KdbxFile, overwrite: bool) -> Result<()> 
         }
     }
 
+    // Not truncated on open: see set_len after write_db
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(kdbx_file.get_database_file_name())?;
 
     if !overwrite {
@@ -716,6 +698,11 @@ pub fn write_kdbx_file(kdbx_file: &mut KdbxFile, overwrite: bool) -> Result<()> 
     }
 
     write_db(&mut file, kdbx_file)?;
+    // The file can't be opened with truncate: without overwrite the old content is read
+    // above to verify the checksum. Cut it here instead, otherwise a shorter database
+    // leaves the tail of the previous one after its end
+    let written_len = file.stream_position()?;
+    file.set_len(written_len)?;
     file.sync_all()?;
 
     // New checksum for the next time use
@@ -744,6 +731,7 @@ pub fn write_kdbx_content_to_file(kdbx_file: &mut KdbxFile, full_file_name: &str
         .read(true)
         .write(true)
         .create(true)
+        .truncate(true)
         .open(full_file_name)?;
 
     write_db(&mut file, kdbx_file)?;
@@ -759,10 +747,13 @@ pub fn write_kdbx_file_with_backup_file(
     overwrite: bool,
 ) -> Result<()> {
     if let Some(b) = backup_file_name {
+        // The backup file is reused on every save: truncate, or a shorter database keeps the
+        // previous tail and fs::copy below carries it into the db file
         let mut backup_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(b)?;
 
         write_db(&mut backup_file, kdbx_file)?;
@@ -773,7 +764,7 @@ pub fn write_kdbx_file_with_backup_file(
             read_and_verify_db_file(kdbx_file)?;
         }
 
-        std::fs::copy(&b, kdbx_file.get_database_file_name())?;
+        std::fs::copy(b, kdbx_file.get_database_file_name())?;
 
         // New checksum for the next time use
         kdbx_file.checksum_hash = calculate_db_file_checksum(&mut backup_file)?;

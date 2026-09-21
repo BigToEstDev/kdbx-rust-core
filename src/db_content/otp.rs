@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -36,17 +36,12 @@ impl OtpSettings {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OtpAlgorithm {
+    #[default]
     SHA1,
     SHA256,
     SHA512,
-}
-
-impl std::default::Default for OtpAlgorithm {
-    fn default() -> Self {
-        OtpAlgorithm::SHA1
-    }
 }
 
 impl fmt::Display for OtpAlgorithm {
@@ -72,7 +67,7 @@ impl OtpAlgorithm {
 
 macro_rules! verify_period {
     ($period:expr) => {
-        if $period < 1 || $period > 60 {
+        if !(1..=60).contains(&$period) {
             return Err(Error::UnexpectedError(format!(
                 "Period should be in the range 1 - 60"
             )));
@@ -82,7 +77,7 @@ macro_rules! verify_period {
 
 macro_rules! verify_digits {
     ($digits:expr) => {
-        if $digits < 6 || $digits > 10 {
+        if !(6..=10).contains(&$digits) {
             return Err(Error::UnexpectedError(format!(
                 "Digits should be in the range 6 - 10"
             )));
@@ -162,8 +157,7 @@ impl OtpData {
     pub fn from_key(encoded_secret: &str) -> Result<OtpData> {
         let space_removed = strip_spaces(encoded_secret).to_uppercase();
         if space_removed.is_empty() {
-            return Err(Error::UnexpectedError(format!(
-                "Decoding failed as secret code entered is empty. Requires US-ASCII uppercase letters and digits"))) ;
+            return Err(Error::UnexpectedError("Decoding failed as secret code entered is empty. Requires US-ASCII uppercase letters and digits".to_string())) ;
         }
 
         Ok(OtpData {
@@ -199,8 +193,8 @@ impl OtpData {
         }
 
         match parsed_url.host_str() {
-            Some(x) if x == "totp" => {}
-            Some(x) if x == "hotp" => {
+            Some("totp") => {}
+            Some("hotp") => {
                 return Err(Error::OtpUrlParseError("HOTP is not supported".into()));
             }
             _ => {
@@ -275,7 +269,7 @@ impl OtpData {
                     let param_issuer: String = value.into();
 
                     if issuer.is_some() && param_issuer.as_str() != issuer.as_ref().unwrap() {
-                        return Err(Error::OtpUrlParseError(format!("Issuer mismatch")));
+                        return Err(Error::OtpUrlParseError("Issuer mismatch".to_string()));
                     }
                     issuer = Some(param_issuer);
                 }
@@ -515,7 +509,7 @@ mod tests {
         init_test_logging();
         let data = test_rfc_values();
 
-        for v in data.get("SHA1").unwrap().iter().into_iter() {
+        for v in data.get("SHA1").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA1, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),
@@ -530,7 +524,7 @@ mod tests {
     fn verify_totp_sha256_with_test_vectors() {
         let data = test_rfc_values();
 
-        for v in data.get("SHA256").unwrap().iter().into_iter() {
+        for v in data.get("SHA256").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA256, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),
@@ -545,7 +539,7 @@ mod tests {
     fn verify_totp_sha512_with_test_vectors() {
         let data = test_rfc_values();
 
-        for v in data.get("SHA512").unwrap().iter().into_iter() {
+        for v in data.get("SHA512").unwrap().iter() {
             let od = OtpData::new(OtpAlgorithm::SHA512, &v.encoded_key, 8, 30, None, None).unwrap();
             assert_eq!(
                 od.generate(v.time).unwrap(),

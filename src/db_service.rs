@@ -65,9 +65,7 @@ pub use io::*;
 
 pub use crate::error::{self, Error, Result};
 
-pub use crate::password_generator::{
-    AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
-};
+pub use crate::password_generator::{AnalyzedPassword, PasswordGenerationOptions, PasswordScore};
 
 // See lib.rs where util module is reexported as service_util
 // TDOO: Rename 'util' module as 'service_util' to avoid confilts with other crates 'util' module
@@ -84,9 +82,9 @@ pub use crate::db_content::{
 
 pub use crate::form_data::{
     CategoryDetail, CurrentOtpTokenData, DbSettings, EntryCategories, EntryCategory,
-    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary,
-    EntryTypeFormData, EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree,
-    KdbxLoaded, KdbxSaved,
+    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary, EntryTypeFormData,
+    EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree, KdbxLoaded,
+    KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -105,8 +103,8 @@ pub use autofill::{autofill_search_term, autofill_search_term_filtered};
 pub use autofill::associate_app_to_entry;
 
 pub use custom_icon::{
-    add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon,
-    set_entry_custom_icon, set_group_custom_icon,
+    add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon, set_entry_custom_icon,
+    set_group_custom_icon,
 };
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -140,8 +138,8 @@ pub struct KdbxContextStatus {
 pub fn kdbx_context_statuses(db_key: &str) -> Result<KdbxContextStatus> {
     call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
         Ok(KdbxContextStatus {
-            last_read_time: ctx.last_read_time.clone(),
-            last_write_time: ctx.last_write_time.clone(),
+            last_read_time: ctx.last_read_time,
+            last_write_time: ctx.last_write_time,
             save_pending: ctx.save_pending,
         })
     })
@@ -183,8 +181,10 @@ impl KdbxContext {
     // Add the newly created KdbxFile to cache for UI use
     fn insert(kdbx_file: KdbxFile) {
         let db_key = kdbx_file.get_database_file_name().to_string();
-        let mut kdbx_context = KdbxContext::default();
-        kdbx_context.kdbx_file = kdbx_file;
+        let kdbx_context = KdbxContext {
+            kdbx_file,
+            ..Default::default()
+        };
         let mut store = main_store().lock().unwrap();
         store.insert(db_key, kdbx_context);
     }
@@ -248,7 +248,7 @@ macro_rules! main_content_mut_action {
         let r = call_main_content_mut_action($db_key, $closure_fn);
         // Update the write time
         call_kdbx_context_mut_action($db_key, |ctx: &mut KdbxContext| {
-            ctx.last_write_time = crate::util::now_utc();
+            ctx.last_write_time = $crate::util::now_utc();
             ctx.save_pending = true;
             Ok(())
         })?;
@@ -336,7 +336,7 @@ where
             // This is because the return ref cannot outlive the borrowed ref (store -> kbdx_file -> k)
             // The borrowed ref 'store' will be dropped at the end of this
             // So we need to clone if we want to return the content to the caller
-            Some(k) => action(&k),
+            Some(k) => action(k),
             None => Err(error::Error::NotFound(
                 "Keepass main content in not found".into(),
             )),
@@ -621,8 +621,8 @@ pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
         //      then key_file_used = false, key_file_changed = true,key_file_name = None; password_used = true , password_changed = true or false
 
         debug!("password_used: {}, password_changed: {}, password is nil?:  {},key_file_used: {}, key_file_changed: {}, key_file_name:  {:?}",
-        &db_settings.password_used,&db_settings.password_changed,db_settings.password.is_none(),
-        &db_settings.key_file_used, &db_settings.key_file_changed, &db_settings.key_file_name
+        db_settings.password_used,db_settings.password_changed,db_settings.password.is_none(),
+        db_settings.key_file_used, db_settings.key_file_changed, db_settings.key_file_name
         );
 
         // Both password and key file can not be none at the same time
@@ -757,7 +757,7 @@ pub fn entry_type_headers(db_key: &str) -> Result<EntryTypeHeaders> {
         let to_headers = |v: Vec<&EntryType>| {
             v.into_iter()
                 .map(|e| EntryTypeHeader {
-                    uuid: e.uuid.clone(),
+                    uuid: e.uuid,
                     name: e.name.clone(),
                     icon_name: e.icon_name.clone(),
                 })
@@ -777,7 +777,7 @@ pub fn insert_or_update_custom_entry_type(
 ) -> Result<Uuid> {
     main_content_mut_action!(db_key, |k: &mut KeepassFile| {
         let et: EntryType = entry_type_form_data.into();
-        let entry_type_uuid = et.uuid.clone();
+        let entry_type_uuid = et.uuid;
         k.meta
             .insert_or_update_custom_entry_type(entry_type_form_data.into());
         Ok(entry_type_uuid)
@@ -824,7 +824,7 @@ fn create_groups_summary_data(k: &KeepassFile) -> Result<GroupTree> {
                 name: group.name.clone(),
                 icon_id: group.icon_id,
                 custom_icon_uuid: group.custom_icon_uuid.map(|u| u.to_string()),
-                group_uuids: adjust_special_groups_order(k, &group),
+                group_uuids: adjust_special_groups_order(k, group),
                 entry_uuids: group.entry_uuids.iter().map(|x| x.to_string()).collect(),
             },
         );
@@ -858,7 +858,8 @@ pub fn combined_category_details(
 pub fn mark_group_as_category(db_key: &str, group_id: &str) -> Result<()> {
     let gid = Uuid::parse_str(group_id)?;
     main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        Ok(k.root.mark_group_as_category(&gid))
+        k.root.mark_group_as_category(&gid);
+        Ok(())
     })
 }
 
@@ -882,7 +883,7 @@ pub fn entry_summary_data(
 ) -> Result<Vec<EntrySummary>> {
     let action = |k: &KeepassFile| {
         // let mut entries = EntrySummary::entry_summary_data(form_data::entry_by_category(&k, &entry_category));
-        let mut entries = EntrySummary::entry_summary_data(&k, &entry_category);
+        let mut entries = EntrySummary::entry_summary_data(k, &entry_category);
         // for now sort just by the title
         entries.sort_unstable_by(|a, b| a.title.cmp(&b.title));
         Ok(entries)
@@ -1051,7 +1052,8 @@ pub fn clone_group(db_key: &str, group_uuid: &Uuid, new_name: Option<String>) ->
 
 pub fn update_group(db_key: &str, group: Group) -> Result<()> {
     main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        Ok(k.root.update_group(group.clone(), false))
+        k.root.update_group(group.clone(), false);
+        Ok(())
     })
 }
 
@@ -1121,14 +1123,11 @@ pub fn delete_custom_entry_type_by_id(
 ) -> Result<EntryTypeHeader> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         let et_opt = k.delete_custom_entry_type_by_id(entry_type_uuid)?;
-        let entry_type_header = et_opt.map_or_else(
-            || EntryTypeHeader::default(),
-            |e| EntryTypeHeader {
-                uuid: e.uuid.clone(),
-                name: e.name.clone(),
-                icon_name: None,
-            },
-        );
+        let entry_type_header = et_opt.map_or_else(EntryTypeHeader::default, |e| EntryTypeHeader {
+            uuid: e.uuid,
+            name: e.name.clone(),
+            icon_name: None,
+        });
         Ok(entry_type_header)
     })
 }
@@ -1179,7 +1178,7 @@ pub fn merge_databases(
     key_file_name: Option<&str>,
 ) -> Result<MergeResult> {
     if target_db_key == source_db_key {
-        return Err(error::Error::UnexpectedError(format!("Both source and target are the same databases. Please select a different database to merge")));
+        return Err(error::Error::UnexpectedError("Both source and target are the same databases. Please select a different database to merge".to_string()));
     }
 
     // IMPORTANT:
@@ -1207,12 +1206,10 @@ pub fn merge_databases(
         let [target, source] = store.get_disjoint_mut([target_db_key, source_db_key]);
         log::debug!("Got refs for source and target");
 
-        let target_kdbx = &mut target
-            .ok_or_else(|| "Target database key is not found")?
-            .kdbx_file;
+        let target_kdbx = &mut target.ok_or("Target database key is not found")?.kdbx_file;
         let source_kdbx = &source
             .as_ref()
-            .ok_or_else(|| "Source database key is not found")?
+            .ok_or("Source database key is not found")?
             .kdbx_file;
         let merge_result = db_merge::Merger::from_kdbx_file(source_kdbx, target_kdbx).merge()?;
         log::debug!("Dbs are merged");
@@ -1261,7 +1258,7 @@ pub fn merge_kdbx_with_disk_version(db_key: &str) -> Result<MergeResult> {
         // Load the on-disk version which will decrypted using the stored composite key.
         let mut reader = db::open_db_file(db_key)?;
 
-        debug!("The db file {} is loaded to merge", &db_key);
+        debug!("The db file {} is loaded to merge", db_key);
 
         // if let Some(kc) = ctx.kdbx_file.keepass_main_content.as_ref() {
         //     debug!("before merging Ctx all entries count{} ", kc.root.all_entries().len());

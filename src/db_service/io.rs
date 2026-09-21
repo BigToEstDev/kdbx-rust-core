@@ -143,7 +143,7 @@ pub fn load_kdbx(
     key_file_name: Option<&str>,
 ) -> Result<KdbxLoaded> {
     let mut db_file_reader = db::open_db_file(db_file_name)?;
-    let file_name = util::file_name(&db_file_name);
+    let file_name = util::file_name(db_file_name);
     read_kdbx(
         &mut db_file_reader,
         db_file_name,
@@ -196,8 +196,10 @@ pub fn read_kdbx<R: Read + Seek>(
         file_name: file_name.map(|s| s.to_string()),
     };
 
-    let mut kdbx_context = KdbxContext::default();
-    kdbx_context.kdbx_file = kdbx_file;
+    let kdbx_context = KdbxContext {
+        kdbx_file,
+        ..Default::default()
+    };
 
     // Arc<T> automatically dereferences to T (via the Deref trait),
     // so you can call T’s methods on a value of type Arc<T>
@@ -232,6 +234,10 @@ pub fn save_kdbx_with_backup(
 /// Converts all data from memory structs to kdbx database formatted data and
 /// writes the final complete db content to the supplied writer. The writer may be in memory or a file
 /// Returns the result of saving in KdbxSaved struct to the client
+///
+/// The writer must be empty or truncated by the caller: a generic writer can't be cut here,
+/// so writing a shorter database over an existing file leaves the old tail after its end.
+/// On Android open the stream in a truncating mode ("wt" / "rwt"), not "w".
 pub fn save_kdbx_to_writer<W: Read + Write + Seek>(
     writer: &mut W,
     db_key: &str,
@@ -243,7 +249,7 @@ pub fn save_kdbx_to_writer<W: Read + Write + Seek>(
         debug!(
             "Saving database_name {} with db_key {}",
             ctx.kdbx_file.get_database_name(),
-            &db_key
+            db_key
         );
         Ok(KdbxSaved {
             db_key: db_key.into(),
@@ -282,7 +288,7 @@ pub fn save_all_modified_dbs_with_backups(
                             "The database is locked. Unlock it to save the changes.".into(),
                         ),
                     })
-                } else if ctx.save_pending == true {
+                } else if ctx.save_pending {
                     match write_kdbx_file_with_backup_file(
                         &mut ctx.kdbx_file,
                         backup_file_name.as_deref(),
@@ -314,7 +320,7 @@ pub fn save_all_modified_dbs_with_backups(
             }
             None => save_result.push(SaveAllResponse {
                 db_key,
-                save_status: SaveStatus::Failed(format!("The supplied db key is not found")),
+                save_status: SaveStatus::Failed("The supplied db key is not found".to_string()),
             }),
         };
     }
@@ -333,7 +339,7 @@ pub fn save_as_kdbx(db_key: &str, database_file_name: &str) -> Result<KdbxLoaded
         write_kdbx_file(&mut ctx.kdbx_file, true)?;
         // All changes are now saved to file
         ctx.save_pending = false;
-        let file_name = util::file_name(&database_file_name);
+        let file_name = util::file_name(database_file_name);
         Ok(KdbxLoaded {
             db_key: database_file_name.into(),
             database_name: ctx.kdbx_file.get_database_name().into(),
@@ -395,8 +401,10 @@ pub fn create_and_write_to_writer<W: Read + Write + Seek>(
     // main_store lock to be released
     {
         // Add the newly created db to cache for UI use
-        let mut kdbx_context = KdbxContext::default();
-        kdbx_context.kdbx_file = kdbx_file;
+        let kdbx_context = KdbxContext {
+            kdbx_file,
+            ..Default::default()
+        };
 
         let mut store = main_store().lock().unwrap();
         store.insert(new_db.database_file_name.clone(), kdbx_context);
@@ -476,7 +484,7 @@ pub fn generate_key_file(key_file_name: &str) -> Result<()> {
 
 pub fn export_main_content_as_xml(db_key: &str, xml_file_name: &str) -> Result<()> {
     main_content_action!(db_key, |k: &KeepassFile| {
-        Ok(db::export_db_main_content_as_xml(k, xml_file_name)?)
+        db::export_db_main_content_as_xml(k, xml_file_name)
     })
 }
 

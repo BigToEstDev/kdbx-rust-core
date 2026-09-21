@@ -111,7 +111,7 @@ impl MainAsyncData {
         let mut timers = self.periodic_timers.lock().unwrap();
 
         // false indicates the timer is not yet cancelled
-        timers.insert(id.clone(), false);
+        timers.insert(id, false);
         id
     }
 
@@ -145,7 +145,7 @@ impl MainAsyncData {
 
     fn sender(&self) -> Option<EntryOtpTx> {
         let t = self.sender.lock().unwrap();
-        (&*t).clone()
+        (*t).clone()
     }
 
     fn remove_sender(&self) {
@@ -200,7 +200,7 @@ impl MainAsyncData {
             }
         }
         EntryOtpTokenReply {
-            entry_uuid: entry_uuid.clone(),
+            entry_uuid: *entry_uuid,
             reply_field_tokens,
         }
     }
@@ -250,7 +250,7 @@ impl MainAsyncData {
             }
         }
         EntryOtpTokenReply {
-            entry_uuid: entry_uuid.clone(),
+            entry_uuid: *entry_uuid,
             reply_field_tokens,
         }
     }
@@ -293,7 +293,7 @@ pub fn start_polling_entry_otp_fields(
     if !main_async_data_store().is_entry_polling_stopped(entry_uuid) {
         error!(
             "Already an otp poll thread is running for the entry uuid {}. No new polling started",
-            &entry_uuid
+            entry_uuid
         );
         return;
     }
@@ -301,43 +301,8 @@ pub fn start_polling_entry_otp_fields(
 
     // Start the polling in a thread of Tokio runtime
     // spawn expects a aeg of type : Future + Send + 'static
-    async_runtime().spawn(poll_token_generation(
-        db_key.to_string(),
-        entry_uuid.clone(),
-    ));
+    async_runtime().spawn(poll_token_generation(db_key.to_string(), *entry_uuid));
 }
-
-/*
-pub fn start_polling_entry_otp_fields(
-    db_key: &str,
-    previous_entry_uuid: Option<&Uuid>,
-    entry_uuid: &Uuid,
-    otp_fields: OtpTokenTtlInfoByField,
-) {
-    // If we see this error, we may need to fix by making sure
-    // stop_polling_all_entries_otp_fields before this call
-    if !main_async_data_store().is_stopped(entry_uuid) {
-        error!(
-            "Already an otp poll thread is running for the entry uuid {}. No new polling started",
-            &entry_uuid
-        );
-        return;
-    }
-
-    if let Some(previous_entry) = previous_entry_uuid {
-        main_async_data_store().remove(previous_entry);
-    }
-
-    main_async_data_store().set(entry_uuid, otp_fields);
-
-    // Start the polling in a thread of Tokio runtime
-    // spawn expects a aeg of type : Future + Send + 'static
-    async_runtime().spawn(poll_token_generation(
-        db_key.to_string(),
-        entry_uuid.clone(),
-    ));
-}
-*/
 
 // Called to remove updating all otp fields of all entries that are set previously
 pub fn stop_polling_all_entries_otp_fields() {
@@ -352,7 +317,7 @@ pub fn stop_polling_entry_otp_fields(entry_uuid: &Uuid) {
 // Called to create a repeat timer that sends a periodic tick
 pub fn start_periodic_timer(period_in_milli_seconds: u64, timer_id: Option<TimerID>) -> TimerID {
     let id = main_async_data_store().init_timer_id(timer_id);
-    async_runtime().spawn(run_periodic_timer(period_in_milli_seconds, id.clone()));
+    async_runtime().spawn(run_periodic_timer(period_in_milli_seconds, id));
     id
 }
 
@@ -360,11 +325,11 @@ pub fn start_periodic_timer(period_in_milli_seconds: u64, timer_id: Option<Timer
 pub fn set_timeout(period_in_milli_seconds: u64, timer_id: Option<TimerID>) -> TimerID {
     debug!(
         "In coming set_timeout period {}, timer_id {:?}",
-        &period_in_milli_seconds, &timer_id
+        period_in_milli_seconds, timer_id
     );
     let id = main_async_data_store().init_timer_id(timer_id);
     // Spawn the timeout
-    async_runtime().spawn(run_specified_timeout(period_in_milli_seconds, id.clone()));
+    async_runtime().spawn(run_specified_timeout(period_in_milli_seconds, id));
 
     id
 }
@@ -413,11 +378,11 @@ async fn send_timer_reply(timer_id: &TimerID) {
     if let Some(tx) = main_async_data_store().sender() {
         let r = tx
             .send(AsyncResponse::Tick(TickReply {
-                timer_id: timer_id.clone(),
+                timer_id: *timer_id,
             }))
             .await;
         if r.is_err() {
-            error!("Unexpected error in sending timer id {}", &timer_id);
+            error!("Unexpected error in sending timer id {}", timer_id);
         }
     }
 }
@@ -446,7 +411,7 @@ async fn run_periodic_timer(period_in_milli_seconds: u64, timer_id: TimerID) {
         time::sleep(time::Duration::from_millis(period_in_milli_seconds)).await;
 
         if main_async_data_store().is_timer_cancelled(&timer_id) {
-            debug!("Timer with id {} is cancelled ", &timer_id);
+            debug!("Timer with id {} is cancelled ", timer_id);
             break;
         }
 
@@ -458,14 +423,14 @@ async fn run_periodic_timer(period_in_milli_seconds: u64, timer_id: TimerID) {
 // async fn is a future
 // await call asynchronously waits for the completion of another operation and doesn’t block the current thread
 async fn poll_token_generation(db_key: String, entry_uuid: Uuid) {
-    debug!("Started polling for entry_uuid {}", &entry_uuid);
+    debug!("Started polling for entry_uuid {}", entry_uuid);
 
     let sender;
     // Lock needs to be dropped by using a block
     // Otherwise, we see the error - future is not `Send` as this value is used across an await
     {
         let tx = main_async_data_store().sender.lock().unwrap();
-        sender = (&*tx).clone();
+        sender = (*tx).clone();
     }
 
     let replys = main_async_data_store().form_first_reply(&db_key, &entry_uuid);
@@ -489,7 +454,7 @@ async fn poll_token_generation(db_key: String, entry_uuid: Uuid) {
         if main_async_data_store().is_entry_polling_stopped(&entry_uuid) {
             debug!(
                 "Polling is stopped for entry {} and exiting the loop",
-                &entry_uuid
+                entry_uuid
             );
             break;
         }
@@ -526,7 +491,7 @@ pub fn start_runtime() {
     if let Err(e) = OKP_TOKIO_RUNTIME.set(Arc::new(runtime)) {
         error!(
             "Setting new tokio runtime in global var resulted in error: {:?}",
-            &e
+            e
         );
     }
 }
@@ -581,119 +546,3 @@ fn shutdown_runtime() {
     //     debug!("No previous tokio runtime is found. No shutdown is called");
     // }
 }
-
-// --------------------------------------------------------
-
-// ****** TO BE REMOVED once we verify the above fns work without any issues in both desktop and mobile layers
-
-/*
-
-// --------------------------------------------------------
-// As this is global, all access to this variable need to use 'unsafe' block
-// Otherwise we will see compile error 'this operation is unsafe and requires an unsafe function or block'
-// We may need to use Mutex to be thread safe for all access to this variable
-static mut OKP_TOKIO_RUNTIME: Option<Runtime> = None;
-
-// Assumed this is called once in a single thread
-// See src-tauri/src/app_state.rs  AppState::init_app fn
-// See src/udl_uniffi_exports.rs   db_service_initialize fn
-pub fn start_runtime() {
-    // This is not expected except during dev time if 'start_runtime' is
-    // called by reloading UI layer code. However, in both tauri layer and in
-    // Swift/Kotlin layer, we ensure that this fn is called once
-    if let Some(_r) = unsafe { OKP_TOKIO_RUNTIME.as_ref() } {
-        info!("OKP_TOKIO_RUNTIME is already running and going to shutdown before restarting");
-        shutdown_runtime();
-    }
-
-    let runtime = Builder::new_multi_thread()
-        //.worker_threads(4)
-        .thread_name("okp-async-service")
-        .thread_stack_size(3 * 1024 * 1024)
-        .enable_all()
-        .build()
-        .unwrap();
-
-    debug!("Core OKP_TOKIO_RUNTIME is built...");
-
-    unsafe { OKP_TOKIO_RUNTIME.replace(runtime) };
-
-    info!("Core OKP_TOKIO_RUNTIME is set...");
-}
-
-// May be called from multiple threads and this Runtime ref is shared
-pub fn async_runtime() -> &'static Runtime {
-    unsafe { OKP_TOKIO_RUNTIME.as_ref().unwrap() }
-}
-
-// Single thread
-pub fn shutdown_runtime() {
-    if let Some(runtime) = unsafe { OKP_TOKIO_RUNTIME.take() } {
-        info!("Shutdown OKP_TOKIO_RUNTIME started");
-        runtime.shutdown_timeout(tokio::time::Duration::from_secs(1));
-        info!("Shutdown OKP_TOKIO_RUNTIME done");
-    }
-}
-
-// --------------------------------------------------------
-
-*/
-
-/*
-static TOKIO_RUNTIME: OnceCell<Runtime> = OnceCell::new();
-
-pub fn start_runtime() {
-
-    let rt = TOKIO_RUNTIME.get();
-    debug!("TOKIO_RUNTIME is {:?}",rt);
-
-    let runtime = Builder::new_multi_thread()
-        //.worker_threads(4)
-        .thread_name("okp-async-service")
-        .thread_stack_size(3 * 1024 * 1024)
-        .enable_all()
-        .build()
-        .unwrap();
-
-    debug!("Core TOKIO_RUNTIME is built...");
-
-    TOKIO_RUNTIME.set(runtime).unwrap();
-
-    info!("Core TOKIO_RUNTIME is set...");
-}
-
-// TODO:  Need to add graceful shutdown of all channels and Runtime itself(how?)
-// One example see https://github.com/rousan/AndroidWithRust/blob/master/app/src/main/rust/bridge/runtime/mod.rs
-// Also we may need to use something similar to 'entry_opt_token_store'
-fn _shutdown_runtime() {
-    if TOKIO_RUNTIME.get().is_some() {
-        // We cann't make this call as async_runtime() is &, but shutdown_background requires full ownership
-        // to be moved from OnceCell
-        //async_runtime().shutdown_background()
-    }
-}
-
-pub fn async_runtime() -> &'static Runtime {
-    TOKIO_RUNTIME
-        .get()
-        .expect("Tokio runtime is not initialized")
-}
-
-*/
-
-//-----------------------------------------------------------------------------------------------------------
-
-// #[cfg(test)]
-// mod tests {
-//     use super::{AsyncResponse, EntryOtpTokenReply};
-
-//     #[test]
-//     fn test1() {
-//         let e = EntryOtpTokenReply::default();
-//         let m = AsyncResponse::EntryOtpToken(e);
-
-//         let r = serde_json::to_string_pretty(&m);
-
-//         println!("r is {}", r.unwrap());
-//     }
-// }

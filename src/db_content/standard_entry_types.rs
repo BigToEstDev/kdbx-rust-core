@@ -25,7 +25,7 @@ macro_rules! build_uuid {
 // Also these names are to be added in 'src/main/onekeepass/frontend/constants.cljs'
 
 // All standard types available for UI to use
-pub const STANDARD_TYPE_NAMES: &[&'static str] = &[
+pub const STANDARD_TYPE_NAMES: &[&str] = &[
     LOGIN,
     CREDIT_DEBIT_CARD,
     BANK_ACCOUNT,
@@ -521,8 +521,8 @@ pub fn standard_type_uuids_names_ordered_by_id() -> Vec<(Uuid, String)> {
         .iter()
         .map(|s| {
             //&* gives &Uuid and we use unwrap assuming STANDARD_TYPE_UUIDS_BY_NAME and STANDARD_TYPE_NAMES match
-            let uuid = &*STANDARD_TYPE_UUIDS_BY_NAME.get(s).unwrap();
-            (uuid.clone(), (&**s).into())
+            let uuid = STANDARD_TYPE_UUIDS_BY_NAME.get(s).unwrap();
+            (*uuid, (&**s).into())
         })
         .collect()
 }
@@ -629,7 +629,10 @@ mod tests {
         let mut seen = HashSet::new();
         for name in STANDARD_TYPE_NAMES {
             let uuid = STANDARD_TYPE_UUIDS_BY_NAME.get(name).unwrap();
-            assert!(seen.insert(*uuid), "duplicate UUID for standard type '{name}'");
+            assert!(
+                seen.insert(*uuid),
+                "duplicate UUID for standard type '{name}'"
+            );
         }
     }
 

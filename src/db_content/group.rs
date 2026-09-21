@@ -100,8 +100,10 @@ impl Group {
 }
 
 impl Group {
-    // Creates a new group without uuid
-    pub fn new() -> Self {
+    // Creates a new group without uuid - a blank template filled in by the caller (uuid, parent).
+    // Crate-only on purpose: with a nil uuid it is not a valid group, so no Default either;
+    // outside the crate use new_with_id / with_parent
+    pub(crate) fn new() -> Self {
         Group {
             uuid: Uuid::default(),
             parent_group_uuid: Uuid::default(),

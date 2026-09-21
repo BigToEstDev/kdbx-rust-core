@@ -47,7 +47,10 @@ fn lock_unlock_content_round_trip() {
 
     // --- Lock: content must be encrypted and removed from RAM ---
     db_service::lock_kdbx(&db_key).unwrap();
-    assert!(db_service::is_db_locked(&db_key).unwrap(), "should be locked");
+    assert!(
+        db_service::is_db_locked(&db_key).unwrap(),
+        "should be locked"
+    );
     assert!(
         db_service::get_db_settings(&db_key).is_err(),
         "content must be gone from RAM while locked"
@@ -74,9 +77,15 @@ fn lock_unlock_content_round_trip() {
 
     // --- Unlock via credentials: correct password restores content ---
     db_service::unlock_kdbx(&db_key, Some(password), None).unwrap();
-    assert!(!db_service::is_db_locked(&db_key).unwrap(), "should be unlocked");
+    assert!(
+        !db_service::is_db_locked(&db_key).unwrap(),
+        "should be unlocked"
+    );
     let after_cred = serde_json::to_string(&db_service::get_db_settings(&db_key).unwrap()).unwrap();
-    assert_eq!(baseline, after_cred, "content changed across credential lock/unlock");
+    assert_eq!(
+        baseline, after_cred,
+        "content changed across credential lock/unlock"
+    );
 
     // Attachment bytes must survive the credential lock/unlock.
     assert_eq!(
@@ -91,7 +100,10 @@ fn lock_unlock_content_round_trip() {
     db_service::unlock_kdbx_on_biometric_authentication(&db_key).unwrap();
     assert!(!db_service::is_db_locked(&db_key).unwrap());
     let after_bio = serde_json::to_string(&db_service::get_db_settings(&db_key).unwrap()).unwrap();
-    assert_eq!(baseline, after_bio, "content changed across biometric lock/unlock");
+    assert_eq!(
+        baseline, after_bio,
+        "content changed across biometric lock/unlock"
+    );
     assert_eq!(
         read_attachment(&db_key, &data_hash),
         attach_bytes,
@@ -106,8 +118,8 @@ fn lock_unlock_content_round_trip() {
 
 // Reads an attachment's bytes back by writing it to a temp file (the public path).
 fn read_attachment(db_key: &str, data_hash: &u64) -> Vec<u8> {
-    let out = db_service::save_attachment_as_temp_file(db_key, "okp_attach_out.bin", data_hash)
-        .unwrap();
+    let out =
+        db_service::save_attachment_as_temp_file(db_key, "okp_attach_out.bin", data_hash).unwrap();
     let mut f = std::fs::File::open(&out).unwrap();
     let mut buf = vec![];
     f.read_to_end(&mut buf).unwrap();

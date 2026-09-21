@@ -154,9 +154,17 @@ fn verify_db_merge() {
     let password = "test-pass-1234";
 
     let created = create_kdbx(make_new_db(&target_db_key, password));
-    assert!(created.is_ok(), "create_kdbx (target) failed: {:?}", created);
+    assert!(
+        created.is_ok(),
+        "create_kdbx (target) failed: {:?}",
+        created
+    );
     let created = create_kdbx(make_new_db(&source_db_key, password));
-    assert!(created.is_ok(), "create_kdbx (source) failed: {:?}", created);
+    assert!(
+        created.is_ok(),
+        "create_kdbx (source) failed: {:?}",
+        created
+    );
 
     // Add an entry only to the source db - this is what the merge should bring over
     let source_root_uuid = db_service::groups_summary_data(&source_db_key)
@@ -172,7 +180,11 @@ fn verify_db_merge() {
 
     let merge_result =
         db_service::merge_databases(&target_db_key, &source_db_key, Some(password), None);
-    assert!(merge_result.is_ok(), "merge_databases failed: {:?}", merge_result);
+    assert!(
+        merge_result.is_ok(),
+        "merge_databases failed: {:?}",
+        merge_result
+    );
 
     let merge_result_json = serde_json::to_value(merge_result.unwrap()).unwrap();
     assert_eq!(merge_result_json["merge_done"], serde_json::json!(true));
@@ -183,7 +195,11 @@ fn verify_db_merge() {
 
     // The merged entry must now be readable from the target db with its original uuid
     let merged_entry = db_service::get_entry_form_data_by_id(&target_db_key, &entry_uuid);
-    assert!(merged_entry.is_ok(), "merged entry not found in target: {:?}", merged_entry);
+    assert!(
+        merged_entry.is_ok(),
+        "merged entry not found in target: {:?}",
+        merged_entry
+    );
 
     let _ = db_service::close_kdbx(&target_db_key);
     let _ = db_service::close_kdbx(&source_db_key);
@@ -235,11 +251,14 @@ fn verify_entry_1() {
     assert!(created.is_ok(), "create_kdbx failed: {:?}", created);
 
     let root_uuid = db_service::groups_summary_data(&db_key).unwrap().root_uuid;
-    let entry_uuid =
-        insert_login_entry(&db_key, &root_uuid, "My Test Entry", "testuser", "s3cret");
+    let entry_uuid = insert_login_entry(&db_key, &root_uuid, "My Test Entry", "testuser", "s3cret");
 
     let entry_form = get_entry_form_data_by_id(&db_key, &entry_uuid);
-    assert!(entry_form.is_ok(), "get_entry_form_data_by_id failed: {:?}", entry_form);
+    assert!(
+        entry_form.is_ok(),
+        "get_entry_form_data_by_id failed: {:?}",
+        entry_form
+    );
 
     let v = serde_json::to_value(entry_form.unwrap()).unwrap();
     assert_eq!(v["title"], serde_json::json!("My Test Entry"));

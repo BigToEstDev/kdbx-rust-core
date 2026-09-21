@@ -149,16 +149,15 @@ lazy_static! {
         //let v2: Vec<&'static str> = years.iter().map(|s| &**s).collect();
         let mut m = HashMap::new();
         m.insert("Brand",
-            vec!["Visa", "Matercard",
+            ["Visa", "Matercard",
                 "American Express","Discover", "Diners Club",
                 "Union Pay", "Other"].iter().map(|s|s.to_string()).collect());
 
         m.insert("Expiration Month",
-            vec!["01-January", "02-February","03-March",
+            ["01-January", "02-February","03-March",
                 "04-April","05-May","06-June", "07-July",
                 "08-August","09-September","10-October",
-                "11-November","12-December",
-        ].iter().map(|s|s.to_string()).collect());
+                "11-November","12-December"].iter().map(|s|s.to_string()).collect());
         m.insert("Expiration Year", years);
         m
     };
@@ -231,7 +230,7 @@ impl EntryFormData {
                     Some(v) if !v.trim().is_empty() => format!("{} {}", v.trim(), url),
                     _ => url.to_string(),
                 };
-                log::debug!("Added the app url {} to additional urls field", &new_value);
+                log::debug!("Added the app url {} to additional urls field", new_value);
                 kvd.value = Some(new_value);
                 return true;
             }
@@ -248,7 +247,7 @@ impl EntryFormData {
     // Creates the EntryFormData from the given entry and is ready to be used by UI layer
     fn from_entry(entry: &Entry) -> Self {
         let entry_type_name = entry.entry_field.entry_type.name.clone();
-        let entry_type_uuid = entry.entry_field.entry_type.uuid.clone();
+        let entry_type_uuid = entry.entry_field.entry_type.uuid;
         let entry_type_icon_name = entry.entry_field.entry_type.icon_name.clone();
 
         // Let us get the all section names
@@ -274,7 +273,7 @@ impl EntryFormData {
             .map_or("No Title".into(), |x| x.value.clone());
         let notes: String = fields
             .remove(NOTES)
-            .map_or(empty_str().into(), |x| x.value.clone());
+            .map_or(empty_str(), |x| x.value.clone());
 
         // All KVs per section name
         let mut section_fields: HashMap<String, Vec<KeyValueData>> = HashMap::default();
@@ -357,12 +356,14 @@ impl EntryFormData {
                         }
 
                         // debug!("Not found in KV - Field Def {:?}", fd);
-                        let mut kvd: KeyValueData = KeyValueData::default();
-                        kvd.data_type = fd.data_type;
-                        kvd.required = fd.required;
-                        kvd.helper_text = fd.helper_text(); //fd.helper_text.clone();
-                        kvd.standard_field = standard_field_names.contains(&fd.name.as_str());
-                        kvd.key = fd.name.clone();
+                        let kvd = KeyValueData {
+                            data_type: fd.data_type,
+                            required: fd.required,
+                            helper_text: fd.helper_text(),
+                            standard_field: standard_field_names.contains(&fd.name.as_str()),
+                            key: fd.name.clone(),
+                            ..Default::default()
+                        };
 
                         // Completed the combining of this field with its definition to create KVD
                         field_names_done.push(kvd.key.clone());
@@ -376,7 +377,7 @@ impl EntryFormData {
         }
 
         // Any left out KVs are meant for Custom Fields
-        if fields.len() != 0 {
+        if !fields.is_empty() {
             // There is a possibility that user might have created a section with name CUSTOM_FILEDS
             // and in that case we need to add these extra fields to that section itself
             // Here we are assuming only the language 'en' at this time.
@@ -504,7 +505,7 @@ impl EntryFormData {
         }
 
         entry_field.entry_type.name = entry_form_data.entry_type_name.clone();
-        entry_field.entry_type.uuid = entry_form_data.entry_type_uuid.clone();
+        entry_field.entry_type.uuid = entry_form_data.entry_type_uuid;
         entry_field.entry_type.icon_name = entry_form_data.entry_type_icon_name.clone();
 
         let mut entry = Entry::new();
@@ -600,7 +601,7 @@ impl Entry {
         if parsing_required {
             // All non empty field values are collected to a HashMap irresespective whether the field
             // contains any placeholder or not
-            entry_fields_with_place_holders = self.entry_field.fields.values().into_iter().fold(
+            entry_fields_with_place_holders = self.entry_field.fields.values().fold(
                 entry_fields_with_place_holders,
                 |mut acc, kvd| {
                     if !kvd.value.trim().is_empty() {
@@ -714,7 +715,7 @@ impl EntrySummary {
                     .map_or(val, |s| Some(s.to_string()))
             }
         };
-        let non_empty = |o: &Option<String>| o.as_ref().map_or(false, |s| !s.trim().is_empty());
+        let non_empty = |o: &Option<String>| o.as_ref().is_some_and(|s| !s.trim().is_empty());
 
         if entry.entry_field.entry_type.name == CREDIT_DEBIT_CARD {
             entry.entry_field.find_key_value(NUMBER).map(|f| {
@@ -762,7 +763,7 @@ impl EntrySummary {
                 .entry_type
                 .sections
                 .iter()
-                .filter(|s| s.field_defs.len() > 0)
+                .filter(|s| !s.field_defs.is_empty())
                 .nth(0) // First Section thas has some fields
                 .map(|s| {
                     s.field_defs
@@ -771,8 +772,7 @@ impl EntrySummary {
                         .nth(0) // Get the first fieldDef
                         .map_or("", |f| &f.name)
                 }) // First field's name
-                .map(|n| entry.entry_field.find_key_value(n))
-                .flatten() // To get Option<Option<&KeyValue>> to Option<&KeyValue>
+                .and_then(|n| entry.entry_field.find_key_value(n)) // To get Option<Option<&KeyValue>> to Option<&KeyValue>
                 .and_then(|kv| {
                     if parsed_fields.is_empty() {
                         Some(kv.value.clone())
@@ -888,16 +888,17 @@ impl From<&EntryTypeFormData> for EntryType {
                     v.push(section);
                     v
                 });
-        let mut et = EntryType::default();
-        // IMPORTANT:
-        // Need to generate a new uuid for this new custom entry type
-        // In case, we change the custom type creation flow and the incoming entry_type_form_data has uuid already set
-        // then we need to use that instead of creating a new one
-        et.uuid = Uuid::new_v4();
-        et.name = entry_type_form_data.entry_type_name.clone();
-        et.sections = section_fields;
-        et.icon_name = entry_type_form_data.entry_type_icon_name.clone();
-        et
+        EntryType {
+            // IMPORTANT:
+            // Need to generate a new uuid for this new custom entry type
+            // In case, we change the custom type creation flow and the incoming entry_type_form_data has uuid already set
+            // then we need to use that instead of creating a new one
+            uuid: Uuid::new_v4(),
+            name: entry_type_form_data.entry_type_name.clone(),
+            sections: section_fields,
+            icon_name: entry_type_form_data.entry_type_icon_name.clone(),
+            ..Default::default()
+        }
     }
 }
 
@@ -921,7 +922,7 @@ mod tests {
 
         root.insert_group(parent_group.clone()).unwrap();
 
-        let uuid = uuid::Builder::from_slice(&entry_type_uuid::LOGIN)
+        let uuid = uuid::Builder::from_slice(entry_type_uuid::LOGIN)
             .unwrap()
             .into_uuid();
         let mut entry = Entry::new_blank_entry_by_type_id(&uuid, None, Some(&parent_group.uuid));
@@ -948,7 +949,7 @@ mod tests {
 
         let form_data = EntryFormData::place_holder_resolved_form_data(&root, &entry);
 
-        println!("Form data is {:?}", &form_data.parsed_fields);
+        println!("Form data is {:?}", form_data.parsed_fields);
 
         let resolved = form_data.parsed_fields.get("USERNAME").unwrap();
         assert_eq!("My first https://www.oracle.com name", resolved);
@@ -956,7 +957,7 @@ mod tests {
 
     #[test]
     fn verify_creating_display_entry() {
-        let uuid = uuid::Builder::from_slice(&entry_type_uuid::LOGIN)
+        let uuid = uuid::Builder::from_slice(entry_type_uuid::LOGIN)
             .unwrap()
             .into_uuid();
         let mut entry = Entry::new_blank_entry_by_type_id(&uuid, None, None);
@@ -1004,19 +1005,14 @@ mod tests {
         let json_str = serde_json::to_string_pretty(&de).unwrap();
         println!("{}", json_str);
 
-        assert_eq!(
-            de.section_fields.get("Custom Fields").unwrap().len() == 3,
-            true
-        );
-        assert_eq!(
-            de.section_fields
-                .get("Custom Fields")
-                .unwrap()
-                .iter()
-                .find(|kv| kv.key == "Custom First Name")
-                .is_some(),
-            true
-        );
+        assert!(de.section_fields.get("Custom Fields").unwrap().len() == 3);
+        assert!(de
+            .section_fields
+            .get("Custom Fields")
+            .unwrap()
+            .iter()
+            .find(|kv| kv.key == "Custom First Name")
+            .is_some());
     }
 }
 

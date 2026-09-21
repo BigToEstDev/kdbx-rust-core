@@ -116,7 +116,7 @@ impl<'a> Merger<'a> {
         target_kdbx.insert_or_update_with_attachmentset(other);
 
         Self::from(
-            &source_kdbx.keepass_main_content.as_ref().unwrap(),
+            source_kdbx.keepass_main_content.as_ref().unwrap(),
             target_kdbx.keepass_main_content.as_mut().unwrap(),
         )
     }
@@ -209,7 +209,7 @@ impl<'a> Merger<'a> {
             .source_db
             .root
             .group_by_id(&self.source_db.root.root_uuid())
-            .ok_or_else(|| "Root source group is not found")?;
+            .ok_or("Root source group is not found")?;
 
         // Read what we need from the target root group up front and drop the
         // mutable borrow before calling self.merge_meta() — Meta::merge needs
@@ -220,7 +220,7 @@ impl<'a> Merger<'a> {
                 .target_db
                 .root
                 .group_by_id(&self.target_db.root.root_uuid())
-                .ok_or_else(|| "Root target group is not found")?;
+                .ok_or("Root target group is not found")?;
             (
                 target_root_group.get_uuid(),
                 target_root_group.last_modification_time(),
@@ -252,10 +252,7 @@ impl<'a> Merger<'a> {
                 self.remap_group_icon(&mut g);
                 self.target_db.root.update_group(g, true);
 
-                self.record_group_updated(
-                    &source_root_group.name(),
-                    source_root_group.get_uuid().clone(),
-                );
+                self.record_group_updated(source_root_group.name(), source_root_group.get_uuid());
             }
 
             // Need to ensure that both source and target use the same recycle group
@@ -368,7 +365,7 @@ impl<'a> Merger<'a> {
                 .source_db
                 .root
                 .group_by_id(source_child_group_uuid)
-                .ok_or_else(|| "Source group is not found")?;
+                .ok_or("Source group is not found")?;
 
             let source_parent_group_uuid = self.parent_group_uuid_of_group(source_child_group);
 
@@ -418,7 +415,7 @@ impl<'a> Merger<'a> {
                     self.target_db.root.insert_group(group)?;
 
                     self.record_group_added(
-                        &source_child_group.name(),
+                        source_child_group.name(),
                         source_child_group.get_uuid(),
                     );
                 }
@@ -448,7 +445,7 @@ impl<'a> Merger<'a> {
         self.remap_group_icon(&mut g);
         self.target_db.root.update_group(g, true);
 
-        self.record_group_updated(&source_group.name(), source_group.get_uuid());
+        self.record_group_updated(source_group.name(), source_group.get_uuid());
 
         Ok(())
     }
@@ -478,8 +475,7 @@ impl<'a> Merger<'a> {
                         && target_entry.parent_group_uuid() != source_parent_group_uuid
                     // && !self.different_databases
                     {
-                        let (title, entry_uuid) =
-                            (target_entry.title(), target_entry.get_uuid().clone());
+                        let (title, entry_uuid) = (target_entry.title(), target_entry.get_uuid());
 
                         self.target_db
                             .root
@@ -662,12 +658,12 @@ impl<'a> Merger<'a> {
 
         for deleted @ DeletedObject { uuid, .. } in merged_deleted_objects_m.values() {
             // Collect all groups in DeletedObject that are also found in the merged target db
-            if let Some(group) = self.target_db.root.group_by_id(&uuid) {
+            if let Some(group) = self.target_db.root.group_by_id(uuid) {
                 deleted_object_groups.push((group.get_uuid(), group.last_modification_time()));
                 continue;
             }
             // Collect all entries in DeletedObject that are also found in the merged target db
-            if let Some(entry) = self.target_db.root.entry_by_id(&uuid) {
+            if let Some(entry) = self.target_db.root.entry_by_id(uuid) {
                 deleted_object_entries.push((entry.get_uuid(), entry.last_modification_time()));
                 continue;
             }

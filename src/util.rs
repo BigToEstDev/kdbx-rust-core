@@ -52,10 +52,8 @@ fn datetime_epoch() -> NaiveDateTime {
 pub(crate) fn decode_datetime_b64(b64date: &str) -> Option<NaiveDateTime> {
     let decoded = base64_decode(b64date).ok()?;
     let mut bytes = [0u8; 8];
-    for i in 0..usize::min(bytes.len(), decoded.len()) {
-        bytes[i] = decoded[i];
-    }
-    //println!("====== dat bytes {:?}", u8_arr_to_i8_arr(&bytes));
+    let n = bytes.len().min(decoded.len());
+    bytes[..n].copy_from_slice(&decoded[..n]);
     let timestamp = Duration::seconds(i64::from_le_bytes(bytes));
     datetime_epoch().checked_add_signed(timestamp)
 }
@@ -68,11 +66,10 @@ pub fn encode_datetime(date: &NaiveDateTime) -> String {
 
 #[allow(dead_code)]
 pub fn now_local() -> NaiveDateTime {
-    let now = chrono::Local::now()
+    chrono::Local::now()
         .naive_local()
         .with_nanosecond(0)
-        .unwrap();
-    now
+        .unwrap()
 }
 
 pub fn now_utc() -> NaiveDateTime {
@@ -104,14 +101,8 @@ pub fn now_utc_milli_seconds() -> i64 {
 #[allow(dead_code)]
 pub fn format_utc_now(format_str: Option<&str>) -> String {
     let now: NaiveDateTime = now_utc(); // 2024-11-05 20:01:42
-    let fmt_str = if let Some(s) = format_str {
-        s
-    } else {
-        // "%d %b %Y %H:%M:%S" This will print 05 Nov 2024
-
-        // Formatted string is of form 2024-11-05 20:05:18
-        "%Y-%m-%d %H:%M:%S"
-    };
+                                        // Default gives 2024-11-05 20:05:18; "%d %b %Y %H:%M:%S" would give 05 Nov 2024 20:05:18
+    let fmt_str = format_str.unwrap_or("%Y-%m-%d %H:%M:%S");
     now.format(fmt_str).to_string()
 }
 
@@ -145,9 +136,9 @@ pub fn _format_utc_naivedatetime_to_local(
 ) -> String {
     // First we need to convert the NaiveDateTime to represent UTC datetime
     let utc_date_time: DateTime<Utc> = Utc
-        .from_local_datetime(&naive)
+        .from_local_datetime(naive)
         .single()
-        .map_or(Utc::now(), |d| d);
+        .unwrap_or(Utc::now());
 
     let local_date_time: DateTime<Local> = utc_date_time.with_timezone(&Local);
     // another way of getting the same local time - Local.from_utc_datetime(&utc_date_time.naive_local());
@@ -163,7 +154,7 @@ pub fn _format_utc_naivedatetime_to_local(
 pub fn add_years<DateTime: Datelike>(old_dt: DateTime, year: i32) -> DateTime {
     let dt = old_dt.with_year(old_dt.year() + year);
     if let Some(d) = dt {
-        return d;
+        d
     } else {
         old_dt
     }
@@ -180,13 +171,13 @@ pub fn add_months<DateTime: Datelike>(old_dt: DateTime, months: u32) -> DateTime
         let years = total_months / 12;
         let rem_months = total_months % 12;
         let ndt = add_years(old_dt, years as i32);
-        return add_months(ndt, rem_months);
+        add_months(ndt, rem_months)
     } else {
         let dt = old_dt.with_month(total_months);
         if let Some(d) = dt {
-            return d;
+            d
         } else {
-            return old_dt;
+            old_dt
         }
     }
 }
@@ -194,7 +185,7 @@ pub fn add_months<DateTime: Datelike>(old_dt: DateTime, months: u32) -> DateTime
 pub fn decompress(compressed_data: &[u8]) -> Result<Vec<u8>> {
     let mut writer = Vec::new();
     let mut decoder = flate2::write::GzDecoder::new(writer);
-    decoder.write_all(&compressed_data)?;
+    decoder.write_all(compressed_data)?;
     decoder.try_finish()?;
     writer = decoder.finish()?;
 
@@ -259,64 +250,21 @@ pub fn to_hex_string_with_space(data: &[u8]) -> String {
         .join(" ")
 }
 
-#[allow(dead_code)]
-pub fn as_hex_array_formatted(data: &[u8]) -> String {
-    // Upper case
-    // [ 0x68, 0x65,0x6C,0x6C, 0x6F,..]
-    // format!("{:#04X?}", data)
-
-    // Lower case
-    // gives something like [ 0x68, 0x65,0x6C,0x6C,0x6F,]
-    format!("{:#04X?}", data)
-}
-
-#[allow(dead_code)]
-pub fn u8_arr_to_i8_arr(data: &[u8]) -> Vec<i8> {
-    let v1: Vec<i8> = data.iter().map(|x| *x as i8).collect();
-    v1
-}
-
-//Need to use some generic type
-#[allow(dead_code)]
-pub fn u8_32arr_to_i8_32arr(data: &[u8]) -> [i8; 32] {
-    use std::mem;
-    let d1 = slice_as_array!(data, [u8; 32]).expect("error");
-    let ir = unsafe { mem::transmute::<[u8; 32], [i8; 32]>(*d1) };
-    ir
-}
-
-//Need to work not on these
-#[allow(dead_code)]
-pub fn to_i64(d: &[u8]) -> std::result::Result<i64, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 8]) {
-        Ok(i64::from_le_bytes(*n))
-    } else {
-        Err("Conversion to i64 failed")
-    }
-}
-
+// try_into() on a slice succeeds only for an exact length, so shorter and longer
+// header fields are both rejected
 pub fn to_u64(d: &[u8]) -> std::result::Result<u64, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 8]) {
-        Ok(u64::from_le_bytes(*n))
-    } else {
-        Err("Conversion to u64 failed")
-    }
+    let n: [u8; 8] = d.try_into().map_err(|_| "Conversion to u64 failed")?;
+    Ok(u64::from_le_bytes(n))
 }
 
 pub fn to_i32(d: &[u8]) -> std::result::Result<i32, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 4]) {
-        Ok(i32::from_le_bytes(*n))
-    } else {
-        Err("Conversion to i32 failed")
-    }
+    let n: [u8; 4] = d.try_into().map_err(|_| "Conversion to i32 failed")?;
+    Ok(i32::from_le_bytes(n))
 }
 
 pub fn to_u32(d: &[u8]) -> std::result::Result<u32, &'static str> {
-    if let Some(n) = slice_as_array!(d, [u8; 4]) {
-        Ok(u32::from_le_bytes(*n))
-    } else {
-        Err("Conversion to u32 failed")
-    }
+    let n: [u8; 4] = d.try_into().map_err(|_| "Conversion to u32 failed")?;
+    Ok(u32::from_le_bytes(n))
 }
 
 // Removes all contents of a dir including sub dirs
@@ -521,12 +469,44 @@ pub(crate) mod test_clock {
 mod tests {
     use super::*;
 
+    // KDBX header fields are little-endian; the byte patterns below give a different
+    // number if read big-endian. A slice of any other length (shorter or longer) must fail.
+    #[test]
+    fn to_u64_reads_exactly_8_le_bytes() {
+        let bytes = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(to_u64(&bytes), Ok(0x0807_0605_0403_0201));
+
+        assert_eq!(to_u64(&bytes[..7]), Err("Conversion to u64 failed"));
+        assert_eq!(to_u64(&[0u8; 9]), Err("Conversion to u64 failed"));
+        assert_eq!(to_u64(&[]), Err("Conversion to u64 failed"));
+    }
+
+    #[test]
+    fn to_i32_reads_exactly_4_le_bytes() {
+        assert_eq!(to_i32(&[0xFE, 0xFF, 0xFF, 0xFF]), Ok(-2));
+        assert_eq!(to_i32(&[0x01, 0x02, 0x03, 0x04]), Ok(0x0403_0201));
+
+        assert_eq!(to_i32(&[0x01, 0x02, 0x03]), Err("Conversion to i32 failed"));
+        assert_eq!(to_i32(&[0u8; 5]), Err("Conversion to i32 failed"));
+        assert_eq!(to_i32(&[]), Err("Conversion to i32 failed"));
+    }
+
+    #[test]
+    fn to_u32_reads_exactly_4_le_bytes() {
+        assert_eq!(to_u32(&[0x01, 0x02, 0x03, 0x04]), Ok(0x0403_0201));
+        assert_eq!(to_u32(&[0xFF, 0xFF, 0xFF, 0xFF]), Ok(u32::MAX));
+
+        assert_eq!(to_u32(&[0x01, 0x02, 0x03]), Err("Conversion to u32 failed"));
+        assert_eq!(to_u32(&[0u8; 5]), Err("Conversion to u32 failed"));
+        assert_eq!(to_u32(&[]), Err("Conversion to u32 failed"));
+    }
+
     #[test]
     fn decode_uuid_sample_b64str() {
         init_test_logging();
         let b64_str = "3aBY+AcLQmiPas0vjK2zng==";
         let u = decode_uuid(b64_str);
-        assert_eq!(u.is_some(), true);
+        assert!(u.is_some());
         println!("Uuid is {}", u.unwrap());
         assert_eq!(
             u.unwrap().to_string(),
@@ -541,7 +521,7 @@ mod tests {
         let b64_str = "3aBY+AcLQmiPas0vjK2zng==";
         let decoded = BASE64.decode(b64_str.as_bytes()).unwrap();
         let u = Uuid::from_slice(&decoded).ok();
-        assert_eq!(u.is_some(), true);
+        assert!(u.is_some());
         println!("Uuid is {}", u.unwrap());
         assert_eq!(
             u.unwrap().to_string(),
@@ -553,25 +533,25 @@ mod tests {
     fn decode_uuid_to_none_sample() {
         let s = "dda058f8-070b-4268-8f6a-cd2f8cadb39e";
         let u = decode_uuid(s);
-        assert_eq!(u.is_none(), true);
+        assert!(u.is_none());
         //println!("Uuid is {}", u.unwrap());
     }
 
     #[test]
     fn encode_uuid_to_b64() {
         let ur = Uuid::parse_str("dda058f8-070b-4268-8f6a-cd2f8cadb39e");
-        assert_eq!(ur.is_ok(), true);
+        assert!(ur.is_ok());
         let u = encode_uuid(&ur.unwrap());
-        assert_eq!(u == "3aBY+AcLQmiPas0vjK2zng==", true);
+        assert!(u == "3aBY+AcLQmiPas0vjK2zng==");
     }
 
     #[test]
     fn encode_uuid_to_b64_1() {
         use data_encoding::BASE64;
         let ur = Uuid::parse_str("dda058f8-070b-4268-8f6a-cd2f8cadb39e");
-        assert_eq!(ur.is_ok(), true);
+        assert!(ur.is_ok());
         let u = BASE64.encode(ur.unwrap().as_bytes());
-        assert_eq!(u == "3aBY+AcLQmiPas0vjK2zng==", true);
+        assert!(u == "3aBY+AcLQmiPas0vjK2zng==");
     }
 
     #[allow(dead_code)]
@@ -622,7 +602,7 @@ mod tests {
     #[allow(deprecated)]
     #[test]
     fn verify_utc_parsing() {
-        let dt = Utc.ymd(2022, 01, 04).and_hms_milli(1, 37, 8, 811);
+        let dt = Utc.ymd(2022, 1, 4).and_hms_milli(1, 37, 8, 811);
 
         //The Javascript Date fn creates datetime  in UTC timezone
         //(.toISOString (js/Date.)) returns UTC time 2022-01-04T01:37:08.811Z
@@ -644,7 +624,7 @@ mod tests {
 
         //println!("New Dt2 {:?}", n2);
 
-        assert_eq!(dt == parsed_dt, true);
+        assert!(dt == parsed_dt);
     }
 
     #[test]
@@ -658,9 +638,9 @@ mod tests {
         assert_eq!(ndt.month(), 1);
         //Day remains the same
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //Let us add few months to an existing date
         //Added 23 months to the currrent month 1
@@ -668,9 +648,9 @@ mod tests {
         assert_eq!(ndt.year(), 2024);
         assert_eq!(ndt.month(), 1);
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //This will add 24 months to the current month 1
         //Year and month will change and all other components will remain the same
@@ -678,9 +658,9 @@ mod tests {
         assert_eq!(ndt.year(), 2024); //
         assert_eq!(ndt.month(), 2);
         assert_eq!(ndt.day(), 4);
-        assert_eq!(ndt.hour(), 01);
+        assert_eq!(ndt.hour(), 1);
         assert_eq!(ndt.minute(), 37);
-        assert_eq!(ndt.second(), 08);
+        assert_eq!(ndt.second(), 8);
 
         //Adding weeks and days
         let ndt = parsed_dt.checked_add_signed(Duration::weeks(52)).unwrap();
@@ -688,18 +668,18 @@ mod tests {
         assert_eq!(ndt.year(), 2023); //Year changed
         assert_eq!(ndt.month(), 1); //Same month
         assert_eq!(ndt.day(), 3); //Day changed from 04 to 03
-        assert_eq!(ndt.hour(), 01); //Same
+        assert_eq!(ndt.hour(), 1); //Same
         assert_eq!(ndt.minute(), 37); //Same
-        assert_eq!(ndt.second(), 08); //Same
+        assert_eq!(ndt.second(), 8); //Same
 
         let ndt = parsed_dt.checked_add_signed(Duration::days(365)).unwrap();
         println!("New ndt {:?}", ndt);
         assert_eq!(ndt.year(), 2023); //Year changed
         assert_eq!(ndt.month(), 1); //Same month
         assert_eq!(ndt.day(), 4); // Same
-        assert_eq!(ndt.hour(), 01); //Same
+        assert_eq!(ndt.hour(), 1); //Same
         assert_eq!(ndt.minute(), 37); //Same
-        assert_eq!(ndt.second(), 08); //Same
+        assert_eq!(ndt.second(), 8); //Same
     }
 
     use super::system_time_to_seconds;
@@ -708,13 +688,13 @@ mod tests {
     fn verify_system_time_secs() {
         use std::time::SystemTime;
         let s1 = SystemTime::now();
-        println!("S1 is  {:?}", &s1);
+        println!("S1 is  {:?}", s1);
 
         let secs = system_time_to_seconds(s1);
-        println!("Secs {}", &secs);
+        println!("Secs {}", secs);
 
         let s2 = super::seconds_to_system_time(secs);
-        println!("S2 is  {:?}", &s2);
+        println!("S2 is  {:?}", s2);
 
         assert_eq!(
             s1.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
@@ -725,10 +705,10 @@ mod tests {
     #[test]
     fn verify_compress_decompress() {
         let v1 = "Test message ".as_bytes();
-        let c_v1 = compress(&v1).unwrap();
+        let c_v1 = compress(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
-        assert_eq!(d_v1 == v1, true);
+        assert!(d_v1 == v1);
 
         // gzip adds timestamp. As a result c_v1 != c_v2
         // use std::{thread, time};
@@ -741,24 +721,24 @@ mod tests {
     #[test]
     fn verify_compress_with_options() {
         let v1 = "Test message ".as_bytes();
-        let c_v1 = compress_with_fixed_timestamp(&v1).unwrap();
+        let c_v1 = compress_with_fixed_timestamp(v1).unwrap();
 
         let d_v1 = decompress(&c_v1).unwrap();
-        assert_eq!(d_v1 == v1, true);
+        assert!(d_v1 == v1);
 
         // gzip adds fixed timestamp. As a result c_v1 == c_v2
         use std::{thread, time};
         let ten_millis = time::Duration::from_millis(1000);
         thread::sleep(ten_millis);
-        let c_v2 = compress_with_fixed_timestamp(&v1).unwrap();
-        assert_eq!(c_v1 == c_v2, true);
+        let c_v2 = compress_with_fixed_timestamp(v1).unwrap();
+        assert!(c_v1 == c_v2);
     }
 
     #[test]
     fn hex_str_test() {
         let b: Vec<u8> = vec![12, 3, 44, 7, 6, 22, 34];
         use hex;
-        println!("{:x?}", &b);
+        println!("{:x?}", b);
         assert_eq!("0c032c07061622", hex::encode(&b));
         assert_eq!(&b, &hex::decode("0c032c07061622").unwrap());
     }
@@ -773,7 +753,7 @@ mod tests {
         assert_eq!(s1, "ba3r2J45");
 
         let s2 = "";
-        assert_eq!(strip_spaces(s2).is_empty(), true);
+        assert!(strip_spaces(s2).is_empty());
     }
 }
 

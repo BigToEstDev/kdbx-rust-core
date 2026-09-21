@@ -1,5 +1,3 @@
-use passwords;
-
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 
@@ -136,7 +134,7 @@ impl From<&String> for PasswordScore {
 
 impl From<f64> for PasswordScore {
     fn from(raw_value: f64) -> Self {
-        if raw_value >= 0.0 && raw_value <= 20.0 {
+        if (0.0..=20.0).contains(&raw_value) {
             PasswordScore::VeryDangerous {
                 raw_value,
                 score_text: "Very Dangerous".into(),
@@ -363,7 +361,7 @@ mod tests {
         let pwd = po.generate().unwrap();
         let result = analyze_password(&pwd);
         println!("result is {:?}", result);
-        assert_eq!(result.lowercase_letters_count > 1, true);
+        assert!(result.lowercase_letters_count > 1);
 
         // let s = 4.5f64;
         // let r = s <= 4.5 && s >= 3.0;
@@ -377,7 +375,7 @@ mod tests {
         // to remove its control characters (control characters like BS, LF, CR, etc). And after analyzing,
         // the analyzer will return the filtered password.
         let pwd = "ZYX[$BCkQB中文}%A_3456]  H(\rg";
-        let result = analyze_password(&pwd);
+        let result = analyze_password(pwd);
         println!("result is {:?}", result);
         assert_eq!("ZYX[$BCkQB中文}%A_3456]  H(g", result.analyzed_password); // "\r" was filtered
     }

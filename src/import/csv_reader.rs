@@ -167,7 +167,7 @@ impl CsvImportMapping {
             type_values: profile.map_or(&[], |p| p.type_values),
             favourite_column: column_index(profile.and_then(|p| p.favourite_column)),
             packed_fields_column: column_index(profile.and_then(|p| p.packed_fields_column)),
-            strip_root_folder: profile.map_or(false, |p| p.strip_root_folder),
+            strip_root_folder: profile.is_some_and(|p| p.strip_root_folder),
             skip_folders: profile.map_or(&[], |p| p.skip_folders),
             icon_column: column_index(profile.and_then(|p| p.icon_column)),
             extra_fields: profile.map_or_else(Vec::new, |p| {
@@ -236,7 +236,7 @@ struct CsvLookup {
 }
 
 impl CsvLookup {
-    fn to_imported_items(&self, records: &Vec<CsvDataRecord>) -> Vec<ImportedItem> {
+    fn to_imported_items(&self, records: &[CsvDataRecord]) -> Vec<ImportedItem> {
         records
             .iter()
             .filter(|r| !self.is_skipped(r))
@@ -250,13 +250,11 @@ impl CsvLookup {
             return false;
         }
 
-        self.folder_path(csv_record)
-            .first()
-            .map_or(false, |segment| {
-                self.skip_folders
-                    .iter()
-                    .any(|skipped| skipped.eq_ignore_ascii_case(segment))
-            })
+        self.folder_path(csv_record).first().is_some_and(|segment| {
+            self.skip_folders
+                .iter()
+                .any(|skipped| skipped.eq_ignore_ascii_case(segment))
+        })
     }
 
     fn to_imported_item(&self, csv_record: &CsvDataRecord) -> ImportedItem {
@@ -286,7 +284,7 @@ impl CsvLookup {
         let favourite = self
             .favourite_column
             .and_then(|i| csv_record.get(i))
-            .map_or(false, |v| transform::is_truthy(v));
+            .is_some_and(|v| transform::is_truthy(v));
 
         if favourite {
             transform::tags_append(tags, FAVORITES)
@@ -518,8 +516,7 @@ impl CsvImport {
         path: P,
         import_options: Option<CsvImportOptions>,
     ) -> Result<CvsHeaderInfo> {
-        let import_options =
-            import_options.map_or_else(|| CsvImportOptions::default(), |imp_opt| imp_opt);
+        let import_options = import_options.unwrap_or_default();
         let mut csv_rdr = import_options.reader_builder().from_path(path.as_ref())?;
 
         let header_row = if csv_rdr.has_headers() {
@@ -530,7 +527,7 @@ impl CsvImport {
                 .map(|(idx, r)| {
                     if r.is_empty() {
                         //"Column" + " " + &idx.to_string()
-                        vec!["Column", &idx.to_string()].join(" ")
+                        ["Column", &idx.to_string()].join(" ")
                     } else {
                         r.to_string()
                     }
@@ -549,7 +546,7 @@ impl CsvImport {
             let v = headers
                 .iter()
                 .enumerate()
-                .map(|(idx, _s)| vec!["Column", &idx.to_string()].join(" "))
+                .map(|(idx, _s)| ["Column", &idx.to_string()].join(" "))
                 .collect::<Vec<_>>();
             // let v = headers.iter().map(|r| r.to_string()).collect::<Vec<_>>();
             // A file without a header row has only generated "Column n" names, so there
@@ -562,8 +559,7 @@ impl CsvImport {
 
         let rows = csv_rdr
             .records()
-            .map(|r| r.ok())
-            .flatten()
+            .filter_map(|r| r.ok())
             .map(|r| r.iter().map(|f| f.to_string()).collect::<CsvDataRecord>())
             .collect::<Vec<_>>();
 
@@ -572,7 +568,7 @@ impl CsvImport {
         // v.extend(rows);
 
         let mut mv = NON_HEADER_RECORDS
-            .get_or_init(|| Default::default())
+            .get_or_init(Default::default)
             .lock()
             .unwrap();
         // Wipe any records left over from a previous import before replacing them
@@ -620,7 +616,7 @@ impl CsvImport {
         if let Some(m) = NON_HEADER_RECORDS.get() {
             let data_wows = m.lock().unwrap();
             for r in data_wows.iter() {
-                println!("Data row is {:?}", &r);
+                println!("Data row is {:?}", r);
             }
         }
     }
@@ -764,8 +760,16 @@ mod tests {
         };
 
         let item = lookup.to_imported_item(&record(&["JBSWY3DPEHPK3PXP"]));
-        let otp = item.fields.iter().find(|f| f.name == "otp").expect("otp field");
-        assert!(otp.value.starts_with("otpauth://totp/"), "got {}", otp.value);
+        let otp = item
+            .fields
+            .iter()
+            .find(|f| f.name == "otp")
+            .expect("otp field");
+        assert!(
+            otp.value.starts_with("otpauth://totp/"),
+            "got {}",
+            otp.value
+        );
 
         // An unusable value drops the field rather than storing a dead otp
         let item = lookup.to_imported_item(&record(&["not-a-secret-18"]));
@@ -816,7 +820,10 @@ mod tests {
     #[test]
     fn a_row_is_a_login_when_no_type_column_is_known() {
         let lookup = lookup_with_group_at(0);
-        assert_eq!(lookup.to_imported_item(&record(&["Work"])).kind, ImportedKind::Login);
+        assert_eq!(
+            lookup.to_imported_item(&record(&["Work"])).kind,
+            ImportedKind::Login
+        );
     }
 
     #[test]
@@ -831,7 +838,11 @@ mod tests {
         let kind_of = |value: &str| lookup.to_imported_item(&record(&["Work", value])).kind;
 
         assert_eq!(kind_of("credit_card"), ImportedKind::CreditCard);
-        assert_eq!(kind_of("CREDIT_CARD"), ImportedKind::CreditCard, "case insensitive");
+        assert_eq!(
+            kind_of("CREDIT_CARD"),
+            ImportedKind::CreditCard,
+            "case insensitive"
+        );
         assert_eq!(kind_of("password"), ImportedKind::Login);
         // An unlisted or blank value falls back rather than failing the row
         assert_eq!(kind_of("something-new"), ImportedKind::Login);
@@ -849,11 +860,8 @@ mod tests {
         lookup.other_fields = other_fields;
         lookup.favourite_column = Some(1);
 
-        let tags_of = |tags: &str, fav: &str| {
-            lookup
-                .to_imported_item(&record(&[tags, fav, "Work"]))
-                .tags
-        };
+        let tags_of =
+            |tags: &str, fav: &str| lookup.to_imported_item(&record(&[tags, fav, "Work"])).tags;
 
         assert_eq!(tags_of("", "1").as_deref(), Some("Favorites"));
         assert_eq!(tags_of("work", "1").as_deref(), Some("work;Favorites"));
@@ -903,8 +911,11 @@ mod tests {
         lookup.standard_fields = standard_fields;
         lookup.packed_fields_column = Some(1);
 
-        let item =
-            lookup.to_imported_item(&record(&["real-secret", "password: decoy\nPin: 1234", "Work"]));
+        let item = lookup.to_imported_item(&record(&[
+            "real-secret",
+            "password: decoy\nPin: 1234",
+            "Work",
+        ]));
 
         let password = item.fields.iter().find(|f| f.name == "Password").unwrap();
         assert_eq!(password.value, "real-secret");
@@ -966,7 +977,7 @@ mod tests {
         lookup.folder_separator = Some('/');
         lookup.skip_folders = &["Recycle Bin"];
 
-        let items = lookup.to_imported_items(&vec![record(&["Recycle Bin Notes"])]);
+        let items = lookup.to_imported_items(&[record(&["Recycle Bin Notes"])]);
         assert_eq!(items.len(), 1);
     }
 
@@ -1004,7 +1015,10 @@ mod tests {
         lookup.extra_fields = vec![(ImportedKind::CreditCard, "Number", 2)];
 
         let card = lookup.to_imported_item(&record(&["Cards", "credit_card", "4111"]));
-        assert!(card.fields.iter().any(|f| f.name == "Number" && f.value == "4111"));
+        assert!(card
+            .fields
+            .iter()
+            .any(|f| f.name == "Number" && f.value == "4111"));
 
         // A login has no Number field on its entry type, so it must not be given one
         let login = lookup.to_imported_item(&record(&["Web", "password", "4111"]));
@@ -1067,15 +1081,20 @@ mod tests {
     fn verify1() {
         // A small csv generated in the test itself instead of reading an external file
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("pass_core_test_csv_reader_verify1_{}.csv", std::process::id()));
+        let path = dir.join(format!(
+            "pass_core_test_csv_reader_verify1_{}.csv",
+            std::process::id()
+        ));
         std::fs::write(
             &path,
             "Title,Username,Password\nSite One,user1,pass1\nSite Two,user2,pass2\n",
         )
         .unwrap();
 
-        let mut opt = CsvImportOptions::default();
-        opt.has_headers = true;
+        let opt = CsvImportOptions {
+            has_headers: true,
+            ..Default::default()
+        };
         let imp = CsvImport::read_from_path(&path, Some(opt)).unwrap();
 
         std::fs::remove_file(&path).unwrap();

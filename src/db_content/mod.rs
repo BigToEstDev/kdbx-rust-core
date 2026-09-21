@@ -51,7 +51,7 @@ pub(crate) fn split_tags(tags: &str) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-pub(crate) fn join_tags(tag_vec: &Vec<String>) -> String {
+pub(crate) fn join_tags(tag_vec: &[String]) -> String {
     tag_vec.join(";")
 }
 

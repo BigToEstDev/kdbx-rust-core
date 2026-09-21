@@ -162,7 +162,7 @@ fn child_group_or_create(
         let matched = keepass_file
             .root
             .group_by_id(&child_uuid)
-            .map_or(false, |child| child.name == name);
+            .is_some_and(|child| child.name == name);
         if matched {
             return Ok(child_uuid);
         }
@@ -259,16 +259,15 @@ mod tests {
     #[test]
     fn a_nested_path_creates_the_whole_chain() {
         let mut kp = empty_db();
-        writer().write(&[item(vec!["Work", "Clients"])], &mut kp).unwrap();
+        writer()
+            .write(&[item(vec!["Work", "Clients"])], &mut kp)
+            .unwrap();
 
         let work = kp.root.group_by_name("Work").expect("Work group");
         let work_children = work.group_uuids.clone();
         assert_eq!(work_children.len(), 1);
 
-        let clients = kp
-            .root
-            .group_by_id(&work_children[0])
-            .expect("child group");
+        let clients = kp.root.group_by_id(&work_children[0]).expect("child group");
         assert_eq!(clients.name, "Clients");
         assert_eq!(clients.entry_uuids.len(), 1);
     }
@@ -291,14 +290,7 @@ mod tests {
         let type_uuids: Vec<_> = group
             .entry_uuids
             .iter()
-            .map(|id| {
-                kp.root
-                    .entry_by_id(id)
-                    .unwrap()
-                    .entry_field
-                    .entry_type
-                    .uuid
-            })
+            .map(|id| kp.root.entry_by_id(id).unwrap().entry_field.entry_type.uuid)
             .collect();
 
         let card_uuid = crate::build_uuid!(entry_type_uuid::CREDIT_DEBIT_CARD);
@@ -321,7 +313,12 @@ mod tests {
 
         writer().write(&[first, second], &mut kp).unwrap();
 
-        let entries = kp.root.group_by_name("Imported").unwrap().entry_uuids.clone();
+        let entries = kp
+            .root
+            .group_by_name("Imported")
+            .unwrap()
+            .entry_uuids
+            .clone();
         let declared: Vec<Vec<String>> = entries
             .iter()
             .map(|id| section_field_names(&kp, id))
@@ -353,7 +350,12 @@ mod tests {
             .write(&[with_icon, item(vec!["Imported"])], &mut kp)
             .unwrap();
 
-        let entries = kp.root.group_by_name("Imported").unwrap().entry_uuids.clone();
+        let entries = kp
+            .root
+            .group_by_name("Imported")
+            .unwrap()
+            .entry_uuids
+            .clone();
         let icons: Vec<i32> = entries
             .iter()
             .map(|id| kp.root.entry_by_id(id).unwrap().icon_id)
@@ -406,7 +408,11 @@ mod tests {
         };
 
         assert_eq!(protected_of("CVC"), Some(true), "CVC is declared protected");
-        assert_eq!(protected_of("Number"), Some(false), "the card number is not");
+        assert_eq!(
+            protected_of("Number"),
+            Some(false),
+            "the card number is not"
+        );
     }
 
     // A source folder called "Recycle Bin" must not resolve onto the target database's
@@ -416,7 +422,9 @@ mod tests {
         let mut kp = empty_db();
         let recycle_bin_uuid = kp.root.recycle_bin_group().unwrap().get_uuid();
 
-        writer().write(&[item(vec!["Recycle Bin"])], &mut kp).unwrap();
+        writer()
+            .write(&[item(vec!["Recycle Bin"])], &mut kp)
+            .unwrap();
 
         assert!(
             kp.root
@@ -435,7 +443,10 @@ mod tests {
         let mut kp = empty_db();
         writer()
             .write(
-                &[item(vec!["Work", "Shared"]), item(vec!["Personal", "Shared"])],
+                &[
+                    item(vec!["Work", "Shared"]),
+                    item(vec!["Personal", "Shared"]),
+                ],
                 &mut kp,
             )
             .unwrap();

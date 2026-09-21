@@ -188,7 +188,10 @@ pub(crate) const PROFILES: &[CsvProfile] = &[
         type_column: Some("type"),
         // A Bitwarden csv only ever carries logins and notes. Notes stay Login with the
         // text in Notes, matching what KeePass and KeePassXC do
-        type_values: &[("login", ImportedKind::Login), ("note", ImportedKind::Login)],
+        type_values: &[
+            ("login", ImportedKind::Login),
+            ("note", ImportedKind::Login),
+        ],
         favourite_column: Some("favorite"),
         // Bitwarden puts every custom field an item has into this one cell
         packed_fields_column: Some("fields"),
@@ -314,7 +317,11 @@ pub(crate) const PROFILES: &[CsvProfile] = &[
         extra_fields: &[
             // The login type declares Additional URLs, so the column has a real home
             (ImportedKind::Login, ADDITIONAL_URLS, "additional_urls"),
-            (ImportedKind::CreditCard, "Cardholder Name", "cardholdername"),
+            (
+                ImportedKind::CreditCard,
+                "Cardholder Name",
+                "cardholdername",
+            ),
             (ImportedKind::CreditCard, "Number", "cardnumber"),
             (ImportedKind::CreditCard, "CVC", "cvc"),
             (ImportedKind::CreditCard, "Zip Code", "zipcode"),
@@ -542,7 +549,9 @@ mod tests {
         assert!(profile.strip_root_folder, "paths start at the source root");
 
         let mapping = profile.mapping_for(&kxc);
-        for expected in ["Group", "Title", "Username", "Password", "URL", "Notes", "TOTP"] {
+        for expected in [
+            "Group", "Title", "Username", "Password", "URL", "Notes", "TOTP",
+        ] {
             assert!(
                 mapping.iter().any(|m| m.mapped_name == expected),
                 "{expected} should be mapped"
@@ -599,7 +608,14 @@ mod tests {
 
     #[test]
     fn detection_ignores_case_and_padding() {
-        let padded = headers(&[" Folder ", "TYPE", "Name", "LOGIN_URI", "login_username", "login_password"]);
+        let padded = headers(&[
+            " Folder ",
+            "TYPE",
+            "Name",
+            "LOGIN_URI",
+            "login_username",
+            "login_password",
+        ]);
         assert_eq!(detect(&padded).unwrap().id, "bitwarden");
     }
 
@@ -647,7 +663,9 @@ mod tests {
         // A profile that reads no column of its own consumes nothing
         assert!(by_id("safari")
             .unwrap()
-            .consumed_columns(&headers(&["Title", "URL", "Username", "Password", "OTPAuth"]))
+            .consumed_columns(&headers(&[
+                "Title", "URL", "Username", "Password", "OTPAuth"
+            ]))
             .is_empty());
     }
 

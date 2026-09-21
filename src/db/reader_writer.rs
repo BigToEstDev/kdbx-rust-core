@@ -1,4 +1,4 @@
-﻿use std::cmp;
+use std::cmp;
 
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
@@ -128,7 +128,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
                     //cannot borrow `*self` as mutable more than once at a time
                     //self.kdbx_file.main_header.extract_kdf_parameters(&self.read_header_field()?)?;
                     let v = &self.read_header_field()?;
-                    self.kdbx_file.main_header.extract_kdf_parameters(&v)?;
+                    self.kdbx_file.main_header.extract_kdf_parameters(v)?;
                 }
                 header_type::COMMENT => {
                     self.kdbx_file.main_header.comment = self.read_header_field()?;
@@ -270,7 +270,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
         )?;
 
         let start = std::time::Instant::now();
-        let mut payload = cipher.decrypt(&encrypted_data, self.kdbx_file.master_key())?;
+        let mut payload = cipher.decrypt(encrypted_data, self.kdbx_file.master_key())?;
         debug!(
             "Decryption of data with size {} and elapsed time is  {} seconds  ",
             payload.len(),
@@ -409,7 +409,7 @@ fn read_stream_data<R: Read + Seek>(reader: &mut R, start: u64, end: u64) -> Res
     //Creates a "by reference" adaptor for this instance of Read.
     //The returned adaptor also implements Read and will simply borrow this current reader
     //self.reader.take(...) will not work as that requires move of Reader
-    reader.by_ref().take(size as u64).read_to_end(&mut buffer)?;
+    reader.by_ref().take(size).read_to_end(&mut buffer)?;
 
     // Resets the stream's position to its original position
     reader.seek(SeekFrom::Start(current_reader_position))?;
@@ -447,8 +447,8 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
         self.write_header_hash()?;
 
         // The main content of database
-        let mut buf = self.write_compressed_encrypted_payload()?;
-        self.write_hmac_data_blocks(&mut buf)?;
+        let buf = self.write_compressed_encrypted_payload()?;
+        self.write_hmac_data_blocks(&buf)?;
 
         self.writer.flush()?;
 
@@ -458,7 +458,8 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
     fn write_file_signature(&mut self) -> Result<()> {
         self.writer.write_all(&constants::SIG1.to_le_bytes())?;
         self.writer.write_all(&constants::SIG2.to_le_bytes())?;
-        self.writer.write_all(&constants::VERSION_41.to_le_bytes())?;
+        self.writer
+            .write_all(&constants::VERSION_41.to_le_bytes())?;
         Ok(())
     }
 
@@ -591,7 +592,7 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
             // Write the data_buffer of blk_size data (Block data)
             self.writer.write_all(&data_buffer)?;
 
-            remaining_bytes = remaining_bytes - blk_size;
+            remaining_bytes -= blk_size;
             blk_size = cmp::min(PAYLOAD_BLOCK_SIZE, remaining_bytes);
 
             // Next block

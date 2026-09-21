@@ -1,4 +1,4 @@
-﻿use quick_xml::escape::unescape;
+use quick_xml::escape::unescape;
 use quick_xml::events::attributes::{Attribute, Attributes};
 use quick_xml::events::Event;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText};
@@ -84,7 +84,7 @@ macro_rules! read_tags {
                             //     debug!("The attribute handling action is not used for the Empty tag: {}",et);
                             // }
 
-                            ()
+
                         }
                     }
                 }
@@ -131,7 +131,7 @@ fn skip_tag<B: BufRead>(tag: &[u8], reader: &mut QuickXmlReader<B>) -> Result<()
 // https://docs.rs/quick-xml/0.30.0/quick_xml/escape/fn.escape.html
 // https://docs.rs/quick-xml/0.30.0/quick_xml/events/struct.BytesText.html#method.new (escapes text content in this call)
 fn content_unescape(content: &str) -> String {
-    match unescape(&content) {
+    match unescape(content) {
         Ok(unescaped_content) => unescaped_content.to_string(),
         Err(e) => {
             error!("XML read time content unescaping failed with error {} ; Returning the original content", e);
@@ -156,11 +156,7 @@ fn content_to_int(content: String) -> i32 {
 
 #[inline]
 fn content_to_bool(content: String) -> bool {
-    if content.to_lowercase() == "true" {
-        true
-    } else {
-        false
-    }
+    content.to_lowercase() == "true"
 }
 
 #[inline]
@@ -177,11 +173,9 @@ fn content_to_dt(content: String) -> chrono::NaiveDateTime {
 }
 
 #[inline]
-fn content_to_uuid(content: &String) -> uuid::Uuid {
-    match util::decode_uuid(content) {
-        Some(u) => u,
-        None => uuid::Uuid::default(), //TODO: Log the uuid conversion error
-    }
+fn content_to_uuid(content: &str) -> uuid::Uuid {
+    //TODO: Log the uuid conversion error
+    util::decode_uuid(content).unwrap_or_default()
 }
 
 #[inline]
@@ -419,7 +413,7 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {
                 UUID => (|content:String, _,  _| icon.uuid = content_to_uuid(&content)),
                 DATA => (|content:String, _,  _| {
-                    if let Some(d) = util::base64_decode(&content).ok() {
+                    if let Ok(d) = util::base64_decode(&content) {
                         icon.data = d;
                     }
                 }),
@@ -855,8 +849,8 @@ fn attachment_ref_index(attributes: &mut Attributes) -> i32 {
                 //debug!("!!!!!! in fn attributes of Value are {:?}",v);
                 if let std::borrow::Cow::Borrowed(a) = x {
                     //debug!("@@@@ a is {:?}",std::str::from_utf8(a).ok());
-                    if let Some(i) = std::str::from_utf8(a).ok() {
-                        if let Some(i) = i.parse::<i32>().ok() {
+                    if let Ok(i) = std::str::from_utf8(a) {
+                        if let Ok(i) = i.parse::<i32>() {
                             ref_index = i;
                         }
                     }
@@ -876,9 +870,9 @@ fn attachment_ref_index(attributes: &mut Attributes) -> i32 {
 
 /// Start parsing incoming xml bytes content
 pub fn parse(data: &[u8], cipher: Option<ProtectedContentStreamCipher>) -> Result<KeepassFile> {
-    let mut reader = XmlReader::new(&data[..], cipher);
-    let r = reader.parse();
-    r
+    let mut reader = XmlReader::new(data, cipher);
+
+    reader.parse()
 }
 
 ///////   All XML writing related //////////
@@ -1087,7 +1081,7 @@ impl<W: Write> XmlWriter<W> {
                 self,
                 ICON,
                 UUID, util::encode_uuid(&icon.uuid),
-                NAME, &icon.name.as_ref().map_or_else(||util::empty_str(), |s| s.to_string()),
+                NAME, &icon.name.as_ref().map_or_else(util::empty_str, |s| s.to_string()),
                 DATA,  util::base64_encode(&icon.data),
                 LAST_MODIFICATION_TIME, util::encode_datetime(&icon.last_modification_time)
             };
@@ -1226,7 +1220,7 @@ impl<W: Write> XmlWriter<W> {
 
         write_tags_or_skip_empty! {
             self,
-            CUSTOM_ICON_UUID, entry.custom_icon_uuid.map_or_else(||empty_str(),|uuid|util::encode_uuid(&uuid))
+            CUSTOM_ICON_UUID, entry.custom_icon_uuid.map_or_else(empty_str,|uuid|util::encode_uuid(&uuid))
         }
 
         // Times tag and the children
@@ -1271,7 +1265,7 @@ impl<W: Write> XmlWriter<W> {
                 self,
                 BINARY,
                 KEY, empty_attr, b.key,
-                VALUE, vec![("Ref", b.index_ref.to_string().as_str())],b.value
+                VALUE, [("Ref", b.index_ref.to_string().as_str())],b.value
             };
         }
         // Entry's Custom Data
@@ -1418,7 +1412,7 @@ impl<'a> FileKeyXmlReader<'a> {
                     }
                     match e.name().as_ref() {
                         KEY_FILE => {
-                            let _r = self.read_top_level(&mut key_file_data)?;
+                            self.read_top_level(&mut key_file_data)?;
                         }
                         x => {
                             //debug!("MAIN: in match {:?}", std::str::from_utf8(e.name()).unwrap());
@@ -1517,10 +1511,7 @@ impl<'a> FileKeyXmlReader<'a> {
 
     #[inline]
     fn remove_formatting(data: &str) -> String {
-        data.split_whitespace()
-            .map(|s| s)
-            .collect::<Vec<_>>()
-            .join("")
+        data.split_whitespace().collect::<Vec<_>>().join("")
     }
 
     fn read_data_hash(attributes: &mut Attributes) -> Option<String> {
@@ -1596,7 +1587,7 @@ impl<W: Write> FileKeyXmlWriter<W> {
         write_parent_child_with_attributes! {
             self,
             KEY_FILE_KEY,
-            KEY_FILE_DATA, vec![("Hash", h.as_str())], fs.as_str()
+            KEY_FILE_DATA, [("Hash", h.as_str())], fs.as_str()
 
         };
         Ok(())
@@ -1613,7 +1604,7 @@ impl<W: Write> FileKeyXmlWriter<W> {
         let s1 = ss.0.to_vec().join(" ");
         let s2 = ss.1.to_vec().join(" ");
         // Final formatted text to use as Text of <Data> tag
-        vec!["\n          ", &s1, "\n          ", &s2, "\n    "].join("")
+        ["\n          ", &s1, "\n          ", &s2, "\n    "].join("")
     }
 
     pub fn write(&mut self, key_file_data: &KeyFileData) -> Result<()> {
@@ -1918,7 +1909,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
         println!(" Kp is {:?}", r.unwrap());
     }
     #[test]
@@ -1938,7 +1929,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_err(), true);
+        assert!(r.is_err());
     }
 
     // KeePass-XML sample used by `read_sample_xml` / `read_write_sample_xml`, embedded
@@ -1955,7 +1946,9 @@ mod tests {
         let column2_protected = enc_cipher
             .process_content_b64_str("protected column2 value")
             .unwrap();
-        let password_protected = enc_cipher.process_content_b64_str("s3cret-password").unwrap();
+        let password_protected = enc_cipher
+            .process_content_b64_str("s3cret-password")
+            .unwrap();
 
         format!(
             r#"
@@ -2053,7 +2046,12 @@ mod tests {
             .all_entries()
             .values()
             .next()
-            .and_then(|e| e.entry_field.get_key_values().into_iter().find(|kv| kv.key == key))
+            .and_then(|e| {
+                e.entry_field
+                    .get_key_values()
+                    .into_iter()
+                    .find(|kv| kv.key == key)
+            })
             .map(|kv| kv.value.clone())
     }
 
@@ -2071,9 +2069,9 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
         let kp = r.unwrap();
-        println!(" Kp is {:?}", &kp);
+        println!(" Kp is {:?}", kp);
 
         // Plain (non-Protected) field values must survive decoding unchanged.
         assert_eq!(
@@ -2115,7 +2113,7 @@ mod tests {
         if let Err(e) = &r {
             println!("Error is {:?}", e);
         }
-        assert_eq!(r.is_ok(), true);
+        assert!(r.is_ok());
 
         let cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
         let kp = r.unwrap();
@@ -2124,7 +2122,7 @@ mod tests {
         if let Err(e) = &write_result {
             println!("Error is {:?}", e);
         }
-        assert_eq!(write_result.is_ok(), true);
+        assert!(write_result.is_ok());
 
         // Re-parse what was just written and compare against the original values -
         // guards the write path the same way `read_sample_xml` guards the read path
@@ -2135,7 +2133,11 @@ mod tests {
         let reparse_cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
         let mut reparse_reader = XmlReader::new(&xml_content[..], Some(reparse_cipher));
         let reparsed = reparse_reader.parse();
-        assert!(reparsed.is_ok(), "re-parsing written xml failed: {:?}", reparsed);
+        assert!(
+            reparsed.is_ok(),
+            "re-parsing written xml failed: {:?}",
+            reparsed
+        );
         let reparsed_kp = reparsed.unwrap();
 
         for field in ["UserName", "Title", "URL", "Notes", "Password", "Column2"] {

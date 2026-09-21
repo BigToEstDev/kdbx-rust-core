@@ -1,4 +1,4 @@
-﻿use crate::write_header_with_size;
+use crate::write_header_with_size;
 
 use super::*;
 
@@ -93,7 +93,7 @@ impl KdbxFile {
     pub fn set_file_key(&mut self, key_file_name: Option<&str>) -> Result<()> {
         debug!(
             "set_file_key is called with key_file_name: {:?}",
-            &key_file_name
+            key_file_name
         );
 
         // We need not do anything if the current db does not use key file and the no file name is selected
@@ -139,7 +139,7 @@ impl KdbxFile {
         debug!(
             "set_credentials is called with password nil?: {}, key_file_name: {:?}",
             password.is_none(),
-            &key_file_name
+            key_file_name
         );
 
         self.file_key = FileKey::from(key_file_name)?;
@@ -268,7 +268,7 @@ impl KdbxFile {
             // the dropped object graph (Rust does not zero on drop).
             framed.zeroize();
             xml_bytes.zeroize();
-            for (_h, data) in attachments.iter_mut() {
+            for data in attachments.values_mut() {
                 data.zeroize();
             }
             kp.zeroize_sensitive_content();
@@ -384,9 +384,10 @@ fn frame_locked_content(
     buf
 }
 
-fn unframe_locked_content(
-    framed: &[u8],
-) -> Result<(Vec<u8>, HashMap<AttachmentHashValue, Vec<u8>>)> {
+// Decrypted content bytes and the attachment blobs taken out of the db while it is locked
+type UnframedLockedContent = (Vec<u8>, HashMap<AttachmentHashValue, Vec<u8>>);
+
+fn unframe_locked_content(framed: &[u8]) -> Result<UnframedLockedContent> {
     let corrupt = || Error::UnexpectedError("Corrupt locked content frame".into());
 
     let mut pos = 0usize;
@@ -488,10 +489,10 @@ impl MainHeader {
 
             match vd_t[0] {
                 vd_type::UINT64 => {
-                    vds.push(VariantDict::UINT64(name, util::to_u64(&bytes_buf)?));
+                    vds.push(VariantDict::UInt64(name, util::to_u64(&bytes_buf)?));
                 }
                 vd_type::UINT32 => {
-                    vds.push(VariantDict::UINT32(name, util::to_u32(&bytes_buf)?));
+                    vds.push(VariantDict::UInt32(name, util::to_u32(&bytes_buf)?));
                 }
                 vd_type::BYTEARRAY => {
                     if name.as_str() == "$UUID" {
@@ -501,7 +502,7 @@ impl MainHeader {
                             kdf = KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::default());
                         }
                     } else {
-                        vds.push(VariantDict::BYTEARRAY(name, bytes_buf.clone()));
+                        vds.push(VariantDict::ByteArray(name, bytes_buf.clone()));
                     }
                 }
                 _ => {
@@ -531,20 +532,16 @@ impl MainHeader {
 
     fn update_argon2_with_vds(
         &self,
-        vds: &Vec<VariantDict>,
+        vds: &[VariantDict],
         argon2_kdf: crypto::kdf::Argon2Kdf,
     ) -> crypto::kdf::Argon2Kdf {
         let kf = vds.iter().fold(argon2_kdf, |mut acc, vd| {
             match vd {
-                VariantDict::UINT64(name, val) if *name == "I".to_string() => acc.iterations = *val,
-                VariantDict::UINT64(name, val) if *name == "M".to_string() => acc.memory = *val,
-                VariantDict::UINT32(name, val) if *name == "P".to_string() => {
-                    acc.parallelism = *val
-                }
-                VariantDict::UINT32(name, val) if *name == "V".to_string() => acc.version = *val,
-                VariantDict::BYTEARRAY(name, val) if *name == "S".to_string() => {
-                    acc.salt = val.clone()
-                }
+                VariantDict::UInt64(name, val) if name == "I" => acc.iterations = *val,
+                VariantDict::UInt64(name, val) if name == "M" => acc.memory = *val,
+                VariantDict::UInt32(name, val) if name == "P" => acc.parallelism = *val,
+                VariantDict::UInt32(name, val) if name == "V" => acc.version = *val,
+                VariantDict::ByteArray(name, val) if name == "S" => acc.salt = val.clone(),
                 _ => (),
             }
             acc
@@ -578,7 +575,11 @@ impl MainHeader {
         match &self.kdf_algorithm {
             // Both Argon2 variants have the same parameters; the UUID comes from the enum variant
             KdfAlgorithm::Argon2d(kdf) | KdfAlgorithm::Argon2id(kdf) => {
-                write(vd_type::BYTEARRAY, "$UUID", self.kdf_algorithm.uuid_bytes()?)?;
+                write(
+                    vd_type::BYTEARRAY,
+                    "$UUID",
+                    self.kdf_algorithm.uuid_bytes()?,
+                )?;
                 write(vd_type::UINT64, "I", &kdf.iterations.to_le_bytes())?;
                 write(vd_type::UINT64, "M", &kdf.memory.to_le_bytes())?;
                 write(vd_type::UINT32, "P", &kdf.parallelism.to_le_bytes())?;
@@ -587,9 +588,9 @@ impl MainHeader {
             }
 
             _ => {
-                return Err(Error::UnsupportedKdfAlgorithm(format!(
-                    "Found invalid KdfAlgorithm during writing"
-                )));
+                return Err(Error::UnsupportedKdfAlgorithm(
+                    "Found invalid KdfAlgorithm during writing".to_string(),
+                ));
             }
         }
         //IMPORTANT: Need to mark the end of Variant Dict with just END type byte
@@ -600,7 +601,7 @@ impl MainHeader {
     pub(crate) fn write_bytes<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
         write_header_with_size!(writer, header_type::CIPHER_ID, &self.cipher_id);
         writer.write_all(&[header_type::COMPRESSION_FLAGS])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
+        writer.write_all(&4_u32.to_le_bytes())?;
         writer.write_all(&self.compression_flag.to_le_bytes())?;
 
         write_header_with_size!(writer, header_type::MASTER_SEED, &self.master_seed);
@@ -629,8 +630,8 @@ impl MainHeader {
 
         //End of header [13, 10, 13, 10]
         writer.write_all(&[header_type::END_OF_HEADER])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
-        writer.write_all(&vec![13, 10, 13, 10])?; //End Data
+        writer.write_all(&4_u32.to_le_bytes())?;
+        writer.write_all(&[13, 10, 13, 10])?; //End Data
 
         Ok(())
     }
@@ -689,7 +690,7 @@ impl InnerHeader {
         writer: &mut W,
     ) -> Result<()> {
         writer.write_all(&[inner_header_type::STREAM_ID])?;
-        writer.write_all(&(4 as u32).to_le_bytes())?;
+        writer.write_all(&4_u32.to_le_bytes())?;
         writer.write_all(&self.stream_cipher_id.to_le_bytes())?;
 
         write_header_with_size!(
@@ -716,7 +717,7 @@ impl InnerHeader {
                 self.entry_attachments
                     .hash_index_ref
                     .insert(h, writen_index);
-                writen_index = writen_index + 1;
+                writen_index += 1;
             }
             // else {
             //     println!("Hash {} is already found at index {:?} and skipping writing to binary data", &h, hidx);
@@ -727,7 +728,7 @@ impl InnerHeader {
         writer.write_all(&[inner_header_type::END_OF_HEADER])?;
 
         // [0, 0, 0, 0] => 0 bytes size - No inner header data for end marker
-        writer.write_all(&vec![0u8; 4])?;
+        writer.write_all(&[0u8; 4])?;
 
         Ok(())
     }

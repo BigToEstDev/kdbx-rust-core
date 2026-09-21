@@ -53,7 +53,7 @@ fn verify_new_group(_ctx: &mut MergeTestContext) {
 
     // println!("groups in final target db are {:?}", &groups);
 
-    assert_eq!(groups.contains(&"S_G1_db1".to_string()), true);
+    assert!(groups.contains(&"S_G1_db1".to_string()));
 }
 
 #[test_context(MergeTestContext)]
@@ -83,7 +83,7 @@ fn verify_updated_group(_ctx: &mut MergeTestContext) {
 
     // println!("groups in final target db are {:?}", &groups);
 
-    assert_eq!(groups.contains(&"group1 changed".to_string()), true);
+    assert!(groups.contains(&"group1 changed".to_string()));
 }
 
 #[test_context(MergeTestContext)]
@@ -96,19 +96,14 @@ fn verify_group_location_changed(_ctx: &mut MergeTestContext) {
     // Create a new group
     let mut group3 = Group::with_parent(&source_db.root.root_uuid());
     group3.set_name("group3").update_modification_time_now();
-    let g3_uuid = group3.get_uuid().clone();
+    let g3_uuid = group3.get_uuid();
     source_db.root.insert_group(group3).unwrap();
 
     // Need to enusre that the following group move is happens in some later time
     util::test_clock::advance_by(1);
 
     // Move the group1 as child of group3 in the source
-    let g1_uuid = source_db
-        .root
-        .group_by_name("group1")
-        .unwrap()
-        .get_uuid()
-        .clone();
+    let g1_uuid = source_db.root.group_by_name("group1").unwrap().get_uuid();
 
     source_db.root.move_group(g1_uuid, g3_uuid).unwrap();
 
@@ -157,7 +152,7 @@ fn verify_root_group_updated(_ctx: &mut MergeTestContext) {
         .collect::<Vec<String>>();
 
     // println!("groups in final target db are {:?}", &groups);
-    assert_eq!(groups.contains(&new_root_name.to_string()), true);
+    assert!(groups.contains(&new_root_name.to_string()));
 }
 
 #[test_context(MergeTestContext)]
@@ -174,7 +169,7 @@ fn verify_entry_location_changed(_ctx: &mut MergeTestContext) {
     // Move the entry to group2 as child in source db
     let g2 = source_db.root.group_by_name("group2").unwrap().clone();
 
-    let g2_uuid = g2.get_uuid().clone();
+    let g2_uuid = g2.get_uuid();
 
     // println!("-- Group {} and child entries BEFORE {:?}",&g2_uuid, g2.entry_uuids() ) ;
 
@@ -182,8 +177,7 @@ fn verify_entry_location_changed(_ctx: &mut MergeTestContext) {
         .root
         .entry_by_matching_kv(TITLE, "entry1")
         .unwrap()
-        .get_uuid()
-        .clone();
+        .get_uuid();
 
     // println!("-- entry 1 uuid is {}",&e1_uuid);
 
@@ -195,7 +189,7 @@ fn verify_entry_location_changed(_ctx: &mut MergeTestContext) {
     //let g2_uuid = g2.get_uuid().clone();
     // println!("-- Group {} and child entries AFTER {:?}",&g2_uuid, g2.entry_uuids() ) ;
 
-    assert_eq!(g2.entry_uuids().len() == 1, true);
+    assert!(g2.entry_uuids().len() == 1);
 
     Merger::from_kdbx_file(&source, &mut target)
         .merge()
@@ -207,7 +201,7 @@ fn verify_entry_location_changed(_ctx: &mut MergeTestContext) {
     // let g2_uuid = g2.get_uuid().clone();
     // println!("-- Group {} and child entries AFTER {:?}",&g2_uuid, g2.entry_uuids() ) ;
 
-    assert_eq!(g2.entry_uuids().len() == 2, true);
+    assert!(g2.entry_uuids().len() == 2);
 }
 
 #[test_context(MergeTestContext)]
@@ -224,11 +218,11 @@ fn verify_entry_simple_update(_ctx: &mut MergeTestContext) {
         .unwrap()
         .clone();
 
-    let e1_uuid = e1.get_uuid().clone();
+    let e1_uuid = e1.get_uuid();
 
     let before_histories = e1.histories().clone();
     // println!("before_histories {:?}", &before_histories.len());
-    assert_eq!(before_histories.len() == 0, true);
+    assert!(before_histories.is_empty());
 
     util::test_clock::advance_by(1);
 
@@ -238,7 +232,7 @@ fn verify_entry_simple_update(_ctx: &mut MergeTestContext) {
     let e1 = target_db.root.entry_by_id(&e1_uuid).unwrap().clone();
     let target_entry_before_histories = e1.histories().clone();
     // println!("target target_entry_before_histories {:?}", &target_entry_before_histories.len());
-    assert_eq!(target_entry_before_histories.len() == 0, true);
+    assert!(target_entry_before_histories.is_empty());
 
     Merger::from_kdbx_file(&source, &mut target)
         .merge()
@@ -248,7 +242,7 @@ fn verify_entry_simple_update(_ctx: &mut MergeTestContext) {
     let e1 = target_db.root.entry_by_id(&e1_uuid).unwrap().clone();
     let target_entry_after_histories = e1.histories().clone();
     // println!("target target_entry_after_histories {:?}", &target_entry_after_histories.len());
-    assert_eq!(target_entry_after_histories.len() == 1, true);
+    assert!(target_entry_after_histories.len() == 1);
 }
 
 #[test_context(MergeTestContext)]
@@ -262,16 +256,13 @@ fn verify_meta_add_custom_icon(_ctx: &mut MergeTestContext) {
     let dummy_icon_data: Vec<u8> = vec![1, 2, 55, 67];
     source_db.meta.add_custom_icon(&dummy_icon_data);
 
-    assert_eq!(target_db.meta.all_custom_icons().len() == 0, true);
+    assert!(target_db.meta.all_custom_icons().is_empty());
 
     Merger::from_kdbx_file(&source, &mut target)
         .merge()
         .unwrap();
 
-    assert_eq!(
-        target.keepass_main_content().meta.all_custom_icons().len() == 1,
-        true
-    );
+    assert!(target.keepass_main_content().meta.all_custom_icons().len() == 1);
 }
 
 #[test_context(MergeTestContext)]
@@ -353,7 +344,7 @@ fn verify_merge_moveto_recycle_bin(_ctx: &mut MergeTestContext) {
     for id in ids {
         let g = source_db.root.group_by_id(&id).unwrap();
         let cid = g.entry_uuids();
-        println!("Source recycled entry id {:?} in group {}", &cid, g.name());
+        println!("Source recycled entry id {:?} in group {}", cid, g.name());
     }
 
     let _merge_result = Merger::from_kdbx_file(&source, &mut target)
@@ -373,7 +364,7 @@ fn verify_merge_moveto_recycle_bin(_ctx: &mut MergeTestContext) {
     for id in ids {
         let g = target_db.root.group_by_id(&id).unwrap();
         let cid = g.entry_uuids();
-        println!("Target recycled entry id {:?} in group {}", &cid, g.name());
+        println!("Target recycled entry id {:?} in group {}", cid, g.name());
     }
 }
 
@@ -399,7 +390,7 @@ fn verify_merge_deletions(_ctx: &mut MergeTestContext) {
 
     // Before merge target should not have any deleted objtect
     let target_db_deleted_objects = target_db.root.deleted_objects();
-    assert_eq!(target_db_deleted_objects.is_empty(), true);
+    assert!(target_db_deleted_objects.is_empty());
 
     // Merge source to the target
     Merger::from_kdbx_file(&source, &mut target)
@@ -409,7 +400,7 @@ fn verify_merge_deletions(_ctx: &mut MergeTestContext) {
     let target_db = target.keepass_main_content.as_ref().unwrap();
     let target_db_deleted_objects = target_db.root.deleted_objects().clone();
 
-    assert_eq!(target_db_deleted_objects.len() == 2, true);
+    assert!(target_db_deleted_objects.len() == 2);
 
     // Both group and its entry should be in the deleted objects of the target
     let r = target_db_deleted_objects
@@ -417,7 +408,7 @@ fn verify_merge_deletions(_ctx: &mut MergeTestContext) {
         .filter(|d| [g2.get_uuid(), e2.get_uuid()].contains(&d.uuid))
         .count();
 
-    assert_eq!(r == 2, true);
+    assert!(r == 2);
 }
 
 #[test_context(MergeTestContext)]
@@ -447,7 +438,7 @@ fn verify_merge_deletions_2(_ctx: &mut MergeTestContext) {
     // source db has some deleted objects
     let source_db_deleted_objects = source_db.root.deleted_objects();
     //println!("Source Dos before {:?}", source_db_deleted_objects);
-    assert_eq!(source_db_deleted_objects.len() == 2, true);
+    assert!(source_db_deleted_objects.len() == 2);
 
     // Adbvance time to simulate modification in different time
     util::test_clock::advance_by(1);
@@ -468,5 +459,5 @@ fn verify_merge_deletions_2(_ctx: &mut MergeTestContext) {
 
     // println!(" Dos after {:?}", target_db_deleted_objects);
 
-    assert_eq!(target_db_deleted_objects.len() == 0, true);
+    assert!(target_db_deleted_objects.is_empty());
 }
