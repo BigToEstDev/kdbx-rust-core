@@ -92,12 +92,14 @@ impl CustomData {
     // }
 
     /// A group is considered category when we do not find the custom data OKP_GROUP_AS_CATEGORY or
-    /// when the value is No. So the default behaviour is, all groups are considered as categories except those
-    /// that have OKP_GROUP_AS_CATEGORY entry with value "No"
+    /// when its value is anything but "No". So the default behaviour is, all groups are considered as
+    /// categories except those that have OKP_GROUP_AS_CATEGORY entry with value "No" (written by
+    /// unmark_as_category). The check used to be inverted (== "No"), so an unmarked group came back
+    /// as a category after the database was saved and reopened
     pub fn is_category(&self) -> bool {
         self.items
             .get(OKP_GROUP_AS_CATEGORY)
-            .is_none_or(|v| v.value == "No")
+            .is_none_or(|v| v.value != "No")
     }
 }
 
