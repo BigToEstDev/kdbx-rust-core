@@ -484,6 +484,38 @@ pub(crate) mod test_clock {
 mod tests {
     use super::*;
 
+    // KDBX header fields are little-endian; the byte patterns below give a different
+    // number if read big-endian. A slice of any other length (shorter or longer) must fail.
+    #[test]
+    fn to_u64_reads_exactly_8_le_bytes() {
+        let bytes = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(to_u64(&bytes), Ok(0x0807_0605_0403_0201));
+
+        assert_eq!(to_u64(&bytes[..7]), Err("Conversion to u64 failed"));
+        assert_eq!(to_u64(&[0u8; 9]), Err("Conversion to u64 failed"));
+        assert_eq!(to_u64(&[]), Err("Conversion to u64 failed"));
+    }
+
+    #[test]
+    fn to_i32_reads_exactly_4_le_bytes() {
+        assert_eq!(to_i32(&[0xFE, 0xFF, 0xFF, 0xFF]), Ok(-2));
+        assert_eq!(to_i32(&[0x01, 0x02, 0x03, 0x04]), Ok(0x0403_0201));
+
+        assert_eq!(to_i32(&[0x01, 0x02, 0x03]), Err("Conversion to i32 failed"));
+        assert_eq!(to_i32(&[0u8; 5]), Err("Conversion to i32 failed"));
+        assert_eq!(to_i32(&[]), Err("Conversion to i32 failed"));
+    }
+
+    #[test]
+    fn to_u32_reads_exactly_4_le_bytes() {
+        assert_eq!(to_u32(&[0x01, 0x02, 0x03, 0x04]), Ok(0x0403_0201));
+        assert_eq!(to_u32(&[0xFF, 0xFF, 0xFF, 0xFF]), Ok(u32::MAX));
+
+        assert_eq!(to_u32(&[0x01, 0x02, 0x03]), Err("Conversion to u32 failed"));
+        assert_eq!(to_u32(&[0u8; 5]), Err("Conversion to u32 failed"));
+        assert_eq!(to_u32(&[]), Err("Conversion to u32 failed"));
+    }
+
     #[test]
     fn decode_uuid_sample_b64str() {
         init_test_logging();
