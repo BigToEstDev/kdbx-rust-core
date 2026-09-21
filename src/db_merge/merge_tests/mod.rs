@@ -103,11 +103,7 @@ fn verify_group_location_changed(_ctx: &mut MergeTestContext) {
     util::test_clock::advance_by(1);
 
     // Move the group1 as child of group3 in the source
-    let g1_uuid = source_db
-        .root
-        .group_by_name("group1")
-        .unwrap()
-        .get_uuid();
+    let g1_uuid = source_db.root.group_by_name("group1").unwrap().get_uuid();
 
     source_db.root.move_group(g1_uuid, g3_uuid).unwrap();
 
@@ -266,9 +262,7 @@ fn verify_meta_add_custom_icon(_ctx: &mut MergeTestContext) {
         .merge()
         .unwrap();
 
-    assert!(
-        target.keepass_main_content().meta.all_custom_icons().len() == 1
-    );
+    assert!(target.keepass_main_content().meta.all_custom_icons().len() == 1);
 }
 
 #[test_context(MergeTestContext)]

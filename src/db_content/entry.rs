@@ -742,10 +742,7 @@ impl Entry {
         let max_items_allowed = self.meta_share.history_max_items() as usize;
         if histories.len() >= max_items_allowed {
             let remove_count = histories.len() - max_items_allowed + 1; // +1 used as we will adding the existing_entry_copy
-            histories = histories
-                .into_iter()
-                .skip(remove_count)
-                .collect();
+            histories = histories.into_iter().skip(remove_count).collect();
             debug!("Removed {} history items", { remove_count });
         }
 
@@ -929,10 +926,8 @@ impl Entry {
                 });
 
                 // Create new encoded_entry_types without the current entry type
-                let mut encoded_entry_types: Vec<String> = types_list
-                    .iter()
-                    .filter(|s| *s != et).cloned()
-                    .collect(); //vec![];
+                let mut encoded_entry_types: Vec<String> =
+                    types_list.iter().filter(|s| *s != et).cloned().collect(); //vec![];
 
                 self.history.entries.iter_mut().for_each(|he| {
                     Entry::replace_history_entry_type_data_by_index(

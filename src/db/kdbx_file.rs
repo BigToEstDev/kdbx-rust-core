@@ -1,4 +1,4 @@
-﻿use crate::write_header_with_size;
+use crate::write_header_with_size;
 
 use super::*;
 
@@ -387,9 +387,7 @@ fn frame_locked_content(
 // Decrypted content bytes and the attachment blobs taken out of the db while it is locked
 type UnframedLockedContent = (Vec<u8>, HashMap<AttachmentHashValue, Vec<u8>>);
 
-fn unframe_locked_content(
-    framed: &[u8],
-) -> Result<UnframedLockedContent> {
+fn unframe_locked_content(framed: &[u8]) -> Result<UnframedLockedContent> {
     let corrupt = || Error::UnexpectedError("Corrupt locked content frame".into());
 
     let mut pos = 0usize;
@@ -541,13 +539,9 @@ impl MainHeader {
             match vd {
                 VariantDict::UInt64(name, val) if name == "I" => acc.iterations = *val,
                 VariantDict::UInt64(name, val) if name == "M" => acc.memory = *val,
-                VariantDict::UInt32(name, val) if name == "P" => {
-                    acc.parallelism = *val
-                }
+                VariantDict::UInt32(name, val) if name == "P" => acc.parallelism = *val,
                 VariantDict::UInt32(name, val) if name == "V" => acc.version = *val,
-                VariantDict::ByteArray(name, val) if name == "S" => {
-                    acc.salt = val.clone()
-                }
+                VariantDict::ByteArray(name, val) if name == "S" => acc.salt = val.clone(),
                 _ => (),
             }
             acc
@@ -581,7 +575,11 @@ impl MainHeader {
         match &self.kdf_algorithm {
             // Both Argon2 variants have the same parameters; the UUID comes from the enum variant
             KdfAlgorithm::Argon2d(kdf) | KdfAlgorithm::Argon2id(kdf) => {
-                write(vd_type::BYTEARRAY, "$UUID", self.kdf_algorithm.uuid_bytes()?)?;
+                write(
+                    vd_type::BYTEARRAY,
+                    "$UUID",
+                    self.kdf_algorithm.uuid_bytes()?,
+                )?;
                 write(vd_type::UINT64, "I", &kdf.iterations.to_le_bytes())?;
                 write(vd_type::UINT64, "M", &kdf.memory.to_le_bytes())?;
                 write(vd_type::UINT32, "P", &kdf.parallelism.to_le_bytes())?;
@@ -590,7 +588,9 @@ impl MainHeader {
             }
 
             _ => {
-                return Err(Error::UnsupportedKdfAlgorithm("Found invalid KdfAlgorithm during writing".to_string()));
+                return Err(Error::UnsupportedKdfAlgorithm(
+                    "Found invalid KdfAlgorithm during writing".to_string(),
+                ));
             }
         }
         //IMPORTANT: Need to mark the end of Variant Dict with just END type byte

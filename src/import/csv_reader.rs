@@ -250,13 +250,11 @@ impl CsvLookup {
             return false;
         }
 
-        self.folder_path(csv_record)
-            .first()
-            .is_some_and(|segment| {
-                self.skip_folders
-                    .iter()
-                    .any(|skipped| skipped.eq_ignore_ascii_case(segment))
-            })
+        self.folder_path(csv_record).first().is_some_and(|segment| {
+            self.skip_folders
+                .iter()
+                .any(|skipped| skipped.eq_ignore_ascii_case(segment))
+        })
     }
 
     fn to_imported_item(&self, csv_record: &CsvDataRecord) -> ImportedItem {
@@ -518,8 +516,7 @@ impl CsvImport {
         path: P,
         import_options: Option<CsvImportOptions>,
     ) -> Result<CvsHeaderInfo> {
-        let import_options =
-            import_options.unwrap_or_default();
+        let import_options = import_options.unwrap_or_default();
         let mut csv_rdr = import_options.reader_builder().from_path(path.as_ref())?;
 
         let header_row = if csv_rdr.has_headers() {
@@ -763,8 +760,16 @@ mod tests {
         };
 
         let item = lookup.to_imported_item(&record(&["JBSWY3DPEHPK3PXP"]));
-        let otp = item.fields.iter().find(|f| f.name == "otp").expect("otp field");
-        assert!(otp.value.starts_with("otpauth://totp/"), "got {}", otp.value);
+        let otp = item
+            .fields
+            .iter()
+            .find(|f| f.name == "otp")
+            .expect("otp field");
+        assert!(
+            otp.value.starts_with("otpauth://totp/"),
+            "got {}",
+            otp.value
+        );
 
         // An unusable value drops the field rather than storing a dead otp
         let item = lookup.to_imported_item(&record(&["not-a-secret-18"]));
@@ -815,7 +820,10 @@ mod tests {
     #[test]
     fn a_row_is_a_login_when_no_type_column_is_known() {
         let lookup = lookup_with_group_at(0);
-        assert_eq!(lookup.to_imported_item(&record(&["Work"])).kind, ImportedKind::Login);
+        assert_eq!(
+            lookup.to_imported_item(&record(&["Work"])).kind,
+            ImportedKind::Login
+        );
     }
 
     #[test]
@@ -830,7 +838,11 @@ mod tests {
         let kind_of = |value: &str| lookup.to_imported_item(&record(&["Work", value])).kind;
 
         assert_eq!(kind_of("credit_card"), ImportedKind::CreditCard);
-        assert_eq!(kind_of("CREDIT_CARD"), ImportedKind::CreditCard, "case insensitive");
+        assert_eq!(
+            kind_of("CREDIT_CARD"),
+            ImportedKind::CreditCard,
+            "case insensitive"
+        );
         assert_eq!(kind_of("password"), ImportedKind::Login);
         // An unlisted or blank value falls back rather than failing the row
         assert_eq!(kind_of("something-new"), ImportedKind::Login);
@@ -848,11 +860,8 @@ mod tests {
         lookup.other_fields = other_fields;
         lookup.favourite_column = Some(1);
 
-        let tags_of = |tags: &str, fav: &str| {
-            lookup
-                .to_imported_item(&record(&[tags, fav, "Work"]))
-                .tags
-        };
+        let tags_of =
+            |tags: &str, fav: &str| lookup.to_imported_item(&record(&[tags, fav, "Work"])).tags;
 
         assert_eq!(tags_of("", "1").as_deref(), Some("Favorites"));
         assert_eq!(tags_of("work", "1").as_deref(), Some("work;Favorites"));
@@ -902,8 +911,11 @@ mod tests {
         lookup.standard_fields = standard_fields;
         lookup.packed_fields_column = Some(1);
 
-        let item =
-            lookup.to_imported_item(&record(&["real-secret", "password: decoy\nPin: 1234", "Work"]));
+        let item = lookup.to_imported_item(&record(&[
+            "real-secret",
+            "password: decoy\nPin: 1234",
+            "Work",
+        ]));
 
         let password = item.fields.iter().find(|f| f.name == "Password").unwrap();
         assert_eq!(password.value, "real-secret");
@@ -1003,7 +1015,10 @@ mod tests {
         lookup.extra_fields = vec![(ImportedKind::CreditCard, "Number", 2)];
 
         let card = lookup.to_imported_item(&record(&["Cards", "credit_card", "4111"]));
-        assert!(card.fields.iter().any(|f| f.name == "Number" && f.value == "4111"));
+        assert!(card
+            .fields
+            .iter()
+            .any(|f| f.name == "Number" && f.value == "4111"));
 
         // A login has no Number field on its entry type, so it must not be given one
         let login = lookup.to_imported_item(&record(&["Web", "password", "4111"]));
@@ -1066,7 +1081,10 @@ mod tests {
     fn verify1() {
         // A small csv generated in the test itself instead of reading an external file
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("pass_core_test_csv_reader_verify1_{}.csv", std::process::id()));
+        let path = dir.join(format!(
+            "pass_core_test_csv_reader_verify1_{}.csv",
+            std::process::id()
+        ));
         std::fs::write(
             &path,
             "Title,Username,Password\nSite One,user1,pass1\nSite Two,user2,pass2\n",

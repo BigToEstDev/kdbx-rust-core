@@ -125,7 +125,6 @@ pub(crate) fn find_update_entry(
     entry
 }
 
-
 // Copied from /onekeepass-core/tests/common/mod.rs
 pub(crate) mod dummy_key_store_service {
     use log::debug;

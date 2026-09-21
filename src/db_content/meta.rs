@@ -225,10 +225,7 @@ impl Meta {
 
     pub fn custom_entry_type_names_by_id(&self) -> Vec<(Uuid, String)> {
         let types = self.meta_share.custom_entry_types_by_id.lock().unwrap();
-        types
-            .iter()
-            .map(|(k, v)| (*k, v.name.clone()))
-            .collect()
+        types.iter().map(|(k, v)| (*k, v.name.clone())).collect()
     }
 
     pub fn with_custom_entry_type<F, R>(&self, action: F) -> R

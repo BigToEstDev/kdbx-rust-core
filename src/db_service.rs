@@ -65,9 +65,7 @@ pub use io::*;
 
 pub use crate::error::{self, Error, Result};
 
-pub use crate::password_generator::{
-    AnalyzedPassword, PasswordGenerationOptions, PasswordScore,
-};
+pub use crate::password_generator::{AnalyzedPassword, PasswordGenerationOptions, PasswordScore};
 
 // See lib.rs where util module is reexported as service_util
 // TDOO: Rename 'util' module as 'service_util' to avoid confilts with other crates 'util' module
@@ -84,9 +82,9 @@ pub use crate::db_content::{
 
 pub use crate::form_data::{
     CategoryDetail, CurrentOtpTokenData, DbSettings, EntryCategories, EntryCategory,
-    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary,
-    EntryTypeFormData, EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree,
-    KdbxLoaded, KdbxSaved,
+    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary, EntryTypeFormData,
+    EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree, KdbxLoaded,
+    KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -105,8 +103,8 @@ pub use autofill::{autofill_search_term, autofill_search_term_filtered};
 pub use autofill::associate_app_to_entry;
 
 pub use custom_icon::{
-    add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon,
-    set_entry_custom_icon, set_group_custom_icon,
+    add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon, set_entry_custom_icon,
+    set_group_custom_icon,
 };
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -1125,14 +1123,11 @@ pub fn delete_custom_entry_type_by_id(
 ) -> Result<EntryTypeHeader> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         let et_opt = k.delete_custom_entry_type_by_id(entry_type_uuid)?;
-        let entry_type_header = et_opt.map_or_else(
-            EntryTypeHeader::default,
-            |e| EntryTypeHeader {
-                uuid: e.uuid,
-                name: e.name.clone(),
-                icon_name: None,
-            },
-        );
+        let entry_type_header = et_opt.map_or_else(EntryTypeHeader::default, |e| EntryTypeHeader {
+            uuid: e.uuid,
+            name: e.name.clone(),
+            icon_name: None,
+        });
         Ok(entry_type_header)
     })
 }
@@ -1211,9 +1206,7 @@ pub fn merge_databases(
         let [target, source] = store.get_disjoint_mut([target_db_key, source_db_key]);
         log::debug!("Got refs for source and target");
 
-        let target_kdbx = &mut target
-            .ok_or("Target database key is not found")?
-            .kdbx_file;
+        let target_kdbx = &mut target.ok_or("Target database key is not found")?.kdbx_file;
         let source_kdbx = &source
             .as_ref()
             .ok_or("Source database key is not found")?

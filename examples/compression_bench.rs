@@ -56,7 +56,9 @@ fn xml_like_payload(target_len: usize) -> Vec<u8> {
     let mut out = String::with_capacity(target_len + 512);
     let mut n: u64 = 0;
     while out.len() < target_len {
-        n = n.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        n = n
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         out.push_str("<Entry><UUID>");
         out.push_str(&format!("{:032x}", n));
         out.push_str("</UUID><String><Key>UserName</Key><Value>user");
@@ -138,7 +140,9 @@ fn add_entry(db_key: &str, parent_group_uuid: &Uuid, i: usize) {
         .unwrap();
     for field in section.iter_mut() {
         match field["key"].as_str() {
-            Some("UserName") => field["value"] = serde_json::json!(format!("user{}@example.com", i)),
+            Some("UserName") => {
+                field["value"] = serde_json::json!(format!("user{}@example.com", i))
+            }
             Some("Password") => {
                 field["value"] = serde_json::json!(format!("p{:0>24x}", i * 2654435761))
             }
@@ -210,8 +214,7 @@ fn main() {
 
     println!(
         "runs: {} warmup + {} measured | flate2 zlib feature: см. Cargo.toml",
-        WARMUP_RUNS,
-        MEASURED_RUNS
+        WARMUP_RUNS, MEASURED_RUNS
     );
     println!();
 

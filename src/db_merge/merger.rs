@@ -252,10 +252,7 @@ impl<'a> Merger<'a> {
                 self.remap_group_icon(&mut g);
                 self.target_db.root.update_group(g, true);
 
-                self.record_group_updated(
-                    source_root_group.name(),
-                    source_root_group.get_uuid(),
-                );
+                self.record_group_updated(source_root_group.name(), source_root_group.get_uuid());
             }
 
             // Need to ensure that both source and target use the same recycle group
@@ -478,8 +475,7 @@ impl<'a> Merger<'a> {
                         && target_entry.parent_group_uuid() != source_parent_group_uuid
                     // && !self.different_databases
                     {
-                        let (title, entry_uuid) =
-                            (target_entry.title(), target_entry.get_uuid());
+                        let (title, entry_uuid) = (target_entry.title(), target_entry.get_uuid());
 
                         self.target_db
                             .root

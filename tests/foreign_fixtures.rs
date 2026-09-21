@@ -20,7 +20,8 @@ const PASSWORD: &str = "test-pass-1234";
 
 const ATTACHMENT_NAME: &str = "notes.txt";
 const ATTACHMENT_DATA: &[u8] = b"example doc\n2 lines\n";
-const TOTP_URL: &str = "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30";
+const TOTP_URL: &str =
+    "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30";
 
 fn resource(name: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -40,7 +41,12 @@ static COPY_SEQ: AtomicU64 = AtomicU64::new(0);
 fn temp_copy(name: &str) -> String {
     let seq = COPY_SEQ.fetch_add(1, Ordering::Relaxed);
     let mut target = std::env::temp_dir();
-    target.push(format!("okp_fixture_{}_{}_{}", std::process::id(), seq, name));
+    target.push(format!(
+        "okp_fixture_{}_{}_{}",
+        std::process::id(),
+        seq,
+        name
+    ));
     std::fs::copy(resource(name), &target).unwrap();
     target.to_str().unwrap().to_string()
 }
@@ -85,10 +91,7 @@ fn verify_content(db_key: &str) {
 
     // --- записи: GitHub, Email, Server ---
     let entries = db_service::entry_summary_data(db_key, EntryCategory::AllEntries).unwrap();
-    let mut titles: Vec<String> = entries
-        .iter()
-        .filter_map(|e| e.title.clone())
-        .collect();
+    let mut titles: Vec<String> = entries.iter().filter_map(|e| e.title.clone()).collect();
     titles.sort();
     assert_eq!(
         titles,
@@ -134,13 +137,15 @@ fn verify_content(db_key: &str) {
 
     // data_hash сериализуется как строка (см. util::from_or_to::string)
     let data_hash: u64 = binary["data_hash"].as_str().unwrap().parse().unwrap();
-    let out_path =
-        db_service::save_attachment_as_temp_file(
-            db_key,
-            &format!("okp_fixture_attach_{}.bin", COPY_SEQ.fetch_add(1, Ordering::Relaxed)),
-            &data_hash,
-        )
-            .unwrap();
+    let out_path = db_service::save_attachment_as_temp_file(
+        db_key,
+        &format!(
+            "okp_fixture_attach_{}.bin",
+            COPY_SEQ.fetch_add(1, Ordering::Relaxed)
+        ),
+        &data_hash,
+    )
+    .unwrap();
     let mut bytes = vec![];
     std::fs::File::open(&out_path)
         .unwrap()

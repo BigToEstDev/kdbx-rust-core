@@ -1,4 +1,4 @@
-﻿use quick_xml::escape::unescape;
+use quick_xml::escape::unescape;
 use quick_xml::events::attributes::{Attribute, Attributes};
 use quick_xml::events::Event;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText};
@@ -84,7 +84,7 @@ macro_rules! read_tags {
                             //     debug!("The attribute handling action is not used for the Empty tag: {}",et);
                             // }
 
-                            
+
                         }
                     }
                 }
@@ -871,7 +871,7 @@ fn attachment_ref_index(attributes: &mut Attributes) -> i32 {
 /// Start parsing incoming xml bytes content
 pub fn parse(data: &[u8], cipher: Option<ProtectedContentStreamCipher>) -> Result<KeepassFile> {
     let mut reader = XmlReader::new(data, cipher);
-    
+
     reader.parse()
 }
 
@@ -1511,9 +1511,7 @@ impl<'a> FileKeyXmlReader<'a> {
 
     #[inline]
     fn remove_formatting(data: &str) -> String {
-        data.split_whitespace()
-            .collect::<Vec<_>>()
-            .join("")
+        data.split_whitespace().collect::<Vec<_>>().join("")
     }
 
     fn read_data_hash(attributes: &mut Attributes) -> Option<String> {
@@ -1948,7 +1946,9 @@ mod tests {
         let column2_protected = enc_cipher
             .process_content_b64_str("protected column2 value")
             .unwrap();
-        let password_protected = enc_cipher.process_content_b64_str("s3cret-password").unwrap();
+        let password_protected = enc_cipher
+            .process_content_b64_str("s3cret-password")
+            .unwrap();
 
         format!(
             r#"
@@ -2046,7 +2046,12 @@ mod tests {
             .all_entries()
             .values()
             .next()
-            .and_then(|e| e.entry_field.get_key_values().into_iter().find(|kv| kv.key == key))
+            .and_then(|e| {
+                e.entry_field
+                    .get_key_values()
+                    .into_iter()
+                    .find(|kv| kv.key == key)
+            })
             .map(|kv| kv.value.clone())
     }
 
@@ -2128,7 +2133,11 @@ mod tests {
         let reparse_cipher = ProtectedContentStreamCipher::try_from(3, &key).unwrap();
         let mut reparse_reader = XmlReader::new(&xml_content[..], Some(reparse_cipher));
         let reparsed = reparse_reader.parse();
-        assert!(reparsed.is_ok(), "re-parsing written xml failed: {:?}", reparsed);
+        assert!(
+            reparsed.is_ok(),
+            "re-parsing written xml failed: {:?}",
+            reparsed
+        );
         let reparsed_kp = reparsed.unwrap();
 
         for field in ["UserName", "Title", "URL", "Notes", "Password", "Column2"] {

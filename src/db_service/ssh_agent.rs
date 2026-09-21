@@ -43,14 +43,14 @@ fn ssh_key_type_uuid() -> Uuid {
 // KeePass Bool fields are stored as a string ("true"/"True"). Treat anything that
 // is not an affirmative value as disabled.
 fn is_truthy(value: &str) -> bool {
-    matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes")
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes"
+    )
 }
 
 // Returns the trimmed value of a field, or None when absent or empty.
-fn non_empty_field(
-    entry: &crate::db_content::Entry,
-    name: &str,
-) -> Option<String> {
+fn non_empty_field(entry: &crate::db_content::Entry, name: &str) -> Option<String> {
     entry
         .entry_field
         .find_key_value(name)
@@ -95,31 +95,32 @@ fn collect_from_db(
             .unwrap_or(false);
 
         let title = non_empty_field(entry, entry_keyvalue_key::TITLE).unwrap_or_default();
-        let private_key_pem =
-            if let Some(private_key_pem) = non_empty_field(entry, entry_keyvalue_key::PRIVATE_KEY) {
-                private_key_pem
-            } else if let Some((name, data_hash)) =
-                private_key_attachment_candidate(entry, attachment_content)
-            {
-                let Some(bytes) = attachment_content(&data_hash) else {
-                    log::warn!(
-                        "SSH agent: private key attachment '{}' for SSH Key entry '{}' was not found",
-                        name,
-                        title
-                    );
-                    continue;
-                };
-                let Some(private_key_pem) = attachment_private_key_pem(&title, &name, bytes) else {
-                    continue;
-                };
-                private_key_pem
-            } else {
-                log::debug!(
-                    "SSH agent: skipping SSH Key entry '{}' because it has neither a Private Key field nor a private key attachment",
+        let private_key_pem = if let Some(private_key_pem) =
+            non_empty_field(entry, entry_keyvalue_key::PRIVATE_KEY)
+        {
+            private_key_pem
+        } else if let Some((name, data_hash)) =
+            private_key_attachment_candidate(entry, attachment_content)
+        {
+            let Some(bytes) = attachment_content(&data_hash) else {
+                log::warn!(
+                    "SSH agent: private key attachment '{}' for SSH Key entry '{}' was not found",
+                    name,
                     title
                 );
                 continue;
             };
+            let Some(private_key_pem) = attachment_private_key_pem(&title, &name, bytes) else {
+                continue;
+            };
+            private_key_pem
+        } else {
+            log::debug!(
+                    "SSH agent: skipping SSH Key entry '{}' because it has neither a Private Key field nor a private key attachment",
+                    title
+                );
+            continue;
+        };
 
         out.push(SshAgentKeySource {
             db_key: db_key.to_string(),

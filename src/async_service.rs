@@ -301,10 +301,7 @@ pub fn start_polling_entry_otp_fields(
 
     // Start the polling in a thread of Tokio runtime
     // spawn expects a aeg of type : Future + Send + 'static
-    async_runtime().spawn(poll_token_generation(
-        db_key.to_string(),
-        *entry_uuid,
-    ));
+    async_runtime().spawn(poll_token_generation(db_key.to_string(), *entry_uuid));
 }
 
 // Called to remove updating all otp fields of all entries that are set previously

@@ -69,7 +69,6 @@ pub enum KdfAlgorithm {
     NoValidKdfAvailable,
 }
 
-
 impl KdfAlgorithm {
     pub fn default_argon2() -> Self {
         KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::default())
@@ -225,7 +224,6 @@ pub(crate) struct SecuredDatabaseKeys {
     master_key: Vec<u8>,
     encrypted: bool,
 }
-
 
 impl SecuredDatabaseKeys {
     // Hashes all incoming credentials data and creates an instance of SecuredDatabaseKeys
@@ -389,7 +387,7 @@ impl SecuredDatabaseKeys {
                 let phash = crypto::sha256_hash_from_slice(p.as_bytes())?;
                 let fhash = f.content_hash();
                 let data = vec![&phash, &fhash];
-                
+
                 crypto::sha256_hash_vec_vecs(&data)?
             }
             (Some(p), None) => {

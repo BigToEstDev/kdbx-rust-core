@@ -1,4 +1,4 @@
-﻿use std::cmp;
+use std::cmp;
 
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
@@ -458,7 +458,8 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
     fn write_file_signature(&mut self) -> Result<()> {
         self.writer.write_all(&constants::SIG1.to_le_bytes())?;
         self.writer.write_all(&constants::SIG2.to_le_bytes())?;
-        self.writer.write_all(&constants::VERSION_41.to_le_bytes())?;
+        self.writer
+            .write_all(&constants::VERSION_41.to_le_bytes())?;
         Ok(())
     }
 

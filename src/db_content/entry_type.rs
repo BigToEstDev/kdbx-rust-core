@@ -1,4 +1,4 @@
-﻿use log::error;
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -255,7 +255,9 @@ impl VersionedEntryType {
                 }
             }
             // As we have removed the built-in fields, a section may be empty and drop them from storing
-            incoming_et.sections.retain(|sec| !sec.field_defs.is_empty());
+            incoming_et
+                .sections
+                .retain(|sec| !sec.field_defs.is_empty());
 
             Some(incoming_et)
         } else {
@@ -432,7 +434,6 @@ pub enum FieldDataType {
     MonthYear,
     OneTimePassword,
 }
-
 
 // impl FieldDataType {
 //     fn from_str(num_str: &str) -> Self {
@@ -648,7 +649,9 @@ mod tests {
 
         // Simulate adding a custom field to one of standard Section
         let first_section = et1.sections.first_mut();
-        if let Some(f) = first_section { f.field_defs.push(fd1) }
+        if let Some(f) = first_section {
+            f.field_defs.push(fd1)
+        }
 
         // Simulate some additional sections
         let mut add_sections = vec![

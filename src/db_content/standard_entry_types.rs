@@ -629,7 +629,10 @@ mod tests {
         let mut seen = HashSet::new();
         for name in STANDARD_TYPE_NAMES {
             let uuid = STANDARD_TYPE_UUIDS_BY_NAME.get(name).unwrap();
-            assert!(seen.insert(*uuid), "duplicate UUID for standard type '{name}'");
+            assert!(
+                seen.insert(*uuid),
+                "duplicate UUID for standard type '{name}'"
+            );
         }
     }
 

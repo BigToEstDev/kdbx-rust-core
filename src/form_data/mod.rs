@@ -87,8 +87,6 @@ impl From<&KdbxFile> for KdbxLoaded {
             }
         }
 
-        
-
         KdbxLoaded {
             db_key,
             database_name,

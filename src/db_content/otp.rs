@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -43,7 +43,6 @@ pub enum OtpAlgorithm {
     SHA256,
     SHA512,
 }
-
 
 impl fmt::Display for OtpAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

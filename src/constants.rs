@@ -478,4 +478,3 @@ pub mod inner_header_type {
     pub const SALSA20_STREAM: u32 = 2; //LE Bytes (2 0 0 0)
     pub const CHACHA20_STREAM: u32 = 3; //LE Bytes (3 0 0 0)
 }
-

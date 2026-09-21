@@ -136,13 +136,15 @@ pub(crate) fn entry_by_category<'a>(
         EntryCategory::EntryTypeUuid(uuid) => kp
             .collect_all_active_entries()
             .iter()
-            .filter(|e| &e.entry_field.entry_type.uuid == uuid).copied()
+            .filter(|e| &e.entry_field.entry_type.uuid == uuid)
+            .copied()
             .collect::<Vec<_>>(),
 
         EntryCategory::Tag(name) => kp
             .collect_all_active_entries()
             .iter()
-            .filter(|e| split_tags(&e.tags).contains(name)).copied()
+            .filter(|e| split_tags(&e.tags).contains(name))
+            .copied()
             .collect::<Vec<_>>(),
     }
 }
@@ -166,7 +168,8 @@ fn type_name_categories(
             icon_id: 0,
             // Need to get the icon name from EntryType struct - mostly for Custom Entry Types
             icon_name: if let Some(meta) = meta_opt {
-                meta.get_custom_entry_type_by_id(uuid).and_then(|e| e.icon_name)
+                meta.get_custom_entry_type_by_id(uuid)
+                    .and_then(|e| e.icon_name)
             } else {
                 None
             },

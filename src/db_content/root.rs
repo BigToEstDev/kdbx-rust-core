@@ -279,10 +279,7 @@ impl Root {
     }
 
     // Collects all entries that are not in recycle bin
-    pub(crate) fn collect_all_active_entries(
-        &self,
-        recycle_group_uuid: Uuid,
-    ) -> Vec<&Entry> {
+    pub(crate) fn collect_all_active_entries(&self, recycle_group_uuid: Uuid) -> Vec<&Entry> {
         let mut excluded_group_ids = self.deleted_group_uuids();
         excluded_group_ids.push(recycle_group_uuid);
         let v: Vec<&Entry> = self
@@ -297,10 +294,7 @@ impl Root {
     }
 
     /// Collects all entries that are not in recycle bin and has tag 'Favorites'
-    pub(crate) fn collect_favorite_entries(
-        &self,
-        recycle_group_uuid: Uuid,
-    ) -> Vec<&Entry> {
+    pub(crate) fn collect_favorite_entries(&self, recycle_group_uuid: Uuid) -> Vec<&Entry> {
         // TODO: Need to merge commonality between this method and 'collect_all_active_entries'
         let mut excluded_group_ids = self.deleted_group_uuids();
         excluded_group_ids.push(recycle_group_uuid);

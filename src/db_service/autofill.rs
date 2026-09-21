@@ -70,9 +70,10 @@ fn url_match_strength(input: &str, entry_field_val: &str) -> Option<MatchStrengt
     // For web requests, two hosts are the same site (weaker match) when they share a
     // registrable domain (eTLD+1) per the PSL. Non-web schemes require exact host.
     if is_web_scheme(input_url.scheme()) {
-        if let (Some(input_domain), Some(entry_domain)) =
-            (registrable_domain(input_host), registrable_domain(entry_host))
-        {
+        if let (Some(input_domain), Some(entry_domain)) = (
+            registrable_domain(input_host),
+            registrable_domain(entry_host),
+        ) {
             if input_domain == entry_domain {
                 return Some(MatchStrength::RegistrableDomain);
             }
@@ -509,9 +510,9 @@ pub fn autofill_search_term_url_only(db_key: &str, term: &str) -> Result<EntrySe
 pub fn associate_app_to_entry(db_key: &str, entry_uuid: &Uuid, app_uri: &str) -> Result<bool> {
     let mut form_data = super::get_entry_form_data_by_id(db_key, entry_uuid)?;
 
-    let already_present = form_data.additional_urls().is_some_and(|urls| {
-        urls.split_whitespace().any(|t| url_matched(app_uri, t))
-    });
+    let already_present = form_data
+        .additional_urls()
+        .is_some_and(|urls| urls.split_whitespace().any(|t| url_matched(app_uri, t)));
 
     if already_present || !form_data.append_additional_url(app_uri) {
         return Ok(false);
@@ -547,7 +548,10 @@ mod tests {
     fn same_registrable_domain_matches() {
         // apex <-> www and sibling subdomains match when they share a
         // registrable domain (eTLD+1).
-        assert!(url_matched("https://www.viator.com/", "https://viator.com/"));
+        assert!(url_matched(
+            "https://www.viator.com/",
+            "https://viator.com/"
+        ));
         assert!(url_matched(
             "https://mail.google.com/",
             "https://accounts.google.com/",
@@ -655,10 +659,7 @@ mod tests {
     fn search_field_priority_order() {
         use crate::constants::entry_keyvalue_key::{ADDITIONAL_URLS, TITLE, URL, USER_NAME};
         // url > additional urls > title > username > other custom fields.
-        assert!(
-            search_field_priority(URL)
-                < search_field_priority(ADDITIONAL_URLS)
-        );
+        assert!(search_field_priority(URL) < search_field_priority(ADDITIONAL_URLS));
         assert!(search_field_priority(ADDITIONAL_URLS) < search_field_priority(TITLE));
         assert!(search_field_priority(TITLE) < search_field_priority(USER_NAME));
         assert!(search_field_priority(USER_NAME) < search_field_priority("My Custom Field"));
@@ -681,7 +682,10 @@ mod tests {
         assert!(add_exact < url_reg);
         assert!(url_reg < add_reg);
         // When both fields match, the stronger pairing is chosen.
-        assert_eq!(match_rank(Some(RegistrableDomain), Some(ExactHost)), add_exact);
+        assert_eq!(
+            match_rank(Some(RegistrableDomain), Some(ExactHost)),
+            add_exact
+        );
     }
 
     const TEST_OTP_URL: &str =
@@ -739,7 +743,9 @@ mod tests {
     #[test]
     fn additional_urls_token_matches() {
         let additional = "https://other.com/x https://example.com/login https://third.com";
-        assert!(additional_urls_match_strength("https://example.com/anything", additional).is_some());
+        assert!(
+            additional_urls_match_strength("https://example.com/anything", additional).is_some()
+        );
         assert!(additional_urls_match_strength("https://nomatch.com/", additional).is_none());
     }
 }

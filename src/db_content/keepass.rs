@@ -72,7 +72,8 @@ impl KeepassFile {
     ) -> Result<Option<EntryType>> {
         if !self
             .root
-            .custom_entry_type_entries_by_id(entry_type_uuid).is_empty()
+            .custom_entry_type_entries_by_id(entry_type_uuid)
+            .is_empty()
         {
             //error::Error::DataError("Entry type can not be deleted as some entries are of this type")
             Err(error::Error::CustomEntryTypeInUse)
@@ -101,9 +102,8 @@ impl KeepassFile {
     pub(crate) fn after_xml_reading(
         &mut self,
         attachment_hash_indexed: &HashMap<i32, (AttachmentHashValue, usize)>,
-        #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))] attachment_content: &dyn Fn(
-            &AttachmentHashValue,
-        ) -> Option<Vec<u8>>,
+        #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
+        attachment_content: &dyn Fn(&AttachmentHashValue) -> Option<Vec<u8>>,
     ) {
         // Need to read any meta specific custom data first
         self.meta.copy_from_custom_data();

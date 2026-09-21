@@ -161,9 +161,10 @@ mod tests {
 
     #[test]
     fn an_existing_otpauth_url_is_preserved() {
-        let url =
-            otp_normalise("otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&digits=8")
-                .expect("should normalise");
+        let url = otp_normalise(
+            "otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&digits=8",
+        )
+        .expect("should normalise");
         assert!(url.contains("secret=JBSWY3DPEHPK3PXP"), "got {url}");
         assert!(url.contains("digits=8"), "non default digits kept: {url}");
     }
@@ -179,7 +180,10 @@ mod tests {
 
     #[test]
     fn comma_separated_tags_become_semicolon_separated() {
-        assert_eq!(tags_normalise("work, email ,social").as_deref(), Some("work;email;social"));
+        assert_eq!(
+            tags_normalise("work, email ,social").as_deref(),
+            Some("work;email;social")
+        );
     }
 
     #[test]
@@ -195,10 +199,19 @@ mod tests {
 
     #[test]
     fn a_folder_path_splits_into_segments() {
-        assert_eq!(folder_path_split("Work/Clients", '/'), vec!["Work", "Clients"]);
-        assert_eq!(folder_path_split(" Work / Clients ", '/'), vec!["Work", "Clients"]);
+        assert_eq!(
+            folder_path_split("Work/Clients", '/'),
+            vec!["Work", "Clients"]
+        );
+        assert_eq!(
+            folder_path_split(" Work / Clients ", '/'),
+            vec!["Work", "Clients"]
+        );
         // Leading, trailing and repeated separators do not produce blank groups
-        assert_eq!(folder_path_split("/Work//Clients/", '/'), vec!["Work", "Clients"]);
+        assert_eq!(
+            folder_path_split("/Work//Clients/", '/'),
+            vec!["Work", "Clients"]
+        );
         assert!(folder_path_split("", '/').is_empty());
         assert!(folder_path_split("///", '/').is_empty());
     }
@@ -210,7 +223,10 @@ mod tests {
             folder_path_split(r"Work\Clients", '\\'),
             vec!["Work", "Clients"]
         );
-        assert_eq!(folder_path_split("Work/Clients", '\\'), vec!["Work/Clients"]);
+        assert_eq!(
+            folder_path_split("Work/Clients", '\\'),
+            vec!["Work/Clients"]
+        );
     }
 
     #[test]
@@ -308,7 +324,10 @@ mod tests {
         assert_eq!(
             fields,
             vec![
-                ("Address".to_string(), "12 High Street\nSomewhere".to_string()),
+                (
+                    "Address".to_string(),
+                    "12 High Street\nSomewhere".to_string()
+                ),
                 ("Phone".to_string(), "555".to_string()),
             ]
         );

@@ -66,7 +66,6 @@ pub fn encode_datetime(date: &NaiveDateTime) -> String {
 
 #[allow(dead_code)]
 pub fn now_local() -> NaiveDateTime {
-    
     chrono::Local::now()
         .naive_local()
         .with_nanosecond(0)
@@ -102,7 +101,7 @@ pub fn now_utc_milli_seconds() -> i64 {
 #[allow(dead_code)]
 pub fn format_utc_now(format_str: Option<&str>) -> String {
     let now: NaiveDateTime = now_utc(); // 2024-11-05 20:01:42
-    // Default gives 2024-11-05 20:05:18; "%d %b %Y %H:%M:%S" would give 05 Nov 2024 20:05:18
+                                        // Default gives 2024-11-05 20:05:18; "%d %b %Y %H:%M:%S" would give 05 Nov 2024 20:05:18
     let fmt_str = format_str.unwrap_or("%Y-%m-%d %H:%M:%S");
     now.format(fmt_str).to_string()
 }

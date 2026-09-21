@@ -285,11 +285,7 @@ impl<'a> EntryPlaceHolderParser<'a> {
             // 'cannot borrow `entry_fields_with_place_holders` as mutable more than once at a time'
             let modified = ef.modified_fields();
 
-            entry_fields_with_place_holders.retain(
-                |k, _v| {
-                    modified.contains(k)
-                },
-            );
+            entry_fields_with_place_holders.retain(|k, _v| modified.contains(k));
         }
 
         entry_fields_with_place_holders

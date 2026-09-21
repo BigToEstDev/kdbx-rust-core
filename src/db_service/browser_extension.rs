@@ -51,10 +51,7 @@ pub fn find_matching_in_enabled_db_entries(
 ) -> Result<Vec<MatchedDbEntries>> {
     Ok(enabled_db_keys
         .iter()
-        .filter_map(|db_key| {
-            
-            find_matching_entries_in_db(db_key, input_url).ok()
-        })
+        .filter_map(|db_key| find_matching_entries_in_db(db_key, input_url).ok())
         .collect::<Vec<_>>())
 }
 
