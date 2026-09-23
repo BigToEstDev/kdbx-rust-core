@@ -650,7 +650,13 @@ impl<'a> XmlReader<'a> {
                                                     } else {
                                                         Some(content_to_uuid(&content))
                                                     } ),
-                TAGS => (|content:String, _,  _| entry.tags = content)
+                TAGS => (|content:String, _,  _| entry.tags = content),
+                FOREGROUND_COLOR => (|content:String, _,  _| entry.foreground_color = content),
+                BACKGROUND_COLOR => (|content:String, _,  _| entry.background_color = content),
+                // A command line: may carry '&' and quotes, stored unescaped like Notes
+                OVERRIDE_URL => (|content:String, _,  _| entry.override_url = content_unescape(&content)),
+                QUALITY_CHECK => (|content:String, _,  _| entry.quality_check = content_to_bool(content)),
+                PREVIOUS_PARENT_GROUP => (|content:String, _,  _| entry.previous_parent_group = content_to_uuid(&content))
             },
             start_tag_blks {
                 TIMES => {
@@ -785,6 +791,9 @@ impl<'a> XmlReader<'a> {
                 }),
                 DEFAULT_SEQUENCE => (|content:String, _attributes, _cipher| {
                     auto_type.default_sequence = content_to_string_opt(content);
+                }),
+                DATA_TRANSFER_OBFUSCATION => (|content:String, _attributes, _cipher| {
+                    auto_type.data_transfer_obfuscation = content_to_int(content);
                 })
             },
             start_tag_blks {
@@ -1275,6 +1284,7 @@ impl<W: Write> XmlWriter<W> {
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
         write_tags! { self,
             ENABLED, bool_to_xml_bool(auto_type.enabled),
+            DATA_TRANSFER_OBFUSCATION, auto_type.data_transfer_obfuscation.to_string(),
             DEFAULT_SEQUENCE,  auto_type.default_sequence.as_ref().map_or("", |s| s)
         };
 
@@ -1301,10 +1311,10 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
 
+        // Element order as in KeePassXC (KdbxXmlWriter::writeEntry)
         write_tags! { self,
             UUID, util::encode_uuid(&entry.uuid), //entry.uuid.to_string(),
-            ICON_ID,entry.icon_id.to_string(),
-            TAGS,entry.tags
+            ICON_ID,entry.icon_id.to_string()
         };
 
         write_tags_or_skip_empty! {
@@ -1312,8 +1322,23 @@ impl<W: Write> XmlWriter<W> {
             CUSTOM_ICON_UUID, entry.custom_icon_uuid.map_or_else(empty_str,|uuid|util::encode_uuid(&uuid))
         }
 
+        write_tags! { self,
+            FOREGROUND_COLOR, entry.foreground_color,
+            BACKGROUND_COLOR, entry.background_color,
+            OVERRIDE_URL, entry.override_url,
+            TAGS,entry.tags
+        };
+
         // Times tag and the children
         self.write_times(&entry.times)?;
+
+        // KDBX 4.1 elements, written only when not default (as KeePass / KeePassXC)
+        if !entry.quality_check {
+            write_tags! { self, QUALITY_CHECK, "False" };
+        }
+        if entry.previous_parent_group != uuid::Uuid::default() {
+            write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&entry.previous_parent_group) };
+        }
 
         // The String tag has childeren with attributes
         let empty_attr: Vec<(&str, &str)> = vec![];
@@ -1357,10 +1382,10 @@ impl<W: Write> XmlWriter<W> {
                 VALUE, [("Ref", b.index_ref.to_string().as_str())],b.value
             };
         }
+        self.write_entry_auto_type(&entry.auto_type)?;
+
         // Entry's Custom Data
         self.write_custom_data(&entry.custom_data)?;
-
-        self.write_entry_auto_type(&entry.auto_type)?;
 
         // We need to exclude the History tag while writing the child Entry tag that comes under the History tag
         if !in_history {
