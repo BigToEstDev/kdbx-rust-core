@@ -1,4 +1,4 @@
-use crate::db_content::{CustomData, Times};
+use crate::db_content::{CustomData, Times, UnknownElement};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -19,14 +19,25 @@ pub struct Group {
     pub(crate) times: Times,
     #[serde(skip)]
     pub custom_data: CustomData,
+    // KeePass view state: the entry shown at the top of the list for this group
     #[serde(skip)]
-    pub(crate) last_top_visible_group: Uuid,
+    pub(crate) last_top_visible_entry: Uuid,
+    // KDBX 4.1: the group this group was in before its last move (nil = none)
+    #[serde(skip)]
+    pub(crate) previous_parent_group: Uuid,
     pub(crate) marked_category: bool,
 
     pub(crate) default_auto_type_sequence: Option<String>,
     pub(crate) enable_auto_type: Option<bool>,
+    // None = inherit from the parent group, as EnableAutoType
+    #[serde(default)]
+    pub(crate) enable_searching: Option<bool>,
 
     pub(crate) custom_icon_uuid: Option<Uuid>,
+
+    // Elements of <Group> the core does not know - written back as read
+    #[serde(skip)]
+    pub(crate) unknown_elements: Vec<UnknownElement>,
 
     // Only the child group uuids are kept here and used to do lookup in 'root.all_groups'
     #[serde(default)]
@@ -92,6 +103,18 @@ impl Group {
         self.times.location_changed
     }
 
+    // Merge: a newer source group brings all its KeePass properties (PwGroup.AssignProperties),
+    // not only the ones the group form edits (see Root::update_group)
+    pub(crate) fn assign_merge_properties(&mut self, other: &Group) {
+        self.is_expanded = other.is_expanded;
+        self.default_auto_type_sequence = other.default_auto_type_sequence.clone();
+        self.enable_auto_type = other.enable_auto_type;
+        self.enable_searching = other.enable_searching;
+        self.last_top_visible_entry = other.last_top_visible_entry;
+        self.previous_parent_group = other.previous_parent_group;
+        self.unknown_elements = other.unknown_elements.clone();
+    }
+
     pub(crate) fn clear_children(&mut self) -> &mut Self {
         self.entry_uuids = vec![];
         self.group_uuids = vec![];
@@ -111,11 +134,13 @@ impl Group {
             icon_id: 48, //i32::default(), folder icon
             tags: String::default(),
             notes: String::default(),
-            is_expanded: false,
+            // KeePass default (PwGroup): a group without <IsExpanded> is expanded
+            is_expanded: true,
             times: Times::new(),
             custom_data: CustomData::default(),
             custom_icon_uuid: None,
-            last_top_visible_group: Uuid::default(),
+            last_top_visible_entry: Uuid::default(),
+            previous_parent_group: Uuid::default(),
             marked_category: true,
 
             // Not sure these are used by keepass at all and it looks like mostly used whatever set in entries
@@ -123,7 +148,9 @@ impl Group {
             // False if auto type is disabled for entries for this group
             // True if auto type is enabled for entries for this group
             enable_auto_type: None,
+            enable_searching: None,
             default_auto_type_sequence: None,
+            unknown_elements: vec![],
 
             group_uuids: vec![],
             entry_uuids: vec![],
@@ -368,5 +395,68 @@ mod category_marker_tests {
             .unwrap();
         assert_eq!(second.value, "No");
         assert_eq!(first.last_modification_time, second.last_modification_time);
+    }
+
+    fn keepass_props(g: &mut Group) {
+        g.is_expanded = false;
+        g.default_auto_type_sequence = Some("{USERNAME}{ENTER}".into());
+        g.enable_auto_type = Some(false);
+        g.enable_searching = Some(false);
+        g.last_top_visible_entry = uuid::Uuid::new_v4();
+        g.previous_parent_group = uuid::Uuid::new_v4();
+    }
+
+    fn assert_keepass_props(actual: &Group, expected: &Group) {
+        assert_eq!(actual.is_expanded, expected.is_expanded);
+        assert_eq!(
+            actual.default_auto_type_sequence,
+            expected.default_auto_type_sequence
+        );
+        assert_eq!(actual.enable_auto_type, expected.enable_auto_type);
+        assert_eq!(actual.enable_searching, expected.enable_searching);
+        assert_eq!(
+            actual.last_top_visible_entry,
+            expected.last_top_visible_entry
+        );
+        assert_eq!(actual.previous_parent_group, expected.previous_parent_group);
+    }
+
+    // The group form carries only name / notes / tags / icons: saving it keeps the other
+    // KeePass properties of the group
+    #[test]
+    fn form_update_keeps_keepass_properties() {
+        let mut stored = Group::new_with_id();
+        keepass_props(&mut stored);
+        let mut root = crate::db_content::Root::new();
+        root.insert_to_all_groups(stored.clone());
+
+        let mut from_form = Group::new();
+        from_form.uuid = stored.uuid;
+        from_form.name = "Renamed".into();
+        root.update_group(from_form, false);
+
+        let updated = root.group_by_id(&stored.uuid).unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_keepass_props(updated, &stored);
+    }
+
+    // Merge with a newer source group takes all its KeePass properties (PwGroup.AssignProperties)
+    #[test]
+    fn merge_update_takes_keepass_properties() {
+        let stored = Group::new_with_id();
+        let mut root = crate::db_content::Root::new();
+        root.insert_to_all_groups(stored.clone());
+
+        let mut source = stored.clone();
+        keepass_props(&mut source);
+        root.update_group(source.clone(), true);
+
+        assert_keepass_props(root.group_by_id(&stored.uuid).unwrap(), &source);
+    }
+
+    // KeePass default: a group without <IsExpanded> is expanded
+    #[test]
+    fn group_new_is_expanded() {
+        assert!(Group::new().is_expanded);
     }
 }

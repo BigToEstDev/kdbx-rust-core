@@ -18,6 +18,7 @@ import os
 import shutil
 import sys
 import uuid as uuid_mod
+from datetime import datetime, timezone
 
 if hasattr(sys.stdout, "reconfigure"):
     # Windows-консоль не utf-8 по умолчанию
@@ -173,6 +174,318 @@ def build_preservation_fixture():
     return db_path
 
 
+# --- Фикстура «все поля KDBX 4.1» (Step 17) ------------------------------------
+#
+# Приложение работает в первую очередь с чужими базами. Всё, что ядро при
+# сохранении теряет или меняет, пользователь увидит только в другом клиенте.
+# Здесь КАЖДЫЙ элемент KDBX 4.1 у Meta, групп, записей, истории и DeletedObjects
+# заполнен не значением по умолчанию — потеря или сброс видны при сравнении
+# до / после (compare_roundtrip.py) и в tests/data_preservation.rs.
+#
+# Список элементов — KeePassLib (KdbxFile.Write) и KeePassXC (KdbxXmlWriter.cpp).
+# pykeepass выставляет в API малую часть, остальное пишется через lxml напрямую.
+# Значения продублированы константами в tests/data_preservation.rs — менять вместе.
+ALL_FIELDS_FIXTURE = "all_fields_41.kdbx"
+
+# Детерминированные UUID: тесты ищут объекты по ним.
+AF_UUIDS = {
+    "work": "5a0e3a4e-0000-4000-8000-000000000001",
+    "templates": "5a0e3a4e-0000-4000-8000-000000000002",
+    "recycle_bin": "5a0e3a4e-0000-4000-8000-000000000003",
+    "entry": "5a0e3a4e-0000-4000-8000-000000000010",
+    "icon": "5a0e3a4e-0000-4000-8000-000000000020",
+    "deleted": "5a0e3a4e-0000-4000-8000-000000000030",
+}
+
+# Прозрачный PNG 1x1 — содержимое иконки ядро не разбирает, только хранит.
+AF_ICON_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+# Элемент, которого нет в KDBX 4.1: проверка сырого хранения неизвестного (Meta, группа, запись).
+AF_UNKNOWN_TAG = "XPassholderUnknown"
+AF_UNKNOWN_ATTR = ("Origin", "fixture")
+AF_UNKNOWN_CHILD = ("Inner", "unknown-value")
+# Protected-значение внутри неизвестного элемента записи. Inner stream расшифровывает
+# protected-значения по порядку документа: если ядро пропустит это значение, не
+# расшифровав, все следующие (пароль в истории) расшифруются мусором.
+AF_UNKNOWN_SECRET = "unknown-secret"
+
+
+def b64_uuid(key):
+    return base64.b64encode(uuid_mod.UUID(AF_UUIDS[key]).bytes).decode("ascii")
+
+
+def af_time(kp, day):
+    """Разные даты для разных полей — перепутанное поле тоже будет видно."""
+    return kp._encode_time(datetime(2021, 3, day, 10, 20, 30, tzinfo=timezone.utc))
+
+
+def put(parent, tag, text):
+    """Задать значение дочернего элемента: заменить существующее или вставить новое.
+
+    Новое вставляется перед первым вложенным Entry / Group / History — так же, как
+    раскладывают элементы KeePass и KeePassXC (свои поля объекта идут до детей).
+    """
+    el = parent.find(tag)
+    if el is None:
+        el = parent.makeelement(tag, {})
+        anchor = next((c for c in parent if c.tag in ("Entry", "Group", "History")), None)
+        if anchor is None:
+            parent.append(el)
+        else:
+            anchor.addprevious(el)
+    el.text = text
+    return el
+
+
+def put_times(kp, obj_el, first_day):
+    times = obj_el.find("Times")
+    put(times, "CreationTime", af_time(kp, first_day))
+    put(times, "LastModificationTime", af_time(kp, first_day + 1))
+    put(times, "LastAccessTime", af_time(kp, first_day + 2))
+    put(times, "ExpiryTime", af_time(kp, first_day + 3))
+    put(times, "Expires", "True")
+    put(times, "UsageCount", "5")
+    put(times, "LocationChanged", af_time(kp, first_day + 4))
+
+
+def put_custom_data(kp, obj_el, key, value, day):
+    custom_data = obj_el.find("CustomData")
+    if custom_data is None:
+        custom_data = put(obj_el, "CustomData", None)
+    item = SubElement(custom_data, "Item")
+    SubElement(item, "Key").text = key
+    SubElement(item, "Value").text = value
+    SubElement(item, "LastModificationTime").text = af_time(kp, day)
+
+
+def put_unknown(obj_el, with_secret=False):
+    unknown = put(obj_el, AF_UNKNOWN_TAG, None)
+    unknown.set(*AF_UNKNOWN_ATTR)
+    SubElement(unknown, AF_UNKNOWN_CHILD[0]).text = AF_UNKNOWN_CHILD[1]
+    if with_secret:
+        # pykeepass шифрует при сохранении любой Value[@Protected='True']
+        secret = SubElement(unknown, "Value", Protected="True")
+        secret.text = AF_UNKNOWN_SECRET
+
+
+def fill_all_fields_meta(kp):
+    meta = kp.tree.getroot().find("Meta")
+    # "&" and "<": text must not gain "&amp;" on every save
+    put(meta, "DatabaseName", "All Fields & <4.1>")
+    put(meta, "DatabaseNameChanged", af_time(kp, 1))
+    put(meta, "DatabaseDescription", "every KDBX 4.1 element, non-default")
+    put(meta, "DatabaseDescriptionChanged", af_time(kp, 2))
+    put(meta, "DefaultUserName", "default-user")
+    put(meta, "DefaultUserNameChanged", af_time(kp, 3))
+    put(meta, "MaintenanceHistoryDays", "123")
+    put(meta, "Color", "#FF8800")
+    put(meta, "MasterKeyChanged", af_time(kp, 4))
+    put(meta, "MasterKeyChangeRec", "90")
+    put(meta, "MasterKeyChangeForce", "180")
+    put(meta, "MasterKeyChangeForceOnce", "True")
+
+    protection = meta.find("MemoryProtection")
+    if protection is None:
+        protection = put(meta, "MemoryProtection", None)
+    # По умолчанию в KeePass защищён только пароль. Здесь всё наоборот.
+    put(protection, "ProtectTitle", "True")
+    put(protection, "ProtectUserName", "True")
+    put(protection, "ProtectPassword", "False")
+    put(protection, "ProtectURL", "True")
+    put(protection, "ProtectNotes", "True")
+
+    icons = meta.find("CustomIcons")
+    if icons is None:
+        icons = put(meta, "CustomIcons", None)
+    icon = SubElement(icons, "Icon")
+    SubElement(icon, "UUID").text = b64_uuid("icon")
+    SubElement(icon, "Data").text = base64.b64encode(AF_ICON_PNG).decode("ascii")
+    SubElement(icon, "Name").text = "fixture-icon"
+    SubElement(icon, "LastModificationTime").text = af_time(kp, 5)
+
+    put(meta, "RecycleBinEnabled", "False")
+    put(meta, "RecycleBinUUID", b64_uuid("recycle_bin"))
+    put(meta, "RecycleBinChanged", af_time(kp, 6))
+    put(meta, "EntryTemplatesGroup", b64_uuid("templates"))
+    put(meta, "EntryTemplatesGroupChanged", af_time(kp, 7))
+    put(meta, "HistoryMaxItems", "7")
+    put(meta, "HistoryMaxSize", str(3 * 1024 * 1024))
+    put(meta, "LastSelectedGroup", b64_uuid("work"))
+    put(meta, "LastTopVisibleGroup", b64_uuid("templates"))
+    put(meta, "SettingsChanged", af_time(kp, 8))
+    put_custom_data(kp, meta, "X-Meta-Key", "meta-value", 9)
+    put_unknown(meta)
+
+
+def set_uuid(obj, key):
+    obj._element.find("UUID").text = b64_uuid(key)
+
+
+def fill_all_fields_groups(kp):
+    root = kp.root_group
+    # Трёхзначные флаги (null / True / False): корень — True, Work — False, корзина — null.
+    put(root._element, "Notes", "root notes")
+    put(root._element, "EnableAutoType", "True")
+    put(root._element, "EnableSearching", "True")
+    put(root._element, "DefaultAutoTypeSequence", "{USERNAME}{TAB}{PASSWORD}")
+
+    templates = kp.add_group(root, "Templates")
+    set_uuid(templates, "templates")
+    bin_group = kp.add_group(root, "Recycle Bin")
+    set_uuid(bin_group, "recycle_bin")
+    put(bin_group._element, "IconID", "43")
+    put(bin_group._element, "EnableAutoType", "null")
+    put(bin_group._element, "EnableSearching", "null")
+
+    work = kp.add_group(root, "Work & Co")
+    set_uuid(work, "work")
+    el = work._element
+    put(el, "Notes", "work group notes")
+    put(el, "IconID", "48")
+    put(el, "CustomIconUUID", b64_uuid("icon"))
+    put_times(kp, el, 10)
+    put(el, "IsExpanded", "False")
+    put(el, "DefaultAutoTypeSequence", "{USERNAME}{ENTER}")
+    put(el, "EnableAutoType", "False")
+    put(el, "EnableSearching", "False")
+    put(el, "LastTopVisibleEntry", b64_uuid("entry"))
+    put(el, "PreviousParentGroup", b64_uuid("templates"))
+    # Разделитель — запятая: проверка, что ядро не нормализует теги при сохранении.
+    put(el, "Tags", "g1,g2")
+    put_custom_data(kp, el, "X-Group-Key", "group-value", 15)
+    put_unknown(el)
+    return work
+
+
+def fill_all_fields_entry(kp, work):
+    entry = kp.add_entry(work, "All Fields", "af-user", "af-pass-1", url="https://af.example.com",
+                         notes="entry notes")
+    set_uuid(entry, "entry")
+    entry.set_custom_property("Custom Plain", "plain-value")
+    entry.set_custom_property("Custom Secret", "secret-value", protect=True)
+    entry.add_attachment(kp.add_binary(ATTACHMENT_DATA), ATTACHMENT_NAME)
+
+    el = entry._element
+    put(el, "IconID", "12")
+    put(el, "CustomIconUUID", b64_uuid("icon"))
+    put(el, "ForegroundColor", "#112233")
+    put(el, "BackgroundColor", "#445566")
+    put(el, "OverrideURL", "cmd://firefox {URL}")
+    put(el, "Tags", "alpha;beta&gamma")
+    put(el, "QualityCheck", "False")
+    put(el, "PreviousParentGroup", b64_uuid("templates"))
+    put_times(kp, el, 20)
+
+    auto_type = el.find("AutoType")
+    if auto_type is None:
+        auto_type = put(el, "AutoType", None)
+    put(auto_type, "Enabled", "False")
+    put(auto_type, "DataTransferObfuscation", "1")
+    put(auto_type, "DefaultSequence", "{PASSWORD}{ENTER}")
+    association = SubElement(auto_type, "Association")
+    SubElement(association, "Window").text = "Firefox*"
+    SubElement(association, "KeystrokeSequence").text = "{USERNAME}"
+
+    put_custom_data(kp, el, "X-Entry-Key", "entry-value", 25)
+    put_unknown(el, with_secret=True)
+
+    # История: копия записи со всеми полями выше, затем текущая версия меняется.
+    entry.save_history()
+    entry.password = "af-pass-2"
+    return entry
+
+
+# Порядок элементов как у KeePassXC (KdbxXmlWriter). pykeepass дописывает новые
+# элементы в конец (Password после History, AutoType до String) — выравниваем, чтобы
+# фикстура выглядела как файл настоящего клиента. Неизвестные теги — перед детьми.
+ENTRY_ORDER = ["UUID", "IconID", "CustomIconUUID", "ForegroundColor", "BackgroundColor",
+               "OverrideURL", "Tags", "Times", "QualityCheck", "PreviousParentGroup", "String",
+               "Binary", "AutoType", "CustomData", AF_UNKNOWN_TAG, "History"]
+GROUP_ORDER = ["UUID", "Name", "Notes", "Tags", "IconID", "CustomIconUUID", "Times", "IsExpanded",
+               "DefaultAutoTypeSequence", "EnableAutoType", "EnableSearching",
+               "LastTopVisibleEntry", "CustomData", "PreviousParentGroup", AF_UNKNOWN_TAG,
+               "Entry", "Group"]
+
+
+def reorder(el, order):
+    children = sorted(el, key=lambda c: order.index(c.tag))  # sorted стабилен: String по порядку
+    for child in children:
+        el.append(child)  # append переносит существующий элемент в конец
+
+
+def canonical_order(kp):
+    root = kp.tree.getroot()
+    for group in root.iter("Group"):
+        reorder(group, GROUP_ORDER)
+    for entry in root.iter("Entry"):
+        reorder(entry, ENTRY_ORDER)
+        # В шаблоне pykeepass пустая Association — у настоящих клиентов её нет.
+        for assoc in entry.findall("AutoType/Association"):
+            if not assoc.findtext("Window"):
+                assoc.getparent().remove(assoc)
+
+
+def fill_deleted_objects(kp):
+    root_el = kp.tree.getroot().find("Root")
+    deleted = root_el.find("DeletedObjects")
+    if deleted is None:
+        deleted = SubElement(root_el, "DeletedObjects")
+    obj = SubElement(deleted, "DeletedObject")
+    SubElement(obj, "UUID").text = b64_uuid("deleted")
+    SubElement(obj, "DeletionTime").text = af_time(kp, 28)
+
+
+def verify_all_fields(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    assert kp.kdbx.header.value.major_version == 4
+    assert kp.kdbx.header.value.minor_version == 1, "ожидался KDBX 4.1"
+    root = kp.tree.getroot()
+    meta = root.find("Meta")
+    for tag in ("Color", "MasterKeyChangeForceOnce", "RecycleBinChanged", "LastTopVisibleGroup",
+                AF_UNKNOWN_TAG):
+        assert meta.find(tag) is not None, tag
+    assert meta.find("RecycleBinEnabled").text == "False"
+
+    entry = kp.find_entries(title="All Fields", first=True)
+    assert entry.password == "af-pass-2"
+    assert entry.get_custom_property("Custom Secret") == "secret-value"
+    assert len(entry.history) == 1 and entry.history[0].password == "af-pass-1"
+    for tag in ("OverrideURL", "ForegroundColor", "QualityCheck", "PreviousParentGroup", AF_UNKNOWN_TAG):
+        assert entry._element.find(tag) is not None, tag
+        assert entry.history[0]._element.find(tag) is not None, "history: " + tag
+    assert entry._element.findtext(AF_UNKNOWN_TAG + "/Value") == AF_UNKNOWN_SECRET
+    assert root.find("Root/DeletedObjects/DeletedObject") is not None
+
+
+def build_all_fields_fixture():
+    db_path = OUT_DIR / ALL_FIELDS_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    fill_all_fields_meta(kp)
+    work = fill_all_fields_groups(kp)
+    fill_all_fields_entry(kp, work)
+    fill_deleted_objects(kp)
+    canonical_order(kp)
+    kp.save()
+    verify_all_fields(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -296,6 +609,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (passkey/SFTP/WebDAV/AutoOpen)"
         % (PRESERVATION_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_all_fields_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (KDBX 4.1, все элементы не по умолчанию)"
+        % (ALL_FIELDS_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 

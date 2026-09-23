@@ -12,7 +12,7 @@ use crate::constants::custom_data_key::{
 use crate::constants::OTP_URL_PREFIX;
 use crate::constants::{entry_keyvalue_key::*, EMPTY_STR};
 use crate::db_content::{entry_type::*, Item};
-use crate::db_content::{AttachmentHashValue, CustomData, Times};
+use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElement};
 use crate::util;
 
 use super::meta::MetaShare;
@@ -170,6 +170,16 @@ pub struct Entry {
 
     pub(crate) tags: String,
 
+    // KeePass / KeePassXC entry properties our UI does not edit - kept as read from the file.
+    // Colors are "#RRGGBB" (empty = none), override_url is the command used to open the URL
+    pub(crate) foreground_color: String,
+    pub(crate) background_color: String,
+    pub(crate) override_url: String,
+    // KDBX 4.1: false = excluded from password quality reports
+    pub(crate) quality_check: bool,
+    // KDBX 4.1: the group the entry was in before its last move (nil = none)
+    pub(crate) previous_parent_group: Uuid,
+
     // entry_field contains all KeyValues
     pub(crate) entry_field: EntryField,
 
@@ -180,6 +190,9 @@ pub struct Entry {
     pub(crate) custom_icon_uuid: Option<Uuid>,
 
     pub(crate) auto_type: AutoType,
+
+    // Elements of <Entry> the core does not know - written back as read (history copies too)
+    pub(crate) unknown_elements: Vec<UnknownElement>,
 
     pub(crate) history: History,
 
@@ -197,11 +210,17 @@ impl PartialEq for Entry {
             && self.icon_id == other.icon_id
             && self.times == other.times
             && self.tags == other.tags
+            && self.foreground_color == other.foreground_color
+            && self.background_color == other.background_color
+            && self.override_url == other.override_url
+            && self.quality_check == other.quality_check
+            && self.previous_parent_group == other.previous_parent_group
             && self.entry_field == other.entry_field
             && self.binary_key_values == other.binary_key_values
             && self.custom_data == other.custom_data
             && self.custom_icon_uuid == other.custom_icon_uuid
             && self.auto_type == other.auto_type
+            && self.unknown_elements == other.unknown_elements
             && self.history.entries.len() == other.history.entries.len()
             && self.history == other.history
             // && self.meta_share == other.meta_share
@@ -217,12 +236,18 @@ impl Entry {
             icon_id: i32::default(),
             times: Times::new(),
             tags: String::default(),
+            foreground_color: String::default(),
+            background_color: String::default(),
+            override_url: String::default(),
+            quality_check: true,
+            previous_parent_group: Uuid::default(),
             entry_field: EntryField::default(),
             //key_values: vec![],
             binary_key_values: vec![],
             custom_data: CustomData::default(),
             custom_icon_uuid: None,
             auto_type: AutoType::default(),
+            unknown_elements: vec![],
             //history has a list of previous entries and those entries listed will have its 'history' empty
             history: History::default(),
             meta_share: Arc::default(),
@@ -388,7 +413,11 @@ impl Entry {
         self.custom_icon_uuid = updated_entry.custom_icon_uuid;
         self.tags = updated_entry.tags;
 
+        // The form does not edit the obfuscation mode: a client that drops the field from the
+        // AutoType JSON must not reset the value read from the file
+        let data_transfer_obfuscation = self.auto_type.data_transfer_obfuscation;
         self.auto_type = updated_entry.auto_type;
+        self.auto_type.data_transfer_obfuscation = data_transfer_obfuscation;
 
         self.entry_field = updated_entry.entry_field;
 
@@ -499,6 +528,9 @@ impl Entry {
     // of its history entries' values before the content is dropped on lock.
     pub(crate) fn zeroize_sensitive_content(&mut self) {
         self.entry_field.zeroize_values();
+        for unknown in &mut self.unknown_elements {
+            unknown.zeroize_text();
+        }
         for e in &mut self.history.entries {
             e.zeroize_sensitive_content();
         }
@@ -757,6 +789,8 @@ impl Entry {
         for h in &self.history.entries {
             bytes += h.keepass_size();
         }
+
+        char_count += chars(&self.override_url);
 
         let tags = crate::db_content::split_tags(&self.tags);
         bytes += tags.len() as u64 * 8;
@@ -1154,6 +1188,10 @@ pub struct AutoType {
     // default_sequence can be set at entry level overriding the inherited one
     pub(crate) default_sequence: Option<String>,
     pub(crate) associations: Vec<Association>,
+    // KeePass: 0 = none, 1 = two-channel auto-type obfuscation. Not edited by our UI -
+    // kept from the file (see Entry::update)
+    #[serde(default)]
+    pub(crate) data_transfer_obfuscation: i32,
 }
 
 impl Default for AutoType {
@@ -1162,6 +1200,7 @@ impl Default for AutoType {
             enabled: true,
             default_sequence: None,
             associations: vec![],
+            data_transfer_obfuscation: 0,
         }
     }
 }
@@ -1550,7 +1589,9 @@ mod history_limit_tests {
                 window: "Win".into(),
                 key_stroke_sequence: Some("{PASSWORD}".into()),
             }],
+            data_transfer_obfuscation: 0,
         };
+        e.override_url = "cmd://x".into();
         e.tags = "a;bb".into();
         e.custom_data = CustomData::default();
         e.custom_data.insert_item(Item::from_kv("k", "vv"));
@@ -1558,8 +1599,46 @@ mod history_limit_tests {
         // bytes: 276 + 2 fields * 40 + 1 attachment * 65 + 100 + 1 association * 24 + 2 tags * 8 + 1 item * 16
         let bytes = 276 + 2 * 40 + 65 + 100 + 24 + 2 * 8 + 16;
         // chars: Title+Bank, Password+pässwörd (8 UTF-16 units, 10 UTF-8 bytes), f.txt,
-        // {USERNAME}, Win+{PASSWORD}, a+bb, k+vv
-        let chars = (5 + 4) + (8 + 8) + 5 + 10 + (3 + 10) + (1 + 2) + (1 + 2);
+        // {USERNAME}, Win+{PASSWORD}, cmd://x, a+bb, k+vv
+        let chars = (5 + 4) + (8 + 8) + 5 + 10 + (3 + 10) + 7 + (1 + 2) + (1 + 2);
         assert_eq!(e.keepass_size(), bytes + chars * 2);
+    }
+
+    // The entry form does not carry colors, OverrideURL, QualityCheck, PreviousParentGroup and the
+    // auto-type obfuscation: updating from the form keeps them, the history copy has them too
+    #[test]
+    fn form_update_keeps_keepass_properties() {
+        let mut e = Entry::new();
+        e.foreground_color = "#112233".into();
+        e.background_color = "#445566".into();
+        e.override_url = "cmd://firefox {URL}".into();
+        e.quality_check = false;
+        e.previous_parent_group = uuid::Uuid::new_v4();
+        e.auto_type.data_transfer_obfuscation = 1;
+        let before = e.clone();
+
+        let from_form = Entry::new();
+        e.update(from_form);
+
+        for (actual, stage) in [(&e, "entry"), (&e.history.entries[0], "history")] {
+            assert_eq!(
+                actual.foreground_color, before.foreground_color,
+                "{}",
+                stage
+            );
+            assert_eq!(
+                actual.background_color, before.background_color,
+                "{}",
+                stage
+            );
+            assert_eq!(actual.override_url, before.override_url, "{}", stage);
+            assert_eq!(actual.quality_check, before.quality_check, "{}", stage);
+            assert_eq!(
+                actual.previous_parent_group, before.previous_parent_group,
+                "{}",
+                stage
+            );
+            assert_eq!(actual.auto_type.data_transfer_obfuscation, 1, "{}", stage);
+        }
     }
 }

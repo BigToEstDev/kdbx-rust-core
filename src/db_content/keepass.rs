@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::db_content::{AttachmentHashValue, Entry, Meta, Root};
 
 use crate::error::{self, Result};
+use crate::util;
 
 use super::EntryType;
 
@@ -149,12 +150,16 @@ impl KeepassFile {
         // Any entries related one
         self.root.entries_before_xml_writing();
 
-        // When a recycle group is created under root group, we need to set it in Meta so that
-        // it can be written as child element of Meta and subsequent reading of db
-        // includes this special group uuid
-        if self.root.recycle_bin_uuid() != Uuid::default() {
-            self.meta.recycle_bin_uuid = self.root.recycle_bin_uuid();
+        // When a recycle group is created under root group (on delete or on merge), we need to set it
+        // in Meta so that it can be written as child element of Meta and subsequent reading of db
+        // includes this special group uuid.
+        // RecycleBinEnabled is switched on only then: a bin read from the file keeps the flag it has
+        // there - a user may have disabled the recycle bin in KeePass and kept the group
+        let bin_uuid = self.root.recycle_bin_uuid();
+        if bin_uuid != Uuid::default() && bin_uuid != self.meta.recycle_bin_uuid {
+            self.meta.recycle_bin_uuid = bin_uuid;
             self.meta.recycle_bin_enabled = true;
+            self.meta.recycle_bin_changed = util::now_utc();
         }
 
         // This copies any custom data specific field information back to custom data before xml writing
@@ -162,5 +167,43 @@ impl KeepassFile {
 
         // Sets the new version
         //self.meta.custom_data.set_internal_version(&INTERNAL_VERSION.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Recycle bin created by the core (on the first delete) switches the bin on
+    #[test]
+    fn recycle_bin_created_by_core_is_enabled() {
+        let mut kp = KeepassFile::new();
+        kp.root.recycle_bin_group();
+        let changed_before = kp.meta.recycle_bin_changed;
+
+        kp.before_xml_writing(&HashMap::new());
+
+        assert_ne!(kp.meta.recycle_bin_uuid, Uuid::default());
+        assert_eq!(kp.meta.recycle_bin_uuid, kp.root.recycle_bin_uuid());
+        assert!(kp.meta.recycle_bin_enabled);
+        assert!(kp.meta.recycle_bin_changed >= changed_before);
+    }
+
+    // Recycle bin read from the file keeps the flag it has there (disabled in KeePass)
+    #[test]
+    fn recycle_bin_from_file_keeps_disabled_flag() {
+        let mut kp = KeepassFile::new();
+        let bin_uuid = Uuid::new_v4();
+        kp.meta.recycle_bin_uuid = bin_uuid;
+        kp.meta.recycle_bin_enabled = false;
+        kp.root.set_recycle_bin_uuid(bin_uuid);
+
+        kp.before_xml_writing(&HashMap::new());
+
+        assert!(
+            !kp.meta.recycle_bin_enabled,
+            "RecycleBinEnabled switched on by save"
+        );
+        assert_eq!(kp.meta.recycle_bin_uuid, bin_uuid);
     }
 }

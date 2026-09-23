@@ -23,6 +23,10 @@ use log::{debug, error, info};
 pub struct XmlReader<'a> {
     reader: QuickXmlReader<&'a [u8]>,
     stream_cipher: Option<ProtectedContentStreamCipher>,
+    // Unknown elements of the Meta / Group / Entry being read (see read_tags!, keep_unknown).
+    // Each of these readers swaps in an empty list and takes it back at its end tag, so nested
+    // groups and entries collect their own elements
+    unknown_elements: Vec<UnknownElement>,
 }
 
 // Macro called for reading specific set of inner tags
@@ -40,11 +44,11 @@ macro_rules! read_tags {
                     match e.name().as_ref() {
                         $($start_tag => {
                             let content = $self.reader.read_text(QName($start_tag))?;
-                            // BytesText no longer implements Display/ToString (quick-xml 0.41) -
-                            // .decode() gives the same raw (not entity-unescaped) content the old
-                            // .to_string() did; callers that need unescaping already do it
-                            // themselves via content_unescape() (see read_key_value, group notes).
-                            let content = content.decode().map_err(quick_xml::Error::from)?.into_owned();
+                            // read_text gives the raw text: entities are resolved here, once, for every
+                            // field - the writer escapes once. Before Step 17 only some fields were
+                            // unescaped, and names, tags etc. gained "&amp;" on every save
+                            let content = content.decode().map_err(quick_xml::Error::from)?;
+                            let content = content_unescape(&content);
                             $start_tag_action(content,&mut e.attributes(),&mut $self.stream_cipher);
                         }
                         )*
@@ -60,15 +64,11 @@ macro_rules! read_tags {
                             $parent_tag_action
                         })*
 
-                        x => {
-                            // Just consume/skip any other tags that are not listed above
-
-                            // TODO: Uncomment if required the follwing during development to see all unhandled tags
-                            // let t = std::str::from_utf8(&x)?;
-                            // let et = std::str::from_utf8($end_tag);
-                            // debug!("No matching action found and skipping the tag: {} and end tag is {:?}", &t, &et);
-
-                            skip_tag(x, &mut $self.reader)?;
+                        _ => {
+                            // A tag not listed above: read it whole - protected values inside are
+                            // decrypted, keeping the inner stream in step - and keep it or drop it
+                            let unknown = read_unknown_element(&mut $self.reader, &mut $self.stream_cipher, e)?;
+                            $self.keep_unknown($end_tag, unknown);
                         }
                     }
                 }
@@ -78,13 +78,17 @@ macro_rules! read_tags {
                             $empty_tag_action(&mut e.attributes())
                         }
                         )*
-                        _x => {
-                            // TODO: Uncomment if required the follwing during development to see all unhandled attributes
-                            // if let Ok(_et) = std::str::from_utf8(x) {
-                            //     debug!("The attribute handling action is not used for the Empty tag: {}",et);
-                            // }
-
-
+                        x => {
+                            // An empty known element (e.g. <Tags/>) means "no value"; any other is unknown
+                            let known = match x {
+                                $($start_tag => true,)*
+                                $($parent_tag => true,)*
+                                _ => false,
+                            };
+                            if !known {
+                                let unknown = unknown_element_start(e)?;
+                                $self.keep_unknown($end_tag, unknown);
+                            }
                         }
                     }
                 }
@@ -113,9 +117,91 @@ macro_rules! read_tags {
     };
 }
 
-fn skip_tag<B: BufRead>(tag: &[u8], reader: &mut QuickXmlReader<B>) -> Result<()> {
+// Tag name and attributes of an element the core does not know
+fn unknown_element_start(start: &BytesStart) -> Result<UnknownElement> {
+    let tag = std::str::from_utf8(start.name().as_ref())?.to_string();
+    let mut attrs = vec![];
+    for attr in start.attributes() {
+        let attr = attr.map_err(quick_xml::Error::from)?;
+        let key = std::str::from_utf8(attr.key.as_ref())?.to_string();
+        let value = content_unescape(std::str::from_utf8(&attr.value)?);
+        attrs.push((key, value));
+    }
+    Ok(UnknownElement::new(tag, attrs))
+}
+
+// Reads an unknown element whose start tag was just read, up to and including its end tag.
+// A protected leaf is decrypted here, in document order like every other protected value:
+// skipping it without decrypting would shift the inner stream for all later values
+fn read_unknown_element<B: BufRead>(
+    reader: &mut QuickXmlReader<B>,
+    stream_cipher: &mut Option<ProtectedContentStreamCipher>,
+    start: &BytesStart,
+) -> Result<UnknownElement> {
+    let mut element = unknown_element_start(start)?;
+
+    // The reader trims text events, and text around an entity comes as separate events:
+    // "a &amp; b" would be read as "a&b". Read unknown content untrimmed, restore after
+    let (trim_start, trim_end) = (
+        reader.config().trim_text_start,
+        reader.config().trim_text_end,
+    );
+    reader.config_mut().trim_text(false);
+    let content = read_unknown_content(reader, stream_cipher, &mut element);
+    reader.config_mut().trim_text_start = trim_start;
+    reader.config_mut().trim_text_end = trim_end;
+    content?;
+
+    if element.children.is_empty() {
+        if element.is_protected_leaf() && !element.text.is_empty() {
+            if let Some(ref mut cipher) = stream_cipher {
+                // base64: surrounding whitespace is layout, not data
+                element.text = cipher.process_basic64_str(element.text.trim())?;
+            }
+        }
+    } else if element.text.trim().is_empty() {
+        // Indentation between child elements, not content
+        element.text.clear();
+    }
+    Ok(element)
+}
+
+fn read_unknown_content<B: BufRead>(
+    reader: &mut QuickXmlReader<B>,
+    stream_cipher: &mut Option<ProtectedContentStreamCipher>,
+    element: &mut UnknownElement,
+) -> Result<()> {
     let mut buf = vec![];
-    reader.read_to_end_into(QName(tag), &mut buf)?;
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(ref e) => {
+                let child = read_unknown_element(reader, stream_cipher, e)?;
+                element.children.push(child);
+            }
+            Event::Empty(ref e) => element.children.push(unknown_element_start(e)?),
+            Event::Text(ref t) => {
+                let text = t.decode().map_err(quick_xml::Error::from)?;
+                element.text.push_str(&text);
+            }
+            // Entities (&amp; etc.) come as their own event since quick-xml 0.38
+            Event::GeneralRef(ref r) => {
+                let name = r.decode().map_err(quick_xml::Error::from)?;
+                element
+                    .text
+                    .push_str(&content_unescape(&format!("&{};", name)));
+            }
+            Event::CData(ref c) => element.text.push_str(std::str::from_utf8(c)?),
+            Event::End(_) => break,
+            Event::Eof => {
+                return Err(Error::XmlReadingFailed(format!(
+                    "Reached end inside the element {:?}",
+                    element.tag
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
     Ok(())
 }
 
@@ -174,6 +260,19 @@ fn content_to_bool(content: String) -> bool {
     content.to_lowercase() == "true"
 }
 
+// Three-state KeePass flag (EnableAutoType, EnableSearching): "null" = inherit from the parent
+fn content_to_opt_bool(content: String) -> Option<bool> {
+    if content.trim().eq_ignore_ascii_case("null") {
+        None
+    } else {
+        Some(content_to_bool(content))
+    }
+}
+
+fn opt_bool_to_xml(flag: Option<bool>) -> String {
+    flag.map_or_else(|| "null".into(), bool_to_xml_bool)
+}
+
 #[inline]
 fn content_to_dt(content: String) -> chrono::NaiveDateTime {
     if let Some(d) = util::decode_datetime_b64(&content) {
@@ -219,6 +318,22 @@ impl<'a> XmlReader<'a> {
         XmlReader {
             reader: qxmlreader,
             stream_cipher: cipher,
+            unknown_elements: vec![],
+        }
+    }
+
+    // Unknown elements are kept where they are written back: directly in Meta, Group and Entry
+    // (history entries too). Elsewhere (e.g. inside <Times>) there is no place to write them
+    // back, so they are dropped - after read_unknown_element already decrypted what they hold
+    fn keep_unknown(&mut self, parent_tag: &[u8], element: UnknownElement) {
+        if parent_tag == META || parent_tag == GROUP || parent_tag == ENTRY {
+            self.unknown_elements.push(element);
+        } else {
+            info!(
+                "Unknown element {} inside {:?} is dropped",
+                element.tag,
+                std::str::from_utf8(parent_tag)
+            );
         }
     }
 
@@ -307,6 +422,7 @@ impl<'a> XmlReader<'a> {
     }
 
     fn read_meta(&mut self, meta: &mut Meta) -> Result<()> {
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags! (
             self,
             start_tag_fns {
@@ -321,6 +437,24 @@ impl<'a> XmlReader<'a> {
                 ),
                 LAST_SELECTED_GROUP => (
                     |content:String, _,  _| meta.last_selected_group = content_to_uuid(&content)
+                ),
+                LAST_TOP_VISIBLE_GROUP => (
+                    |content:String, _,  _| meta.last_top_visible_group = content_to_uuid(&content)
+                ),
+                COLOR => (
+                    |content:String, _,  _| meta.color = content
+                ),
+                MASTER_KEY_CHANGE_REC => (
+                    |content:String, _,  _| meta.master_key_change_rec = content_to_i64(content)
+                ),
+                MASTER_KEY_CHANGE_FORCE => (
+                    |content:String, _,  _| meta.master_key_change_force = content_to_i64(content)
+                ),
+                MASTER_KEY_CHANGE_FORCE_ONCE => (
+                    |content:String, _,  _| meta.master_key_change_force_once = content_to_bool(content)
+                ),
+                RECYCLE_BIN_CHANGED => (
+                    |content:String, _,  _| meta.recycle_bin_changed = content_to_dt(content)
                 ),
                 HISTORY_MAX_ITEMS => (
                     |content:String, _,  _| meta.meta_share.set_history_max_items(content_to_int(content))
@@ -382,6 +516,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             META
         );
+        meta.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
         Ok(())
     }
 
@@ -399,6 +534,14 @@ impl<'a> XmlReader<'a> {
                 PROTECT_TITLE =>
                 (|content:String, _,  _|
                     mp.protect_title = content_to_bool(content)
+                ),
+                PROTECT_USER_NAME =>
+                (|content:String, _,  _|
+                    mp.protect_username = content_to_bool(content)
+                ),
+                PROTECT_URL =>
+                (|content:String, _,  _|
+                    mp.protect_url = content_to_bool(content)
                 )
             },
             start_tag_blks {},
@@ -547,22 +690,20 @@ impl<'a> XmlReader<'a> {
         if let Some(gid) = parent_group_uuid {
             group.parent_group_uuid = gid;
         }
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags!(self,
             start_tag_fns {
                 NAME => (|content:String, _,  _| group.name = content),
                 UUID => (|content:String, _,  _| group.uuid = content_to_uuid(&content)),
                 ICON_ID => (|content:String, _,  _| group.icon_id = content_to_int(content)),
-                LAST_TOP_VISIBLE_ENTRY => (|content:String, _,  _| group.last_top_visible_group = content_to_uuid(&content)),
+                LAST_TOP_VISIBLE_ENTRY => (|content:String, _,  _| group.last_top_visible_entry = content_to_uuid(&content)),
+                PREVIOUS_PARENT_GROUP => (|content:String, _,  _| group.previous_parent_group = content_to_uuid(&content)),
                 IS_EXPANDED => (|content:String, _,  _| group.is_expanded = content_to_bool(content)),
-                NOTES => (|content:String, _,  _| group.notes = content_unescape(&content)),
+                NOTES => (|content:String, _,  _| group.notes = content),
                 TAGS => (|content:String, _,  _| group.tags = content),
-                ENABLE_AUTO_TYPE => (|content:String, _,  _| {
-                    if content.trim().to_lowercase() == "null" {
-                        group.enable_auto_type = None
-                    } else {
-                        group.enable_auto_type = Some(content_to_bool(content))
-                    }
-                }),
+                DEFAULT_AUTO_TYPE_SEQUENCE => (|content:String, _,  _| group.default_auto_type_sequence = Some(content)),
+                ENABLE_AUTO_TYPE => (|content:String, _,  _| group.enable_auto_type = content_to_opt_bool(content)),
+                ENABLE_SEARCHING => (|content:String, _,  _| group.enable_searching = content_to_opt_bool(content)),
                 CUSTOM_ICON_UUID => (|content:String, _,  _|
                     group.custom_icon_uuid = if content.is_empty() {
                                                     None
@@ -595,6 +736,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             GROUP
         );
+        group.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
         // TODO: We may need to ensure all Entries of this group has its group_uuid is set to this group's UUID. See above comments in 'ENTRY'
         let gid = group.uuid; // copy to return
 
@@ -604,6 +746,7 @@ impl<'a> XmlReader<'a> {
 
     fn read_entry_data(&mut self) -> Result<Entry> {
         let mut entry = Entry::new();
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags!(self,
             start_tag_fns {
                 UUID => (|content:String, _,  _| entry.uuid = content_to_uuid(&content)),
@@ -614,7 +757,12 @@ impl<'a> XmlReader<'a> {
                                                     } else {
                                                         Some(content_to_uuid(&content))
                                                     } ),
-                TAGS => (|content:String, _,  _| entry.tags = content)
+                TAGS => (|content:String, _,  _| entry.tags = content),
+                FOREGROUND_COLOR => (|content:String, _,  _| entry.foreground_color = content),
+                BACKGROUND_COLOR => (|content:String, _,  _| entry.background_color = content),
+                OVERRIDE_URL => (|content:String, _,  _| entry.override_url = content),
+                QUALITY_CHECK => (|content:String, _,  _| entry.quality_check = content_to_bool(content)),
+                PREVIOUS_PARENT_GROUP => (|content:String, _,  _| entry.previous_parent_group = content_to_uuid(&content))
             },
             start_tag_blks {
                 TIMES => {
@@ -639,6 +787,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             ENTRY
         );
+        entry.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
 
         Ok(entry)
     }
@@ -696,12 +845,11 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {
                 KEY =>
                 (|content:String, _attributes, _cipher| {
-                    // Xml tag 'Key' may have a text content with escaped charaters that are to be unescaped
-                    kv.key = content_unescape(&content);
+                    kv.key = content;
                 }),
                 VALUE =>
                 (|content:String, attributes:&mut Attributes, cipher:&mut Option<ProtectedContentStreamCipher>| {
-                        // Xml tag 'Value' may have a text content with escaped charaters that are to be unescaped
+                        // content is already unescaped by read_tags! (a protected value is base64)
                         //println!("KV:Value content is {}",&content);
 
                         kv.protected = is_value_protected(attributes);
@@ -713,11 +861,11 @@ impl<'a> XmlReader<'a> {
                                     kv.value = v;
                                 }
                             } else {
-                                kv.value = content_unescape(&content);
+                                kv.value = content;
                             }
                         }
                         else {
-                                kv.value = content_unescape(&content);
+                                kv.value = content;
                         }
                     }
                 )
@@ -749,6 +897,9 @@ impl<'a> XmlReader<'a> {
                 }),
                 DEFAULT_SEQUENCE => (|content:String, _attributes, _cipher| {
                     auto_type.default_sequence = content_to_string_opt(content);
+                }),
+                DATA_TRANSFER_OBFUSCATION => (|content:String, _attributes, _cipher| {
+                    auto_type.data_transfer_obfuscation = content_to_int(content);
                 })
             },
             start_tag_blks {
@@ -1038,32 +1189,96 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(meta_tag)))?;
 
+        let meta = &keepass_file.meta;
+
+        // Element order as in KeePass (KdbxFile.Write) and KeePassXC (KdbxXmlWriter)
         write_tags! { self,
             GENERATOR,GENERATOR_NAME,
-            DATABASE_NAME,keepass_file.meta.database_name,
-            DATABASE_DESCRIPTION, keepass_file.meta.database_description,
-            HISTORY_MAX_ITEMS,keepass_file.meta.meta_share.history_max_items().to_string(),
-            HISTORY_MAX_SIZE,keepass_file.meta.meta_share.history_max_size().to_string(),
-            MAINTENANCE_HISTORY_DAYS, keepass_file.meta.maintenance_history_days.to_string(),
-            RECYCLE_BIN_ENABLED, if keepass_file.meta.recycle_bin_enabled {"True"} else {"False"},
-            RECYCLE_BIN_UUID, util::encode_uuid(&keepass_file.meta.recycle_bin_uuid),
-            ENTRY_TEMPLATE_GROUP, util::encode_uuid(&keepass_file.meta.entry_template_group),
-            ENTRY_TEMPLATE_GROUP_CHANGED,util::encode_datetime(&keepass_file.meta.entry_template_group_changed),
-            DEFAULT_USER_NAME, keepass_file.meta.default_user_name,
-            DATABASE_NAME_CHANGED,util::encode_datetime(&keepass_file.meta.database_name_changed),
-            DATABASE_DESCRIPTION_CHANGED,util::encode_datetime(&keepass_file.meta.database_description_changed),
-            DEFAULT_USER_NAME_CHANGED,util::encode_datetime(&keepass_file.meta.default_user_name_changed),
-            SETTINGS_CHANGED, util::encode_datetime(&keepass_file.meta.settings_changed),
-            MASTER_KEY_CHANGED, util::encode_datetime(&keepass_file.meta.master_key_changed)
+            DATABASE_NAME,meta.database_name,
+            DATABASE_NAME_CHANGED,util::encode_datetime(&meta.database_name_changed),
+            DATABASE_DESCRIPTION, meta.database_description,
+            DATABASE_DESCRIPTION_CHANGED,util::encode_datetime(&meta.database_description_changed),
+            DEFAULT_USER_NAME, meta.default_user_name,
+            DEFAULT_USER_NAME_CHANGED,util::encode_datetime(&meta.default_user_name_changed),
+            MAINTENANCE_HISTORY_DAYS, meta.maintenance_history_days.to_string(),
+            COLOR, meta.color,
+            MASTER_KEY_CHANGED, util::encode_datetime(&meta.master_key_changed),
+            MASTER_KEY_CHANGE_REC, meta.master_key_change_rec.to_string(),
+            MASTER_KEY_CHANGE_FORCE, meta.master_key_change_force.to_string()
+        };
+        // KeePass writes it only when set
+        if meta.master_key_change_force_once {
+            write_tags! { self, MASTER_KEY_CHANGE_FORCE_ONCE, "True" };
+        }
+
+        self.write_memory_protection(&meta.memory_protection)?;
+
+        self.write_custom_icons(&meta.custom_icons)?;
+
+        write_tags! { self,
+            RECYCLE_BIN_ENABLED, if meta.recycle_bin_enabled {"True"} else {"False"},
+            RECYCLE_BIN_UUID, util::encode_uuid(&meta.recycle_bin_uuid),
+            RECYCLE_BIN_CHANGED, util::encode_datetime(&meta.recycle_bin_changed),
+            ENTRY_TEMPLATE_GROUP, util::encode_uuid(&meta.entry_template_group),
+            ENTRY_TEMPLATE_GROUP_CHANGED,util::encode_datetime(&meta.entry_template_group_changed),
+            HISTORY_MAX_ITEMS,meta.meta_share.history_max_items().to_string(),
+            HISTORY_MAX_SIZE,meta.meta_share.history_max_size().to_string(),
+            LAST_SELECTED_GROUP, util::encode_uuid(&meta.last_selected_group),
+            LAST_TOP_VISIBLE_GROUP, util::encode_uuid(&meta.last_top_visible_group),
+            SETTINGS_CHANGED, util::encode_datetime(&meta.settings_changed)
         };
 
-        self.write_custom_data(&keepass_file.meta.custom_data)?;
+        self.write_custom_data(&meta.custom_data)?;
 
-        self.write_custom_icons(&keepass_file.meta.custom_icons)?;
+        self.write_unknown_elements(&meta.unknown_elements)?;
 
         self.writer
             .write_event(Event::End(BytesEnd::new(meta_tag)))?;
 
+        Ok(())
+    }
+
+    // Writes back elements the core does not know (read by read_unknown_element).
+    // Protected leaves are encrypted here, in document order like every other protected value
+    fn write_unknown_elements(&mut self, elements: &[UnknownElement]) -> Result<()> {
+        for element in elements {
+            let mut start = BytesStart::new(element.tag.as_str());
+            for (key, value) in element.attrs.iter() {
+                start.push_attribute((key.as_str(), value.as_str()));
+            }
+            if element.text.is_empty() && element.children.is_empty() {
+                self.writer.write_event(Event::Empty(start))?;
+                continue;
+            }
+
+            self.writer.write_event(Event::Start(start))?;
+            if !element.text.is_empty() {
+                let mut text = element.text.clone();
+                if element.is_protected_leaf() {
+                    if let Some(ref mut cipher) = &mut self.stream_cipher {
+                        text = cipher.process_content_b64_str(&element.text)?;
+                    }
+                }
+                self.writer
+                    .write_event(Event::Text(BytesText::new(&text)))?;
+            }
+            self.write_unknown_elements(&element.children)?;
+            self.writer
+                .write_event(Event::End(BytesEnd::new(element.tag.as_str())))?;
+        }
+        Ok(())
+    }
+
+    fn write_memory_protection(&mut self, mp: &MemoryProtection) -> Result<()> {
+        write_parent_child_tags! {
+            self,
+            MEMORY_PROTECTION,
+            PROTECT_TITLE, bool_to_xml_bool(mp.protect_title),
+            PROTECT_USER_NAME, bool_to_xml_bool(mp.protect_username),
+            PROTECT_PASSWORD, bool_to_xml_bool(mp.protect_password),
+            PROTECT_URL, bool_to_xml_bool(mp.protect_url),
+            PROTECT_NOTES, bool_to_xml_bool(mp.protect_notes)
+        };
         Ok(())
     }
 
@@ -1148,23 +1363,18 @@ impl<W: Write> XmlWriter<W> {
             self.writer
                 .write_event(Event::Start(BytesStart::new(group_tag)))?;
 
-            // The tags are written in this order. If we want change the order of tags, then
-            // call the write_* macros in that required sequences accordingly
+            // The tags are written in this order (as KeePassXC KdbxXmlWriter). If we want change the
+            // order of tags, then call the write_* macros in that required sequences accordingly
 
             write_tags! { self,
-                NAME, group.name,
                 UUID,util::encode_uuid(&group.uuid),
-                ICON_ID,group.icon_id.to_string(),
-                NOTES, group.notes,
-                IS_EXPANDED, if group.is_expanded {"True"} else {"False"}
+                NAME, group.name,
+                NOTES, group.notes
             };
 
             write_tags_or_skip_empty! { self,TAGS,group.tags};
 
-            // write_tags_or_skip_empty! { self,
-            //     TAGS,group.tags,
-            //     CUSTOM_ICON_UUID, group.custom_icon_uuid.map_or_else(||empty_str(),|uuid|util::encode_uuid(&uuid))
-            // };
+            write_tags! { self, ICON_ID,group.icon_id.to_string() };
 
             write_opt_val_tags_or_skip! { self,
                 CUSTOM_ICON_UUID, group.custom_icon_uuid.map(|uuid|util::encode_uuid(&uuid))
@@ -1172,8 +1382,22 @@ impl<W: Write> XmlWriter<W> {
 
             self.write_times(&group.times)?;
 
+            write_tags! { self,
+                IS_EXPANDED, bool_to_xml_bool(group.is_expanded),
+                DEFAULT_AUTO_TYPE_SEQUENCE, group.default_auto_type_sequence.as_deref().unwrap_or_default(),
+                ENABLE_AUTO_TYPE, opt_bool_to_xml(group.enable_auto_type),
+                ENABLE_SEARCHING, opt_bool_to_xml(group.enable_searching),
+                LAST_TOP_VISIBLE_ENTRY, util::encode_uuid(&group.last_top_visible_entry)
+            };
+
             //Custom Data
             self.write_custom_data(&group.custom_data)?;
+
+            if group.previous_parent_group != uuid::Uuid::default() {
+                write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&group.previous_parent_group) };
+            }
+
+            self.write_unknown_elements(&group.unknown_elements)?;
 
             for e_uuid in group.entry_uuids.iter() {
                 self.write_entry(e_uuid, root.all_entries(), false)?;
@@ -1201,6 +1425,7 @@ impl<W: Write> XmlWriter<W> {
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
         write_tags! { self,
             ENABLED, bool_to_xml_bool(auto_type.enabled),
+            DATA_TRANSFER_OBFUSCATION, auto_type.data_transfer_obfuscation.to_string(),
             DEFAULT_SEQUENCE,  auto_type.default_sequence.as_ref().map_or("", |s| s)
         };
 
@@ -1227,10 +1452,10 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
 
+        // Element order as in KeePassXC (KdbxXmlWriter::writeEntry)
         write_tags! { self,
             UUID, util::encode_uuid(&entry.uuid), //entry.uuid.to_string(),
-            ICON_ID,entry.icon_id.to_string(),
-            TAGS,entry.tags
+            ICON_ID,entry.icon_id.to_string()
         };
 
         write_tags_or_skip_empty! {
@@ -1238,8 +1463,23 @@ impl<W: Write> XmlWriter<W> {
             CUSTOM_ICON_UUID, entry.custom_icon_uuid.map_or_else(empty_str,|uuid|util::encode_uuid(&uuid))
         }
 
+        write_tags! { self,
+            FOREGROUND_COLOR, entry.foreground_color,
+            BACKGROUND_COLOR, entry.background_color,
+            OVERRIDE_URL, entry.override_url,
+            TAGS,entry.tags
+        };
+
         // Times tag and the children
         self.write_times(&entry.times)?;
+
+        // KDBX 4.1 elements, written only when not default (as KeePass / KeePassXC)
+        if !entry.quality_check {
+            write_tags! { self, QUALITY_CHECK, "False" };
+        }
+        if entry.previous_parent_group != uuid::Uuid::default() {
+            write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&entry.previous_parent_group) };
+        }
 
         // The String tag has childeren with attributes
         let empty_attr: Vec<(&str, &str)> = vec![];
@@ -1283,10 +1523,12 @@ impl<W: Write> XmlWriter<W> {
                 VALUE, [("Ref", b.index_ref.to_string().as_str())],b.value
             };
         }
+        self.write_entry_auto_type(&entry.auto_type)?;
+
         // Entry's Custom Data
         self.write_custom_data(&entry.custom_data)?;
 
-        self.write_entry_auto_type(&entry.auto_type)?;
+        self.write_unknown_elements(&entry.unknown_elements)?;
 
         // We need to exclude the History tag while writing the child Entry tag that comes under the History tag
         if !in_history {
@@ -1400,6 +1642,9 @@ impl<'a> FileKeyXmlReader<'a> {
             stream_cipher: None,
         }
     }
+
+    // Key files are only read, never written back - unknown elements are not kept
+    fn keep_unknown(&mut self, _parent_tag: &[u8], _element: UnknownElement) {}
 
     pub fn parse(&mut self) -> Result<KeyFileData> {
         let mut buf: Vec<u8> = vec![];
@@ -1658,6 +1903,118 @@ mod tests {
     use std::path::PathBuf;
 
     // --- Non-ignored unit tests ---
+
+    // Step 17: elements the core does not know are kept in Meta / Group / Entry
+    const UNKNOWN_XML: &str = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Meta>
+    <Generator>test</Generator>
+    <XMeta a="1"/>
+  </Meta>
+  <Root>
+    <Group>
+      <UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>
+      <Name>Root</Name>
+      <Tags/>
+      <XGroup>text &amp; more<Inner k="v">x</Inner></XGroup>
+      <Entry>
+        <UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID>
+        <Times>
+          <XInTimes>dropped</XInTimes>
+        </Times>
+        <OverrideURL/>
+        <XEntry/>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>"#;
+
+    #[test]
+    fn unknown_elements_are_kept_in_meta_group_entry() {
+        let kp = parse(UNKNOWN_XML.as_bytes(), None).unwrap();
+
+        let meta_unknown = &kp.meta.unknown_elements;
+        assert_eq!(meta_unknown.len(), 1);
+        assert_eq!(meta_unknown[0].tag, "XMeta");
+        assert_eq!(
+            meta_unknown[0].attrs,
+            vec![("a".to_string(), "1".to_string())]
+        );
+
+        let group = kp.root.group_by_id(&kp.root.root_uuid()).unwrap();
+        // <Tags/> is a known empty element, not an unknown one
+        assert_eq!(group.unknown_elements.len(), 1);
+        let x_group = &group.unknown_elements[0];
+        assert_eq!(x_group.tag, "XGroup");
+        assert_eq!(x_group.text, "text & more");
+        assert_eq!(x_group.children[0].tag, "Inner");
+        assert_eq!(x_group.children[0].text, "x");
+
+        let entry = kp.root.all_entries().values().next().unwrap();
+        // <OverrideURL/> is known; <XInTimes> has no place to go back to and is dropped
+        let tags: Vec<&str> = entry
+            .unknown_elements
+            .iter()
+            .map(|e| e.tag.as_str())
+            .collect();
+        assert_eq!(tags, vec!["XEntry"]);
+    }
+
+    // Text fields are unescaped once on read and escaped once on write: "A & B" stays "A & B"
+    // after any number of saves (before Step 17 names and tags gained "&amp;" on every save)
+    #[test]
+    fn escaped_text_survives_read_write_read() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Meta>
+    <DatabaseName>Db &amp; Co &lt;x&gt;</DatabaseName>
+    <DefaultUserName>me &amp; you</DefaultUserName>
+  </Meta>
+  <Root>
+    <Group>
+      <UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>
+      <Name>A &amp; B</Name>
+      <Tags>g&amp;h</Tags>
+      <Entry>
+        <UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID>
+        <Tags>x&amp;y;z</Tags>
+        <String><Key>K &amp; k</Key><Value>v &amp; v</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>"#;
+        let first = parse(xml.as_bytes(), None).unwrap();
+        let written = write_xml(&first, None).unwrap();
+        let second = parse(&written, None).unwrap();
+
+        for kp in [&first, &second] {
+            assert_eq!(kp.meta.database_name, "Db & Co <x>");
+            assert_eq!(kp.meta.default_user_name, "me & you");
+            let group = kp.root.group_by_id(&kp.root.root_uuid()).unwrap();
+            assert_eq!(group.name, "A & B");
+            assert_eq!(group.tags, "g&h");
+            let entry = kp.root.all_entries().values().next().unwrap();
+            assert_eq!(entry.tags, "x&y;z");
+            let kv = entry.entry_field.find_key_value("K & k").unwrap();
+            assert_eq!(kv.value, "v & v");
+        }
+    }
+
+    #[test]
+    fn unknown_elements_are_written_back() {
+        let kp = parse(UNKNOWN_XML.as_bytes(), None).unwrap();
+        let xml = String::from_utf8(write_xml(&kp, None).unwrap()).unwrap();
+
+        assert!(xml.contains(r#"<XMeta a="1"/>"#), "{}", xml);
+        assert!(
+            xml.contains(r#"<XGroup>text &amp; more<Inner k="v">x</Inner></XGroup>"#),
+            "{}",
+            xml
+        );
+        assert!(xml.contains("<XEntry/>"), "{}", xml);
+        assert!(!xml.contains("XInTimes"), "{}", xml);
+        assert_eq!(xml.matches("<Tags").count(), 1, "{}", xml);
+    }
 
     #[test]
     fn content_unescape_plain_string_unchanged() {

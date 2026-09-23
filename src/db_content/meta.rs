@@ -2,7 +2,7 @@ use crate::constants::custom_data_key::OKP_ENTRY_TYPE_MAP_DATA;
 use crate::constants::GENERATOR_NAME;
 use crate::crypto;
 use crate::db_content::EntryType;
-use crate::db_content::{CustomData, CustomIcons, MemoryProtection};
+use crate::db_content::{CustomData, CustomIcons, MemoryProtection, UnknownElement};
 use crate::error::Result;
 use crate::util;
 use chrono::NaiveDateTime;
@@ -101,8 +101,19 @@ pub struct Meta {
     // copied to meta from root before writing to xml
     pub(crate) recycle_bin_uuid: Uuid,
 
+    pub(crate) recycle_bin_changed: NaiveDateTime,
+
     pub(crate) last_selected_group: Uuid,
+    pub(crate) last_top_visible_group: Uuid,
     pub(crate) entry_template_group: Uuid,
+
+    // Database color in KeePass ("#RRGGBB"), empty = none
+    pub(crate) color: String,
+
+    // Master key change policy in days, -1 = off (KeePass / KeePassXC)
+    pub(crate) master_key_change_rec: i64,
+    pub(crate) master_key_change_force: i64,
+    pub(crate) master_key_change_force_once: bool,
 
     pub(crate) memory_protection: MemoryProtection,
     pub(crate) custom_icons: CustomIcons,
@@ -115,6 +126,9 @@ pub struct Meta {
 
     pub(crate) master_key_changed: NaiveDateTime,
     pub(crate) entry_template_group_changed: NaiveDateTime,
+
+    // Elements of <Meta> the core does not know - written back as read
+    pub(crate) unknown_elements: Vec<UnknownElement>,
 
     // history_max_items and history_max_size are moved to MetaShare
     pub(crate) meta_share: Arc<MetaShare>,
@@ -133,8 +147,15 @@ impl Meta {
 
             recycle_bin_enabled: false,
             recycle_bin_uuid: Uuid::default(),
+            recycle_bin_changed: current_time,
             last_selected_group: Uuid::default(),
+            last_top_visible_group: Uuid::default(),
             entry_template_group: Uuid::default(),
+
+            color: String::default(),
+            master_key_change_rec: -1,
+            master_key_change_force: -1,
+            master_key_change_force_once: false,
 
             memory_protection: MemoryProtection::default(),
             custom_icons: Default::default(),
@@ -146,6 +167,8 @@ impl Meta {
             settings_changed: current_time,
             master_key_changed: current_time,
             entry_template_group_changed: current_time,
+
+            unknown_elements: vec![],
 
             meta_share: Arc::default(),
         }
@@ -331,6 +354,21 @@ impl Meta {
             if self.master_key_changed != other.master_key_changed {
                 self.master_key_changed = other.master_key_changed;
                 // debug!("-- META: master_key_changed is changed");
+                modified = true;
+            }
+
+            if self.master_key_change_rec != other.master_key_change_rec
+                || self.master_key_change_force != other.master_key_change_force
+                || self.master_key_change_force_once != other.master_key_change_force_once
+            {
+                self.master_key_change_rec = other.master_key_change_rec;
+                self.master_key_change_force = other.master_key_change_force;
+                self.master_key_change_force_once = other.master_key_change_force_once;
+                modified = true;
+            }
+
+            if self.color != other.color {
+                self.color = other.color.clone();
                 modified = true;
             }
 
