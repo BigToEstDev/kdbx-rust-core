@@ -174,6 +174,19 @@ fn content_to_bool(content: String) -> bool {
     content.to_lowercase() == "true"
 }
 
+// Three-state KeePass flag (EnableAutoType, EnableSearching): "null" = inherit from the parent
+fn content_to_opt_bool(content: String) -> Option<bool> {
+    if content.trim().eq_ignore_ascii_case("null") {
+        None
+    } else {
+        Some(content_to_bool(content))
+    }
+}
+
+fn opt_bool_to_xml(flag: Option<bool>) -> String {
+    flag.map_or_else(|| "null".into(), bool_to_xml_bool)
+}
+
 #[inline]
 fn content_to_dt(content: String) -> chrono::NaiveDateTime {
     if let Some(d) = util::decode_datetime_b64(&content) {
@@ -578,17 +591,14 @@ impl<'a> XmlReader<'a> {
                 NAME => (|content:String, _,  _| group.name = content),
                 UUID => (|content:String, _,  _| group.uuid = content_to_uuid(&content)),
                 ICON_ID => (|content:String, _,  _| group.icon_id = content_to_int(content)),
-                LAST_TOP_VISIBLE_ENTRY => (|content:String, _,  _| group.last_top_visible_group = content_to_uuid(&content)),
+                LAST_TOP_VISIBLE_ENTRY => (|content:String, _,  _| group.last_top_visible_entry = content_to_uuid(&content)),
+                PREVIOUS_PARENT_GROUP => (|content:String, _,  _| group.previous_parent_group = content_to_uuid(&content)),
                 IS_EXPANDED => (|content:String, _,  _| group.is_expanded = content_to_bool(content)),
                 NOTES => (|content:String, _,  _| group.notes = content_unescape(&content)),
                 TAGS => (|content:String, _,  _| group.tags = content),
-                ENABLE_AUTO_TYPE => (|content:String, _,  _| {
-                    if content.trim().to_lowercase() == "null" {
-                        group.enable_auto_type = None
-                    } else {
-                        group.enable_auto_type = Some(content_to_bool(content))
-                    }
-                }),
+                DEFAULT_AUTO_TYPE_SEQUENCE => (|content:String, _,  _| group.default_auto_type_sequence = Some(content_unescape(&content))),
+                ENABLE_AUTO_TYPE => (|content:String, _,  _| group.enable_auto_type = content_to_opt_bool(content)),
+                ENABLE_SEARCHING => (|content:String, _,  _| group.enable_searching = content_to_opt_bool(content)),
                 CUSTOM_ICON_UUID => (|content:String, _,  _|
                     group.custom_icon_uuid = if content.is_empty() {
                                                     None
@@ -1205,23 +1215,18 @@ impl<W: Write> XmlWriter<W> {
             self.writer
                 .write_event(Event::Start(BytesStart::new(group_tag)))?;
 
-            // The tags are written in this order. If we want change the order of tags, then
-            // call the write_* macros in that required sequences accordingly
+            // The tags are written in this order (as KeePassXC KdbxXmlWriter). If we want change the
+            // order of tags, then call the write_* macros in that required sequences accordingly
 
             write_tags! { self,
-                NAME, group.name,
                 UUID,util::encode_uuid(&group.uuid),
-                ICON_ID,group.icon_id.to_string(),
-                NOTES, group.notes,
-                IS_EXPANDED, if group.is_expanded {"True"} else {"False"}
+                NAME, group.name,
+                NOTES, group.notes
             };
 
             write_tags_or_skip_empty! { self,TAGS,group.tags};
 
-            // write_tags_or_skip_empty! { self,
-            //     TAGS,group.tags,
-            //     CUSTOM_ICON_UUID, group.custom_icon_uuid.map_or_else(||empty_str(),|uuid|util::encode_uuid(&uuid))
-            // };
+            write_tags! { self, ICON_ID,group.icon_id.to_string() };
 
             write_opt_val_tags_or_skip! { self,
                 CUSTOM_ICON_UUID, group.custom_icon_uuid.map(|uuid|util::encode_uuid(&uuid))
@@ -1229,8 +1234,20 @@ impl<W: Write> XmlWriter<W> {
 
             self.write_times(&group.times)?;
 
+            write_tags! { self,
+                IS_EXPANDED, bool_to_xml_bool(group.is_expanded),
+                DEFAULT_AUTO_TYPE_SEQUENCE, group.default_auto_type_sequence.as_deref().unwrap_or_default(),
+                ENABLE_AUTO_TYPE, opt_bool_to_xml(group.enable_auto_type),
+                ENABLE_SEARCHING, opt_bool_to_xml(group.enable_searching),
+                LAST_TOP_VISIBLE_ENTRY, util::encode_uuid(&group.last_top_visible_entry)
+            };
+
             //Custom Data
             self.write_custom_data(&group.custom_data)?;
+
+            if group.previous_parent_group != uuid::Uuid::default() {
+                write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&group.previous_parent_group) };
+            }
 
             for e_uuid in group.entry_uuids.iter() {
                 self.write_entry(e_uuid, root.all_entries(), false)?;

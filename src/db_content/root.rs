@@ -491,8 +491,11 @@ impl Root {
         //TODO: Need return error if this group is not present in all_groups map
 
         if let Some(g) = self.all_groups.get_mut(&group.uuid) {
+            // true only on merge (the source group is newer): take its times and all KeePass
+            // properties; from the group form - only the fields below
             if group_modification_time_used {
                 g.times = group.times.clone();
+                g.assign_merge_properties(&group);
             } else {
                 g.times.update_modification_time_now();
             }
