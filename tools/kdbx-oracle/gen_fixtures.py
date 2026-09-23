@@ -206,6 +206,10 @@ AF_ICON_PNG = base64.b64decode(
 AF_UNKNOWN_TAG = "XPassholderUnknown"
 AF_UNKNOWN_ATTR = ("Origin", "fixture")
 AF_UNKNOWN_CHILD = ("Inner", "unknown-value")
+# Protected-значение внутри неизвестного элемента записи. Inner stream расшифровывает
+# protected-значения по порядку документа: если ядро пропустит это значение, не
+# расшифровав, все следующие (пароль в истории) расшифруются мусором.
+AF_UNKNOWN_SECRET = "unknown-secret"
 
 
 def b64_uuid(key):
@@ -256,10 +260,14 @@ def put_custom_data(kp, obj_el, key, value, day):
     SubElement(item, "LastModificationTime").text = af_time(kp, day)
 
 
-def put_unknown(obj_el):
+def put_unknown(obj_el, with_secret=False):
     unknown = put(obj_el, AF_UNKNOWN_TAG, None)
     unknown.set(*AF_UNKNOWN_ATTR)
     SubElement(unknown, AF_UNKNOWN_CHILD[0]).text = AF_UNKNOWN_CHILD[1]
+    if with_secret:
+        # pykeepass шифрует при сохранении любой Value[@Protected='True']
+        secret = SubElement(unknown, "Value", Protected="True")
+        secret.text = AF_UNKNOWN_SECRET
 
 
 def fill_all_fields_meta(kp):
@@ -380,7 +388,7 @@ def fill_all_fields_entry(kp, work):
     SubElement(association, "KeystrokeSequence").text = "{USERNAME}"
 
     put_custom_data(kp, el, "X-Entry-Key", "entry-value", 25)
-    put_unknown(el)
+    put_unknown(el, with_secret=True)
 
     # История: копия записи со всеми полями выше, затем текущая версия меняется.
     entry.save_history()
@@ -446,6 +454,7 @@ def verify_all_fields(db_path):
     for tag in ("OverrideURL", "ForegroundColor", "QualityCheck", "PreviousParentGroup", AF_UNKNOWN_TAG):
         assert entry._element.find(tag) is not None, tag
         assert entry.history[0]._element.find(tag) is not None, "history: " + tag
+    assert entry._element.findtext(AF_UNKNOWN_TAG + "/Value") == AF_UNKNOWN_SECRET
     assert root.find("Root/DeletedObjects/DeletedObject") is not None
 
 
