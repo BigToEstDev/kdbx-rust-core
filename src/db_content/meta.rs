@@ -101,8 +101,19 @@ pub struct Meta {
     // copied to meta from root before writing to xml
     pub(crate) recycle_bin_uuid: Uuid,
 
+    pub(crate) recycle_bin_changed: NaiveDateTime,
+
     pub(crate) last_selected_group: Uuid,
+    pub(crate) last_top_visible_group: Uuid,
     pub(crate) entry_template_group: Uuid,
+
+    // Database color in KeePass ("#RRGGBB"), empty = none
+    pub(crate) color: String,
+
+    // Master key change policy in days, -1 = off (KeePass / KeePassXC)
+    pub(crate) master_key_change_rec: i64,
+    pub(crate) master_key_change_force: i64,
+    pub(crate) master_key_change_force_once: bool,
 
     pub(crate) memory_protection: MemoryProtection,
     pub(crate) custom_icons: CustomIcons,
@@ -133,8 +144,15 @@ impl Meta {
 
             recycle_bin_enabled: false,
             recycle_bin_uuid: Uuid::default(),
+            recycle_bin_changed: current_time,
             last_selected_group: Uuid::default(),
+            last_top_visible_group: Uuid::default(),
             entry_template_group: Uuid::default(),
+
+            color: String::default(),
+            master_key_change_rec: -1,
+            master_key_change_force: -1,
+            master_key_change_force_once: false,
 
             memory_protection: MemoryProtection::default(),
             custom_icons: Default::default(),
@@ -331,6 +349,21 @@ impl Meta {
             if self.master_key_changed != other.master_key_changed {
                 self.master_key_changed = other.master_key_changed;
                 // debug!("-- META: master_key_changed is changed");
+                modified = true;
+            }
+
+            if self.master_key_change_rec != other.master_key_change_rec
+                || self.master_key_change_force != other.master_key_change_force
+                || self.master_key_change_force_once != other.master_key_change_force_once
+            {
+                self.master_key_change_rec = other.master_key_change_rec;
+                self.master_key_change_force = other.master_key_change_force;
+                self.master_key_change_force_once = other.master_key_change_force_once;
+                modified = true;
+            }
+
+            if self.color != other.color {
+                self.color = other.color.clone();
                 modified = true;
             }
 

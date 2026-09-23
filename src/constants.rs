@@ -284,6 +284,13 @@ pub mod xml_element {
     pub const MAINTENANCE_HISTORY_DAYS: &[u8] = b"MaintenanceHistoryDays";
     pub const HISTORY_MAX_SIZE: &[u8] = b"HistoryMaxSize";
     pub const LAST_SELECTED_GROUP: &[u8] = b"LastSelectedGroup";
+    pub const LAST_TOP_VISIBLE_GROUP: &[u8] = b"LastTopVisibleGroup";
+    pub const COLOR: &[u8] = b"Color";
+    // Master key change policy (KeePass): days, -1 = off
+    pub const MASTER_KEY_CHANGE_REC: &[u8] = b"MasterKeyChangeRec";
+    pub const MASTER_KEY_CHANGE_FORCE: &[u8] = b"MasterKeyChangeForce";
+    // KeePass only; written only when true
+    pub const MASTER_KEY_CHANGE_FORCE_ONCE: &[u8] = b"MasterKeyChangeForceOnce";
 
     pub const MEMORY_PROTECTION: &[u8] = b"MemoryProtection";
     pub const PROTECT_TITLE: &[u8] = b"ProtectTitle";
@@ -333,6 +340,17 @@ pub mod xml_element {
     pub const ICON_ID: &[u8] = b"IconID";
     pub const LAST_TOP_VISIBLE_ENTRY: &[u8] = b"LastTopVisibleEntry";
     pub const IS_EXPANDED: &[u8] = b"IsExpanded";
+    // <EnableSearching>null / True / False</EnableSearching>, null = inherit from parent
+    pub const ENABLE_SEARCHING: &[u8] = b"EnableSearching";
+    // KDBX 4.1, group and entry: the group the object was in before the last move
+    pub const PREVIOUS_PARENT_GROUP: &[u8] = b"PreviousParentGroup";
+
+    // Entry
+    pub const FOREGROUND_COLOR: &[u8] = b"ForegroundColor";
+    pub const BACKGROUND_COLOR: &[u8] = b"BackgroundColor";
+    pub const OVERRIDE_URL: &[u8] = b"OverrideURL";
+    // KDBX 4.1: False = exclude the entry from password quality reports; written only when false
+    pub const QUALITY_CHECK: &[u8] = b"QualityCheck";
 
     //
 
@@ -366,7 +384,7 @@ pub mod xml_element {
     // <DefaultAutoTypeSequence>{USERNAME}</DefaultAutoTypeSequence> when custom AutoTypeSequence is used
     pub const DEFAULT_AUTO_TYPE_SEQUENCE: &[u8] = b"DefaultAutoTypeSequence"; // Group level
 
-    pub const DATA_TRANSFER_OBFUSCATION: &[u8] = b"DataTransferObfuscation"; // entry level - not used ?
+    pub const DATA_TRANSFER_OBFUSCATION: &[u8] = b"DataTransferObfuscation"; // entry AutoType, 0 = none
 
     //pub const KEEPASS_FILE_TAGS:&[&[u8]] = &[META,ROOT];
 }

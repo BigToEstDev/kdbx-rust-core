@@ -55,13 +55,27 @@ pub(crate) fn join_tags(tag_vec: &[String]) -> String {
     tag_vec.join(";")
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct MemoryProtection {
     pub(crate) protect_title: bool,
     pub(crate) protect_notes: bool,
     pub(crate) protect_url: bool,
     pub(crate) protect_username: bool,
     pub(crate) protect_password: bool,
+}
+
+// Defaults as in KeePass (MemoryProtectionConfig) and KeePassXC: only the password is protected.
+// Used for new databases and for elements missing in the file
+impl Default for MemoryProtection {
+    fn default() -> Self {
+        Self {
+            protect_title: false,
+            protect_notes: false,
+            protect_url: false,
+            protect_username: false,
+            protect_password: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

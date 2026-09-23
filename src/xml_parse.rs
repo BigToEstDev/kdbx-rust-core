@@ -322,6 +322,24 @@ impl<'a> XmlReader<'a> {
                 LAST_SELECTED_GROUP => (
                     |content:String, _,  _| meta.last_selected_group = content_to_uuid(&content)
                 ),
+                LAST_TOP_VISIBLE_GROUP => (
+                    |content:String, _,  _| meta.last_top_visible_group = content_to_uuid(&content)
+                ),
+                COLOR => (
+                    |content:String, _,  _| meta.color = content
+                ),
+                MASTER_KEY_CHANGE_REC => (
+                    |content:String, _,  _| meta.master_key_change_rec = content_to_i64(content)
+                ),
+                MASTER_KEY_CHANGE_FORCE => (
+                    |content:String, _,  _| meta.master_key_change_force = content_to_i64(content)
+                ),
+                MASTER_KEY_CHANGE_FORCE_ONCE => (
+                    |content:String, _,  _| meta.master_key_change_force_once = content_to_bool(content)
+                ),
+                RECYCLE_BIN_CHANGED => (
+                    |content:String, _,  _| meta.recycle_bin_changed = content_to_dt(content)
+                ),
                 HISTORY_MAX_ITEMS => (
                     |content:String, _,  _| meta.meta_share.set_history_max_items(content_to_int(content))
                 ),
@@ -399,6 +417,14 @@ impl<'a> XmlReader<'a> {
                 PROTECT_TITLE =>
                 (|content:String, _,  _|
                     mp.protect_title = content_to_bool(content)
+                ),
+                PROTECT_USER_NAME =>
+                (|content:String, _,  _|
+                    mp.protect_username = content_to_bool(content)
+                ),
+                PROTECT_URL =>
+                (|content:String, _,  _|
+                    mp.protect_url = content_to_bool(content)
                 )
             },
             start_tag_blks {},
@@ -1038,32 +1064,63 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(meta_tag)))?;
 
+        let meta = &keepass_file.meta;
+
+        // Element order as in KeePass (KdbxFile.Write) and KeePassXC (KdbxXmlWriter)
         write_tags! { self,
             GENERATOR,GENERATOR_NAME,
-            DATABASE_NAME,keepass_file.meta.database_name,
-            DATABASE_DESCRIPTION, keepass_file.meta.database_description,
-            HISTORY_MAX_ITEMS,keepass_file.meta.meta_share.history_max_items().to_string(),
-            HISTORY_MAX_SIZE,keepass_file.meta.meta_share.history_max_size().to_string(),
-            MAINTENANCE_HISTORY_DAYS, keepass_file.meta.maintenance_history_days.to_string(),
-            RECYCLE_BIN_ENABLED, if keepass_file.meta.recycle_bin_enabled {"True"} else {"False"},
-            RECYCLE_BIN_UUID, util::encode_uuid(&keepass_file.meta.recycle_bin_uuid),
-            ENTRY_TEMPLATE_GROUP, util::encode_uuid(&keepass_file.meta.entry_template_group),
-            ENTRY_TEMPLATE_GROUP_CHANGED,util::encode_datetime(&keepass_file.meta.entry_template_group_changed),
-            DEFAULT_USER_NAME, keepass_file.meta.default_user_name,
-            DATABASE_NAME_CHANGED,util::encode_datetime(&keepass_file.meta.database_name_changed),
-            DATABASE_DESCRIPTION_CHANGED,util::encode_datetime(&keepass_file.meta.database_description_changed),
-            DEFAULT_USER_NAME_CHANGED,util::encode_datetime(&keepass_file.meta.default_user_name_changed),
-            SETTINGS_CHANGED, util::encode_datetime(&keepass_file.meta.settings_changed),
-            MASTER_KEY_CHANGED, util::encode_datetime(&keepass_file.meta.master_key_changed)
+            DATABASE_NAME,meta.database_name,
+            DATABASE_NAME_CHANGED,util::encode_datetime(&meta.database_name_changed),
+            DATABASE_DESCRIPTION, meta.database_description,
+            DATABASE_DESCRIPTION_CHANGED,util::encode_datetime(&meta.database_description_changed),
+            DEFAULT_USER_NAME, meta.default_user_name,
+            DEFAULT_USER_NAME_CHANGED,util::encode_datetime(&meta.default_user_name_changed),
+            MAINTENANCE_HISTORY_DAYS, meta.maintenance_history_days.to_string(),
+            COLOR, meta.color,
+            MASTER_KEY_CHANGED, util::encode_datetime(&meta.master_key_changed),
+            MASTER_KEY_CHANGE_REC, meta.master_key_change_rec.to_string(),
+            MASTER_KEY_CHANGE_FORCE, meta.master_key_change_force.to_string()
+        };
+        // KeePass writes it only when set
+        if meta.master_key_change_force_once {
+            write_tags! { self, MASTER_KEY_CHANGE_FORCE_ONCE, "True" };
+        }
+
+        self.write_memory_protection(&meta.memory_protection)?;
+
+        self.write_custom_icons(&meta.custom_icons)?;
+
+        write_tags! { self,
+            RECYCLE_BIN_ENABLED, if meta.recycle_bin_enabled {"True"} else {"False"},
+            RECYCLE_BIN_UUID, util::encode_uuid(&meta.recycle_bin_uuid),
+            RECYCLE_BIN_CHANGED, util::encode_datetime(&meta.recycle_bin_changed),
+            ENTRY_TEMPLATE_GROUP, util::encode_uuid(&meta.entry_template_group),
+            ENTRY_TEMPLATE_GROUP_CHANGED,util::encode_datetime(&meta.entry_template_group_changed),
+            HISTORY_MAX_ITEMS,meta.meta_share.history_max_items().to_string(),
+            HISTORY_MAX_SIZE,meta.meta_share.history_max_size().to_string(),
+            LAST_SELECTED_GROUP, util::encode_uuid(&meta.last_selected_group),
+            LAST_TOP_VISIBLE_GROUP, util::encode_uuid(&meta.last_top_visible_group),
+            SETTINGS_CHANGED, util::encode_datetime(&meta.settings_changed)
         };
 
-        self.write_custom_data(&keepass_file.meta.custom_data)?;
-
-        self.write_custom_icons(&keepass_file.meta.custom_icons)?;
+        self.write_custom_data(&meta.custom_data)?;
 
         self.writer
             .write_event(Event::End(BytesEnd::new(meta_tag)))?;
 
+        Ok(())
+    }
+
+    fn write_memory_protection(&mut self, mp: &MemoryProtection) -> Result<()> {
+        write_parent_child_tags! {
+            self,
+            MEMORY_PROTECTION,
+            PROTECT_TITLE, bool_to_xml_bool(mp.protect_title),
+            PROTECT_USER_NAME, bool_to_xml_bool(mp.protect_username),
+            PROTECT_PASSWORD, bool_to_xml_bool(mp.protect_password),
+            PROTECT_URL, bool_to_xml_bool(mp.protect_url),
+            PROTECT_NOTES, bool_to_xml_bool(mp.protect_notes)
+        };
         Ok(())
     }
 
