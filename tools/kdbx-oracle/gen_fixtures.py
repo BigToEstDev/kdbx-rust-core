@@ -272,7 +272,8 @@ def put_unknown(obj_el, with_secret=False):
 
 def fill_all_fields_meta(kp):
     meta = kp.tree.getroot().find("Meta")
-    put(meta, "DatabaseName", "All Fields 4.1")
+    # "&" and "<": text must not gain "&amp;" on every save
+    put(meta, "DatabaseName", "All Fields & <4.1>")
     put(meta, "DatabaseNameChanged", af_time(kp, 1))
     put(meta, "DatabaseDescription", "every KDBX 4.1 element, non-default")
     put(meta, "DatabaseDescriptionChanged", af_time(kp, 2))
@@ -338,7 +339,7 @@ def fill_all_fields_groups(kp):
     put(bin_group._element, "EnableAutoType", "null")
     put(bin_group._element, "EnableSearching", "null")
 
-    work = kp.add_group(root, "Work")
+    work = kp.add_group(root, "Work & Co")
     set_uuid(work, "work")
     el = work._element
     put(el, "Notes", "work group notes")
@@ -372,7 +373,7 @@ def fill_all_fields_entry(kp, work):
     put(el, "ForegroundColor", "#112233")
     put(el, "BackgroundColor", "#445566")
     put(el, "OverrideURL", "cmd://firefox {URL}")
-    put(el, "Tags", "alpha;beta")
+    put(el, "Tags", "alpha;beta&gamma")
     put(el, "QualityCheck", "False")
     put(el, "PreviousParentGroup", b64_uuid("templates"))
     put_times(kp, el, 20)

@@ -44,11 +44,11 @@ macro_rules! read_tags {
                     match e.name().as_ref() {
                         $($start_tag => {
                             let content = $self.reader.read_text(QName($start_tag))?;
-                            // BytesText no longer implements Display/ToString (quick-xml 0.41) -
-                            // .decode() gives the same raw (not entity-unescaped) content the old
-                            // .to_string() did; callers that need unescaping already do it
-                            // themselves via content_unescape() (see read_key_value, group notes).
-                            let content = content.decode().map_err(quick_xml::Error::from)?.into_owned();
+                            // read_text gives the raw text: entities are resolved here, once, for every
+                            // field - the writer escapes once. Before Step 17 only some fields were
+                            // unescaped, and names, tags etc. gained "&amp;" on every save
+                            let content = content.decode().map_err(quick_xml::Error::from)?;
+                            let content = content_unescape(&content);
                             $start_tag_action(content,&mut e.attributes(),&mut $self.stream_cipher);
                         }
                         )*
@@ -699,9 +699,9 @@ impl<'a> XmlReader<'a> {
                 LAST_TOP_VISIBLE_ENTRY => (|content:String, _,  _| group.last_top_visible_entry = content_to_uuid(&content)),
                 PREVIOUS_PARENT_GROUP => (|content:String, _,  _| group.previous_parent_group = content_to_uuid(&content)),
                 IS_EXPANDED => (|content:String, _,  _| group.is_expanded = content_to_bool(content)),
-                NOTES => (|content:String, _,  _| group.notes = content_unescape(&content)),
+                NOTES => (|content:String, _,  _| group.notes = content),
                 TAGS => (|content:String, _,  _| group.tags = content),
-                DEFAULT_AUTO_TYPE_SEQUENCE => (|content:String, _,  _| group.default_auto_type_sequence = Some(content_unescape(&content))),
+                DEFAULT_AUTO_TYPE_SEQUENCE => (|content:String, _,  _| group.default_auto_type_sequence = Some(content)),
                 ENABLE_AUTO_TYPE => (|content:String, _,  _| group.enable_auto_type = content_to_opt_bool(content)),
                 ENABLE_SEARCHING => (|content:String, _,  _| group.enable_searching = content_to_opt_bool(content)),
                 CUSTOM_ICON_UUID => (|content:String, _,  _|
@@ -760,8 +760,7 @@ impl<'a> XmlReader<'a> {
                 TAGS => (|content:String, _,  _| entry.tags = content),
                 FOREGROUND_COLOR => (|content:String, _,  _| entry.foreground_color = content),
                 BACKGROUND_COLOR => (|content:String, _,  _| entry.background_color = content),
-                // A command line: may carry '&' and quotes, stored unescaped like Notes
-                OVERRIDE_URL => (|content:String, _,  _| entry.override_url = content_unescape(&content)),
+                OVERRIDE_URL => (|content:String, _,  _| entry.override_url = content),
                 QUALITY_CHECK => (|content:String, _,  _| entry.quality_check = content_to_bool(content)),
                 PREVIOUS_PARENT_GROUP => (|content:String, _,  _| entry.previous_parent_group = content_to_uuid(&content))
             },
@@ -846,12 +845,11 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {
                 KEY =>
                 (|content:String, _attributes, _cipher| {
-                    // Xml tag 'Key' may have a text content with escaped charaters that are to be unescaped
-                    kv.key = content_unescape(&content);
+                    kv.key = content;
                 }),
                 VALUE =>
                 (|content:String, attributes:&mut Attributes, cipher:&mut Option<ProtectedContentStreamCipher>| {
-                        // Xml tag 'Value' may have a text content with escaped charaters that are to be unescaped
+                        // content is already unescaped by read_tags! (a protected value is base64)
                         //println!("KV:Value content is {}",&content);
 
                         kv.protected = is_value_protected(attributes);
@@ -863,11 +861,11 @@ impl<'a> XmlReader<'a> {
                                     kv.value = v;
                                 }
                             } else {
-                                kv.value = content_unescape(&content);
+                                kv.value = content;
                             }
                         }
                         else {
-                                kv.value = content_unescape(&content);
+                                kv.value = content;
                         }
                     }
                 )
@@ -1960,6 +1958,46 @@ mod tests {
             .map(|e| e.tag.as_str())
             .collect();
         assert_eq!(tags, vec!["XEntry"]);
+    }
+
+    // Text fields are unescaped once on read and escaped once on write: "A & B" stays "A & B"
+    // after any number of saves (before Step 17 names and tags gained "&amp;" on every save)
+    #[test]
+    fn escaped_text_survives_read_write_read() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Meta>
+    <DatabaseName>Db &amp; Co &lt;x&gt;</DatabaseName>
+    <DefaultUserName>me &amp; you</DefaultUserName>
+  </Meta>
+  <Root>
+    <Group>
+      <UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>
+      <Name>A &amp; B</Name>
+      <Tags>g&amp;h</Tags>
+      <Entry>
+        <UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID>
+        <Tags>x&amp;y;z</Tags>
+        <String><Key>K &amp; k</Key><Value>v &amp; v</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>"#;
+        let first = parse(xml.as_bytes(), None).unwrap();
+        let written = write_xml(&first, None).unwrap();
+        let second = parse(&written, None).unwrap();
+
+        for kp in [&first, &second] {
+            assert_eq!(kp.meta.database_name, "Db & Co <x>");
+            assert_eq!(kp.meta.default_user_name, "me & you");
+            let group = kp.root.group_by_id(&kp.root.root_uuid()).unwrap();
+            assert_eq!(group.name, "A & B");
+            assert_eq!(group.tags, "g&h");
+            let entry = kp.root.all_entries().values().next().unwrap();
+            assert_eq!(entry.tags, "x&y;z");
+            let kv = entry.entry_field.find_key_value("K & k").unwrap();
+            assert_eq!(kv.value, "v & v");
+        }
     }
 
     #[test]

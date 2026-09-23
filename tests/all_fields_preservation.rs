@@ -222,6 +222,8 @@ fn meta_fields_survive_save() {
         ("MaintenanceHistoryDays", "123"),
         ("HistoryMaxItems", "7"),
         ("DefaultUserName", "default-user"),
+        // "&" and "<" are unescaped once and escaped once - not "&amp;" after a save
+        ("DatabaseName", "All Fields & <4.1>"),
     ] {
         assert_text(meta, tag, expected, "Meta");
     }
@@ -267,6 +269,7 @@ fn group_fields_survive_save() {
         // уже сохранялись до Step 17
         ("Tags", "g1,g2"),
         ("Notes", "work group notes"),
+        ("Name", "Work & Co"),
     ] {
         assert_text(work, tag, expected, "Group Work");
     }
@@ -304,7 +307,7 @@ fn assert_entry_fields(entry: &Node, what: &str) {
         ("QualityCheck", "False"),
         ("PreviousParentGroup", TEMPLATES),
         // уже сохранялись до Step 17
-        ("Tags", "alpha;beta"),
+        ("Tags", "alpha;beta&gamma"),
         ("IconID", "12"),
     ] {
         assert_text(entry, tag, expected, what);
