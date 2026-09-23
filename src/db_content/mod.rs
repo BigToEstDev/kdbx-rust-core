@@ -7,6 +7,7 @@ mod meta;
 mod otp;
 mod root;
 mod standard_entry_types;
+mod unknown_element;
 
 pub(crate) use self::custom_data::{CustomData, Item};
 pub(crate) use self::keepass::KeepassFile;
@@ -14,6 +15,7 @@ pub(crate) use self::meta::Meta;
 pub(crate) use self::otp::OtpData;
 pub(crate) use self::root::DeletedObject;
 pub(crate) use self::root::Root;
+pub(crate) use self::unknown_element::UnknownElement;
 
 pub use self::entry::{
     Association, AutoType, BinaryKeyValue, Entry, EntryField, History, KeyValue,

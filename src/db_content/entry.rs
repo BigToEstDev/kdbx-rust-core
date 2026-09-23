@@ -12,7 +12,7 @@ use crate::constants::custom_data_key::{
 use crate::constants::OTP_URL_PREFIX;
 use crate::constants::{entry_keyvalue_key::*, EMPTY_STR};
 use crate::db_content::{entry_type::*, Item};
-use crate::db_content::{AttachmentHashValue, CustomData, Times};
+use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElement};
 use crate::util;
 
 use super::meta::MetaShare;
@@ -191,6 +191,9 @@ pub struct Entry {
 
     pub(crate) auto_type: AutoType,
 
+    // Elements of <Entry> the core does not know - written back as read (history copies too)
+    pub(crate) unknown_elements: Vec<UnknownElement>,
+
     pub(crate) history: History,
 
     // Need to use #[serde(skip)] if we use Entry 'Serialize'
@@ -217,6 +220,7 @@ impl PartialEq for Entry {
             && self.custom_data == other.custom_data
             && self.custom_icon_uuid == other.custom_icon_uuid
             && self.auto_type == other.auto_type
+            && self.unknown_elements == other.unknown_elements
             && self.history.entries.len() == other.history.entries.len()
             && self.history == other.history
             // && self.meta_share == other.meta_share
@@ -243,6 +247,7 @@ impl Entry {
             custom_data: CustomData::default(),
             custom_icon_uuid: None,
             auto_type: AutoType::default(),
+            unknown_elements: vec![],
             //history has a list of previous entries and those entries listed will have its 'history' empty
             history: History::default(),
             meta_share: Arc::default(),
@@ -523,6 +528,9 @@ impl Entry {
     // of its history entries' values before the content is dropped on lock.
     pub(crate) fn zeroize_sensitive_content(&mut self) {
         self.entry_field.zeroize_values();
+        for unknown in &mut self.unknown_elements {
+            unknown.zeroize_text();
+        }
         for e in &mut self.history.entries {
             e.zeroize_sensitive_content();
         }

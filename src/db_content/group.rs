@@ -1,4 +1,4 @@
-use crate::db_content::{CustomData, Times};
+use crate::db_content::{CustomData, Times, UnknownElement};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,10 @@ pub struct Group {
     pub(crate) enable_searching: Option<bool>,
 
     pub(crate) custom_icon_uuid: Option<Uuid>,
+
+    // Elements of <Group> the core does not know - written back as read
+    #[serde(skip)]
+    pub(crate) unknown_elements: Vec<UnknownElement>,
 
     // Only the child group uuids are kept here and used to do lookup in 'root.all_groups'
     #[serde(default)]
@@ -108,6 +112,7 @@ impl Group {
         self.enable_searching = other.enable_searching;
         self.last_top_visible_entry = other.last_top_visible_entry;
         self.previous_parent_group = other.previous_parent_group;
+        self.unknown_elements = other.unknown_elements.clone();
     }
 
     pub(crate) fn clear_children(&mut self) -> &mut Self {
@@ -145,6 +150,7 @@ impl Group {
             enable_auto_type: None,
             enable_searching: None,
             default_auto_type_sequence: None,
+            unknown_elements: vec![],
 
             group_uuids: vec![],
             entry_uuids: vec![],

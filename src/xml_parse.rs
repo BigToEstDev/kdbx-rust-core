@@ -23,6 +23,10 @@ use log::{debug, error, info};
 pub struct XmlReader<'a> {
     reader: QuickXmlReader<&'a [u8]>,
     stream_cipher: Option<ProtectedContentStreamCipher>,
+    // Unknown elements of the Meta / Group / Entry being read (see read_tags!, keep_unknown).
+    // Each of these readers swaps in an empty list and takes it back at its end tag, so nested
+    // groups and entries collect their own elements
+    unknown_elements: Vec<UnknownElement>,
 }
 
 // Macro called for reading specific set of inner tags
@@ -60,15 +64,11 @@ macro_rules! read_tags {
                             $parent_tag_action
                         })*
 
-                        x => {
-                            // Just consume/skip any other tags that are not listed above
-
-                            // TODO: Uncomment if required the follwing during development to see all unhandled tags
-                            // let t = std::str::from_utf8(&x)?;
-                            // let et = std::str::from_utf8($end_tag);
-                            // debug!("No matching action found and skipping the tag: {} and end tag is {:?}", &t, &et);
-
-                            skip_tag(x, &mut $self.reader)?;
+                        _ => {
+                            // A tag not listed above: read it whole - protected values inside are
+                            // decrypted, keeping the inner stream in step - and keep it or drop it
+                            let unknown = read_unknown_element(&mut $self.reader, &mut $self.stream_cipher, e)?;
+                            $self.keep_unknown($end_tag, unknown);
                         }
                     }
                 }
@@ -78,13 +78,17 @@ macro_rules! read_tags {
                             $empty_tag_action(&mut e.attributes())
                         }
                         )*
-                        _x => {
-                            // TODO: Uncomment if required the follwing during development to see all unhandled attributes
-                            // if let Ok(_et) = std::str::from_utf8(x) {
-                            //     debug!("The attribute handling action is not used for the Empty tag: {}",et);
-                            // }
-
-
+                        x => {
+                            // An empty known element (e.g. <Tags/>) means "no value"; any other is unknown
+                            let known = match x {
+                                $($start_tag => true,)*
+                                $($parent_tag => true,)*
+                                _ => false,
+                            };
+                            if !known {
+                                let unknown = unknown_element_start(e)?;
+                                $self.keep_unknown($end_tag, unknown);
+                            }
                         }
                     }
                 }
@@ -113,9 +117,91 @@ macro_rules! read_tags {
     };
 }
 
-fn skip_tag<B: BufRead>(tag: &[u8], reader: &mut QuickXmlReader<B>) -> Result<()> {
+// Tag name and attributes of an element the core does not know
+fn unknown_element_start(start: &BytesStart) -> Result<UnknownElement> {
+    let tag = std::str::from_utf8(start.name().as_ref())?.to_string();
+    let mut attrs = vec![];
+    for attr in start.attributes() {
+        let attr = attr.map_err(quick_xml::Error::from)?;
+        let key = std::str::from_utf8(attr.key.as_ref())?.to_string();
+        let value = content_unescape(std::str::from_utf8(&attr.value)?);
+        attrs.push((key, value));
+    }
+    Ok(UnknownElement::new(tag, attrs))
+}
+
+// Reads an unknown element whose start tag was just read, up to and including its end tag.
+// A protected leaf is decrypted here, in document order like every other protected value:
+// skipping it without decrypting would shift the inner stream for all later values
+fn read_unknown_element<B: BufRead>(
+    reader: &mut QuickXmlReader<B>,
+    stream_cipher: &mut Option<ProtectedContentStreamCipher>,
+    start: &BytesStart,
+) -> Result<UnknownElement> {
+    let mut element = unknown_element_start(start)?;
+
+    // The reader trims text events, and text around an entity comes as separate events:
+    // "a &amp; b" would be read as "a&b". Read unknown content untrimmed, restore after
+    let (trim_start, trim_end) = (
+        reader.config().trim_text_start,
+        reader.config().trim_text_end,
+    );
+    reader.config_mut().trim_text(false);
+    let content = read_unknown_content(reader, stream_cipher, &mut element);
+    reader.config_mut().trim_text_start = trim_start;
+    reader.config_mut().trim_text_end = trim_end;
+    content?;
+
+    if element.children.is_empty() {
+        if element.is_protected_leaf() && !element.text.is_empty() {
+            if let Some(ref mut cipher) = stream_cipher {
+                // base64: surrounding whitespace is layout, not data
+                element.text = cipher.process_basic64_str(element.text.trim())?;
+            }
+        }
+    } else if element.text.trim().is_empty() {
+        // Indentation between child elements, not content
+        element.text.clear();
+    }
+    Ok(element)
+}
+
+fn read_unknown_content<B: BufRead>(
+    reader: &mut QuickXmlReader<B>,
+    stream_cipher: &mut Option<ProtectedContentStreamCipher>,
+    element: &mut UnknownElement,
+) -> Result<()> {
     let mut buf = vec![];
-    reader.read_to_end_into(QName(tag), &mut buf)?;
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(ref e) => {
+                let child = read_unknown_element(reader, stream_cipher, e)?;
+                element.children.push(child);
+            }
+            Event::Empty(ref e) => element.children.push(unknown_element_start(e)?),
+            Event::Text(ref t) => {
+                let text = t.decode().map_err(quick_xml::Error::from)?;
+                element.text.push_str(&text);
+            }
+            // Entities (&amp; etc.) come as their own event since quick-xml 0.38
+            Event::GeneralRef(ref r) => {
+                let name = r.decode().map_err(quick_xml::Error::from)?;
+                element
+                    .text
+                    .push_str(&content_unescape(&format!("&{};", name)));
+            }
+            Event::CData(ref c) => element.text.push_str(std::str::from_utf8(c)?),
+            Event::End(_) => break,
+            Event::Eof => {
+                return Err(Error::XmlReadingFailed(format!(
+                    "Reached end inside the element {:?}",
+                    element.tag
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
     Ok(())
 }
 
@@ -232,6 +318,22 @@ impl<'a> XmlReader<'a> {
         XmlReader {
             reader: qxmlreader,
             stream_cipher: cipher,
+            unknown_elements: vec![],
+        }
+    }
+
+    // Unknown elements are kept where they are written back: directly in Meta, Group and Entry
+    // (history entries too). Elsewhere (e.g. inside <Times>) there is no place to write them
+    // back, so they are dropped - after read_unknown_element already decrypted what they hold
+    fn keep_unknown(&mut self, parent_tag: &[u8], element: UnknownElement) {
+        if parent_tag == META || parent_tag == GROUP || parent_tag == ENTRY {
+            self.unknown_elements.push(element);
+        } else {
+            info!(
+                "Unknown element {} inside {:?} is dropped",
+                element.tag,
+                std::str::from_utf8(parent_tag)
+            );
         }
     }
 
@@ -320,6 +422,7 @@ impl<'a> XmlReader<'a> {
     }
 
     fn read_meta(&mut self, meta: &mut Meta) -> Result<()> {
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags! (
             self,
             start_tag_fns {
@@ -413,6 +516,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             META
         );
+        meta.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
         Ok(())
     }
 
@@ -586,6 +690,7 @@ impl<'a> XmlReader<'a> {
         if let Some(gid) = parent_group_uuid {
             group.parent_group_uuid = gid;
         }
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags!(self,
             start_tag_fns {
                 NAME => (|content:String, _,  _| group.name = content),
@@ -631,6 +736,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             GROUP
         );
+        group.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
         // TODO: We may need to ensure all Entries of this group has its group_uuid is set to this group's UUID. See above comments in 'ENTRY'
         let gid = group.uuid; // copy to return
 
@@ -640,6 +746,7 @@ impl<'a> XmlReader<'a> {
 
     fn read_entry_data(&mut self) -> Result<Entry> {
         let mut entry = Entry::new();
+        let outer_unknown = std::mem::take(&mut self.unknown_elements);
         read_tags!(self,
             start_tag_fns {
                 UUID => (|content:String, _,  _| entry.uuid = content_to_uuid(&content)),
@@ -681,6 +788,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             ENTRY
         );
+        entry.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
 
         Ok(entry)
     }
@@ -1124,9 +1232,42 @@ impl<W: Write> XmlWriter<W> {
 
         self.write_custom_data(&meta.custom_data)?;
 
+        self.write_unknown_elements(&meta.unknown_elements)?;
+
         self.writer
             .write_event(Event::End(BytesEnd::new(meta_tag)))?;
 
+        Ok(())
+    }
+
+    // Writes back elements the core does not know (read by read_unknown_element).
+    // Protected leaves are encrypted here, in document order like every other protected value
+    fn write_unknown_elements(&mut self, elements: &[UnknownElement]) -> Result<()> {
+        for element in elements {
+            let mut start = BytesStart::new(element.tag.as_str());
+            for (key, value) in element.attrs.iter() {
+                start.push_attribute((key.as_str(), value.as_str()));
+            }
+            if element.text.is_empty() && element.children.is_empty() {
+                self.writer.write_event(Event::Empty(start))?;
+                continue;
+            }
+
+            self.writer.write_event(Event::Start(start))?;
+            if !element.text.is_empty() {
+                let mut text = element.text.clone();
+                if element.is_protected_leaf() {
+                    if let Some(ref mut cipher) = &mut self.stream_cipher {
+                        text = cipher.process_content_b64_str(&element.text)?;
+                    }
+                }
+                self.writer
+                    .write_event(Event::Text(BytesText::new(&text)))?;
+            }
+            self.write_unknown_elements(&element.children)?;
+            self.writer
+                .write_event(Event::End(BytesEnd::new(element.tag.as_str())))?;
+        }
         Ok(())
     }
 
@@ -1258,6 +1399,8 @@ impl<W: Write> XmlWriter<W> {
                 write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&group.previous_parent_group) };
             }
 
+            self.write_unknown_elements(&group.unknown_elements)?;
+
             for e_uuid in group.entry_uuids.iter() {
                 self.write_entry(e_uuid, root.all_entries(), false)?;
             }
@@ -1387,6 +1530,8 @@ impl<W: Write> XmlWriter<W> {
         // Entry's Custom Data
         self.write_custom_data(&entry.custom_data)?;
 
+        self.write_unknown_elements(&entry.unknown_elements)?;
+
         // We need to exclude the History tag while writing the child Entry tag that comes under the History tag
         if !in_history {
             let history_tag_element = std::str::from_utf8(HISTORY)?;
@@ -1499,6 +1644,9 @@ impl<'a> FileKeyXmlReader<'a> {
             stream_cipher: None,
         }
     }
+
+    // Key files are only read, never written back - unknown elements are not kept
+    fn keep_unknown(&mut self, _parent_tag: &[u8], _element: UnknownElement) {}
 
     pub fn parse(&mut self) -> Result<KeyFileData> {
         let mut buf: Vec<u8> = vec![];
@@ -1757,6 +1905,78 @@ mod tests {
     use std::path::PathBuf;
 
     // --- Non-ignored unit tests ---
+
+    // Step 17: elements the core does not know are kept in Meta / Group / Entry
+    const UNKNOWN_XML: &str = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Meta>
+    <Generator>test</Generator>
+    <XMeta a="1"/>
+  </Meta>
+  <Root>
+    <Group>
+      <UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>
+      <Name>Root</Name>
+      <Tags/>
+      <XGroup>text &amp; more<Inner k="v">x</Inner></XGroup>
+      <Entry>
+        <UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID>
+        <Times>
+          <XInTimes>dropped</XInTimes>
+        </Times>
+        <OverrideURL/>
+        <XEntry/>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>"#;
+
+    #[test]
+    fn unknown_elements_are_kept_in_meta_group_entry() {
+        let kp = parse(UNKNOWN_XML.as_bytes(), None).unwrap();
+
+        let meta_unknown = &kp.meta.unknown_elements;
+        assert_eq!(meta_unknown.len(), 1);
+        assert_eq!(meta_unknown[0].tag, "XMeta");
+        assert_eq!(
+            meta_unknown[0].attrs,
+            vec![("a".to_string(), "1".to_string())]
+        );
+
+        let group = kp.root.group_by_id(&kp.root.root_uuid()).unwrap();
+        // <Tags/> is a known empty element, not an unknown one
+        assert_eq!(group.unknown_elements.len(), 1);
+        let x_group = &group.unknown_elements[0];
+        assert_eq!(x_group.tag, "XGroup");
+        assert_eq!(x_group.text, "text & more");
+        assert_eq!(x_group.children[0].tag, "Inner");
+        assert_eq!(x_group.children[0].text, "x");
+
+        let entry = kp.root.all_entries().values().next().unwrap();
+        // <OverrideURL/> is known; <XInTimes> has no place to go back to and is dropped
+        let tags: Vec<&str> = entry
+            .unknown_elements
+            .iter()
+            .map(|e| e.tag.as_str())
+            .collect();
+        assert_eq!(tags, vec!["XEntry"]);
+    }
+
+    #[test]
+    fn unknown_elements_are_written_back() {
+        let kp = parse(UNKNOWN_XML.as_bytes(), None).unwrap();
+        let xml = String::from_utf8(write_xml(&kp, None).unwrap()).unwrap();
+
+        assert!(xml.contains(r#"<XMeta a="1"/>"#), "{}", xml);
+        assert!(
+            xml.contains(r#"<XGroup>text &amp; more<Inner k="v">x</Inner></XGroup>"#),
+            "{}",
+            xml
+        );
+        assert!(xml.contains("<XEntry/>"), "{}", xml);
+        assert!(!xml.contains("XInTimes"), "{}", xml);
+        assert_eq!(xml.matches("<Tags").count(), 1, "{}", xml);
+    }
 
     #[test]
     fn content_unescape_plain_string_unchanged() {
