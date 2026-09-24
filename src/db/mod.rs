@@ -125,10 +125,18 @@ pub(crate) struct AttachmentSet {
 impl AttachmentSet {
     // Called to add the bytes data while reading the db content
     fn add(&mut self, data: Vec<u8>) {
-        let key = AttachmentSet::to_hash(&data);
+        // The first byte is a flag to indicate whether the data needs protection or not.
+        // A binary with no bytes at all happens only in a damaged inner header: read it as an
+        // empty unprotected attachment instead of panicking on "len() - 1", and keep it in the
+        // collection so that the Ref indexes of the binaries after it still match the file
+        let data = if data.is_empty() {
+            log::warn!("A binary of the inner header has no bytes, reading it as empty");
+            vec![0u8]
+        } else {
+            data
+        };
 
-        // The first byte is a flag to indicate whether the data needs protection or not
-        // and we need to exclude it from the content
+        let key = AttachmentSet::to_hash(&data);
         let size = data.len() - 1;
 
         self.attachments.insert(key, data);
@@ -142,15 +150,11 @@ impl AttachmentSet {
 
     // Gets the bytes content of attachment for view or saving
     fn get_bytes_content(&self, data_hash: &AttachmentHashValue) -> Option<Vec<u8>> {
-        match self.attachments.get(data_hash) {
-            Some(data) => {
-                // The first byte is a flag to indicate whether the data needs protection or not
-                // This byte is removed to get the actual bytes content
-                let b: &[u8] = &data[1..];
-                Some(b.to_vec())
-            }
-            None => None,
-        }
+        // The first byte is a flag to indicate whether the data needs protection or not
+        // This byte is removed to get the actual bytes content
+        self.attachments
+            .get(data_hash)
+            .map(|data| data.get(1..).unwrap_or_default().to_vec())
     }
 
     // Called when a new document is uploaded
@@ -820,4 +824,38 @@ pub fn export_db_main_content_as_xml(
 #[inline]
 pub fn create_key_file(key_file_name: &str) -> Result<()> {
     FileKey::create_xml_key_file(key_file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AttachmentSet;
+
+    // Step 19: испорченный inner header может объявить двоичный блок нулевой длины.
+    // До правки это роняло ядро на "data.len() - 1" ещё при чтении файла
+    #[test]
+    fn an_empty_binary_of_the_inner_header_does_not_panic() {
+        let mut set = AttachmentSet::default();
+        set.add(vec![]);
+
+        let hashes: Vec<_> = set.attachments.keys().copied().collect();
+        assert_eq!(hashes.len(), 1, "пустое вложение должно остаться в наборе");
+        assert_eq!(
+            set.get_bytes_content(&hashes[0]),
+            Some(vec![]),
+            "содержимое пустого вложения"
+        );
+    }
+
+    // Нумерация Ref идёт по порядку блоков inner header: пустой блок нельзя просто
+    // выбросить, иначе все следующие вложения съедут на один индекс
+    #[test]
+    fn an_empty_binary_keeps_the_ref_indexes_of_the_next_ones() {
+        let mut set = AttachmentSet::default();
+        set.add(vec![]);
+        set.add(vec![0u8, 1, 2, 3]);
+
+        assert_eq!(set.index_ref_hash.len(), 2);
+        let (_, size) = set.index_ref_hash.get(&1).expect("второй блок");
+        assert_eq!(*size, 3, "размер второго вложения");
+    }
 }
