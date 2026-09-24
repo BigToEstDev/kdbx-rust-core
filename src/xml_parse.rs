@@ -141,6 +141,19 @@ macro_rules! read_tags {
     };
 }
 
+// Текст элемента для записи. XML при чтении нормализует "\r\n" и одиночный "\r" в "\n"
+// (спецификация XML, 2.11), поэтому возврат каретки переживает сохранение, только если записан
+// как ссылка &#13; - так его пишут KeePass и KeePassXC. Без этого многострочная заметка,
+// созданная в Windows, при каждом нашем сохранении теряла "\r" (Step 19)
+fn text_event(content: &str) -> BytesText<'static> {
+    let escaped = quick_xml::escape::escape(content).into_owned();
+    if escaped.contains('\r') {
+        BytesText::from_escaped(escaped.replace('\r', "&#13;"))
+    } else {
+        BytesText::from_escaped(escaped)
+    }
+}
+
 // Tag name and attributes of an element the core does not know
 fn unknown_element_start(start: &BytesStart) -> Result<UnknownElement> {
     let tag = std::str::from_utf8(start.name().as_ref())?.to_string();
@@ -1274,7 +1287,7 @@ macro_rules! write_tags {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
             }
         )*
@@ -1293,7 +1306,7 @@ macro_rules! write_tags_or_skip_empty {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
 
             }
@@ -1313,7 +1326,7 @@ macro_rules! write_opt_val_tags_or_skip {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
             }
         )*
@@ -1343,7 +1356,7 @@ macro_rules! write_tags_with_attributes {
             }
             let s:&str = $txt.as_ref();
             $self.writer.write_event(Event::Start(my_element))?;
-            $self.writer.write_event(Event::Text(BytesText::new(s)))?; //&$txt
+            $self.writer.write_event(Event::Text(text_event(s)))?; //&$txt
             $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
         )*
     };
@@ -1506,8 +1519,7 @@ impl<W: Write> XmlWriter<W> {
                         text = cipher.process_content_b64_str(&element.text)?;
                     }
                 }
-                self.writer
-                    .write_event(Event::Text(BytesText::new(&text)))?;
+                self.writer.write_event(Event::Text(text_event(&text)))?;
             }
             self.write_unknown_elements(&element.children)?;
             self.writer
@@ -3066,7 +3078,7 @@ mod tests {
 //                     $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
 //                     // Creates a new BytesText from a string. The string is expected not to be escaped
 //                     // quick_xml escapes the text content internally
-//                     $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+//                     $self.writer.write_event(Event::Text(text_event(val)))?;
 //                     $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
 //                 }
 //             }

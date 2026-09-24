@@ -719,6 +719,142 @@ def build_unknown_fixture():
     return db_path
 
 
+# --- Фикстура граничных значений (Step 19) -----------------------------------
+#
+# Оракул Step 17 проверял «каждый элемент заполнен», но не «чем именно заполнен».
+# Здесь значения, на которых обычно и ломаются парсеры: юникод и эмодзи (включая
+# суррогатные пары), пустые и пробельные поля, многострочный текст, очень длинные
+# строки, спецсимволы XML в ключах полей, пустое вложение и одно и то же вложение
+# в разных записях и в истории, CustomData в том виде, как его пишет KeePassXC.
+EDGE_FIXTURE = "edge_values_41.kdbx"
+
+EDGE_UUIDS = {
+    "group": "3c7a9e10-0000-4000-8000-000000000001",
+    "entry": "3c7a9e10-0000-4000-8000-000000000010",
+    "entry2": "3c7a9e10-0000-4000-8000-000000000011",
+}
+
+# Эмодзи вне BMP (суррогатная пара в UTF-16), комбинирующая диакритика, нулевая ширина,
+# управляющие символы направления письма, иероглифы, математический алфавит
+EDGE_UNICODE = "спам \U0001F510\U0001F1FA\U0001F1E6 é ​ ‮RTL‬ 中文 \U0001D54F"
+EDGE_MULTILINE = "первая строка\nвторая строка\r\nтретья\tс табом\n\nпустая выше"
+EDGE_LONG = "длинная-" * 12000  # ~96 КБ в одном поле
+EDGE_SPACES = "   "
+EDGE_XML_CHARS = 'a & b < c > d " e'
+EDGE_KEY_WITH_XML = 'Ключ & <со> "спецсимволами"'
+
+# KeePassXC пишет в CustomData записи свои ключи браузерной интеграции
+EDGE_KPXC = [
+    ("KPXC_BROWSER_example.com", "true"),
+    ("_LAST_MODIFIED", "Sun Jan 12 03:51:58 2020 GMT"),
+]
+
+
+def edge_uuid(key):
+    return base64.b64encode(uuid_mod.UUID(EDGE_UUIDS[key]).bytes).decode("ascii")
+
+
+def fill_edge_entry(kp, group, binary_id):
+    entry = kp.add_entry(group, EDGE_UNICODE, "user " + EDGE_UNICODE, "пароль \U0001F510 & <x>",
+                         url="https://example.com/?a=1&b=2", notes=EDGE_MULTILINE)
+    entry._element.find("UUID").text = edge_uuid("entry")
+
+    entry.set_custom_property("Пустое", "")
+    entry.set_custom_property("Пробелы", EDGE_SPACES)
+    entry.set_custom_property("Длинное", EDGE_LONG)
+    # Ключ со спецсимволами добавляем через lxml: pykeepass строит XPath по ключу
+    # и ломается на кавычках
+    field = SubElement(entry._element, "String")
+    SubElement(field, "Key").text = EDGE_KEY_WITH_XML
+    SubElement(field, "Value").text = EDGE_XML_CHARS
+    # Пустое protected-значение: inner stream не должен на нём спотыкаться
+    entry.set_custom_property("Пустой секрет", "", protect=True)
+    entry.set_custom_property("Секрет", "значение \U0001F510", protect=True)
+
+    put(entry._element, "Tags", "тег-один;тег & два;\U0001F510")
+
+    custom_data = put(entry._element, "CustomData", None)
+    for key, value in EDGE_KPXC:
+        item = SubElement(custom_data, "Item")
+        SubElement(item, "Key").text = key
+        SubElement(item, "Value").text = value
+
+    # Одно и то же вложение и пустое вложение
+    entry.add_attachment(binary_id, "общий.txt")
+    entry.add_attachment(kp.add_binary(b""), "пустой.bin")
+
+    # История: версия с теми же вложениями
+    entry.save_history()
+    entry.password = "пароль-2 \U0001F510"
+    return entry
+
+
+def fill_edge_second_entry(kp, group, binary_id):
+    # То же самое вложение во второй записи: при сохранении оно не должно задвоиться
+    # или потеряться у одной из записей
+    entry = kp.add_entry(group, "Вторая", "", "", url="", notes="")
+    entry._element.find("UUID").text = edge_uuid("entry2")
+    entry.add_attachment(binary_id, "общий.txt")
+    return entry
+
+
+def verify_edge_fixture(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    assert kp.kdbx.header.value.minor_version == 1, "ожидался KDBX 4.1"
+    # Поиск по заголовку тут не годится: pykeepass строит XPath и ломается на кавычках
+    def by_uuid(key):
+        wanted = uuid_mod.UUID(EDGE_UUIDS[key])
+        return next((e for e in kp.entries if e.uuid == wanted), None)
+
+    entry = by_uuid("entry")
+    assert entry is not None, "запись с юникодом в заголовке не найдена"
+    assert entry.title == EDGE_UNICODE
+    assert entry.notes == EDGE_MULTILINE
+    assert entry.get_custom_property("Длинное") == EDGE_LONG
+    assert entry.get_custom_property("Секрет") == "значение \U0001F510"
+    # Пустое protected-значение pykeepass отдаёт как None: важно, что поле в файле есть
+    assert entry.get_custom_property("Пустой секрет") in (None, "")
+    values = {f.findtext("Key"): f.findtext("Value") for f in entry._element.findall("String")}
+    assert values[EDGE_KEY_WITH_XML] == EDGE_XML_CHARS
+    assert values["Пробелы"] == EDGE_SPACES
+    assert "Пустой секрет" in values and "Пустое" in values
+    names = sorted(a.filename for a in entry.attachments)
+    assert names == ["общий.txt", "пустой.bin"], names
+    assert len(entry.history) == 1
+    second = by_uuid("entry2")
+    assert [a.filename for a in second.attachments] == ["общий.txt"]
+
+
+def build_edge_fixture():
+    db_path = OUT_DIR / EDGE_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    group = kp.add_group(kp.root_group, "Группа & <граничная> \U0001F510")
+    group._element.find("UUID").text = edge_uuid("group")
+    put(group._element, "Notes", EDGE_MULTILINE)
+
+    binary_id = kp.add_binary(ATTACHMENT_DATA)
+    fill_edge_entry(kp, group, binary_id)
+    fill_edge_second_entry(kp, group, binary_id)
+
+    kp.save()
+    verify_edge_fixture(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -854,6 +990,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (неизвестные элементы на всех уровнях)"
         % (UNKNOWN_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_edge_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (граничные значения полей)"
+        % (EDGE_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 
