@@ -327,7 +327,12 @@ impl<'a> PendingUnknowns<'a> {
     fn take(&mut self, path: &[&str]) -> Vec<&'a UnknownElement> {
         let mut found = vec![];
         for (item_path, element, written) in self.items.iter_mut() {
-            if !*written && item_path.iter().map(|s| s.as_str()).eq(path.iter().copied()) {
+            if !*written
+                && item_path
+                    .iter()
+                    .map(|s| s.as_str())
+                    .eq(path.iter().copied())
+            {
                 *written = true;
                 found.push(*element);
             }
@@ -1315,11 +1320,7 @@ impl<W: Write> XmlWriter<W> {
         }
     }
 
-    fn write_deleted_objects(
-        &mut self,
-        root: &Root,
-        pending: &mut PendingUnknowns,
-    ) -> Result<()> {
+    fn write_deleted_objects(&mut self, root: &Root, pending: &mut PendingUnknowns) -> Result<()> {
         if root.deleted_objects().is_empty() && !pending.has_below(&["DeletedObjects"]) {
             return Ok(());
         }

@@ -6,8 +6,7 @@ use std::vec;
 use crate::constants::entry_keyvalue_key::{PASSWORD, TITLE, USER_NAME};
 use crate::constants::general_category_names::FAVORITES;
 use crate::db_content::{
-    move_to_recycle_bin, verify_uuid, AttachmentHashValue, Entry, Group, KeyValue,
-    UnknownElements,
+    move_to_recycle_bin, verify_uuid, AttachmentHashValue, Entry, Group, KeyValue, UnknownElements,
 };
 use crate::error::{Error, Result};
 use crate::util;

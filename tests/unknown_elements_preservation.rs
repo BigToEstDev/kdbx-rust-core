@@ -169,7 +169,9 @@ fn unknown_elements_in_meta_survive_save() {
 
     let icons = at(&xml, &["Meta", "CustomIcons"], "Meta/CustomIcons");
     assert_unknown(icons, "XIconsUnknown", "custom_icons");
-    let icon = icons.child("Icon").expect("Meta/CustomIcons: <Icon> потерян");
+    let icon = icons
+        .child("Icon")
+        .expect("Meta/CustomIcons: <Icon> потерян");
     assert_unknown(icon, "XIconUnknown", "icon");
 
     // Шаблон pykeepass добавляет в Meta свои Item (KPXC_*) — ищем наш по ключу
