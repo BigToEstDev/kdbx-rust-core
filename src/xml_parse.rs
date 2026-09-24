@@ -23,10 +23,14 @@ use log::{debug, error, info};
 pub struct XmlReader<'a> {
     reader: QuickXmlReader<&'a [u8]>,
     stream_cipher: Option<ProtectedContentStreamCipher>,
-    // Unknown elements of the Meta / Group / Entry being read (see read_tags!, keep_unknown).
-    // Each of these readers swaps in an empty list and takes it back at its end tag, so nested
-    // groups and entries collect their own elements
-    unknown_elements: Vec<UnknownElement>,
+    // Tags of the elements currently open, from the document root down (read_tags! keeps it).
+    // An unknown element is stored with its path from the owner, so a place nobody listed -
+    // <Times>, a future nested node - is kept as well as one that is listed
+    path: Vec<String>,
+    // Index in 'path' of the owner collecting unknown elements now: the file, Meta, Root,
+    // a group or an entry (see begin_owner / end_owner and db_content/unknown_element.rs)
+    owner_depth: usize,
+    unknown_elements: UnknownElements,
 }
 
 // Macro called for reading specific set of inner tags
@@ -37,6 +41,7 @@ macro_rules! read_tags {
         empty_tags {$($empty_tag:pat => $empty_tag_action:tt),*} , $end_tag:expr   )
         => {
         let mut buf:Vec<u8> = vec![];
+        $self.enter_tag($end_tag);
         loop {
 
             match $self.reader.read_event_into(&mut buf) {
@@ -94,6 +99,7 @@ macro_rules! read_tags {
                 }
 
                 Ok(Event::End(ref e)) if e.name().as_ref() == $end_tag => {
+                    $self.leave_tag();
                     break;
                 }
                 Ok(Event::End(ref e)) if e.name().as_ref() != $end_tag => {
@@ -301,6 +307,65 @@ fn content_to_string_opt(content: String) -> Option<String> {
     }
 }
 
+// Unknown elements of one owner while it is being written: each is handed back at the path it
+// was read at, and what stays behind is reported. A place the writer forgets would otherwise
+// lose data silently - the fixture test `unknown_elements_preservation` is the hard guard,
+// this is the runtime warning (an element can also stay behind legitimately: its object, say a
+// CustomData item, was deleted by the user since the file was read)
+struct PendingUnknowns<'a> {
+    items: Vec<(&'a [String], &'a UnknownElement, bool)>,
+}
+
+impl<'a> PendingUnknowns<'a> {
+    fn new(store: &'a UnknownElements) -> Self {
+        Self {
+            items: store.iter().map(|(p, e)| (p, e, false)).collect(),
+        }
+    }
+
+    // Elements read at this exact path, marked as written back
+    fn take(&mut self, path: &[&str]) -> Vec<&'a UnknownElement> {
+        let mut found = vec![];
+        for (item_path, element, written) in self.items.iter_mut() {
+            if !*written && item_path.iter().map(|s| s.as_str()).eq(path.iter().copied()) {
+                *written = true;
+                found.push(*element);
+            }
+        }
+        found
+    }
+
+    // Is there anything to write at or below this path? A container the core would skip as
+    // empty (CustomData without items) still has to be written when it holds unknown elements
+    fn has_below(&self, prefix: &[&str]) -> bool {
+        self.items.iter().any(|(path, _, written)| {
+            !*written && path.len() >= prefix.len() && path[..prefix.len()] == *prefix
+        })
+    }
+
+    fn missed(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .filter(|(_, _, written)| !*written)
+            .map(|(path, element, _)| format!("{}/{}", path.join("/"), element.tag))
+            .collect()
+    }
+}
+
+// What the writer did not hand back: either a place the writer forgets, or an object (a custom
+// data item, an attachment) the user deleted since the file was read. The fixture test
+// unknown_elements_preservation is what turns the first case into a failure
+fn report_unwritten(pending: &PendingUnknowns, owner: &str) {
+    let missed = pending.missed();
+    if !missed.is_empty() {
+        log::warn!(
+            "{}: unknown elements not written back: {}",
+            owner,
+            missed.join(", ")
+        );
+    }
+}
+
 #[inline]
 fn bool_to_xml_bool(flag: bool) -> String {
     if flag {
@@ -318,23 +383,77 @@ impl<'a> XmlReader<'a> {
         XmlReader {
             reader: qxmlreader,
             stream_cipher: cipher,
-            unknown_elements: vec![],
+            path: vec![],
+            // The file itself is the outermost owner: <KeePassFile> lands at index 0
+            owner_depth: 0,
+            unknown_elements: UnknownElements::default(),
         }
     }
 
-    // Unknown elements are kept where they are written back: directly in Meta, Group and Entry
-    // (history entries too). Elsewhere (e.g. inside <Times>) there is no place to write them
-    // back, so they are dropped - after read_unknown_element already decrypted what they hold
-    fn keep_unknown(&mut self, parent_tag: &[u8], element: UnknownElement) {
-        if parent_tag == META || parent_tag == GROUP || parent_tag == ENTRY {
-            self.unknown_elements.push(element);
-        } else {
-            info!(
-                "Unknown element {} inside {:?} is dropped",
-                element.tag,
-                std::str::from_utf8(parent_tag)
-            );
+    // Keeping an unknown element is the default, at any depth: it goes to the owner being read
+    // with the path where it stood, and the writer puts it back there. Nothing is dropped, so a
+    // node no one listed does not silently lose data (Step 18)
+    fn keep_unknown(&mut self, _parent_tag: &[u8], element: UnknownElement) {
+        let path = self.path_from_owner();
+        self.unknown_elements.push(path, element);
+    }
+
+    // Path of the element being read, relative to its owner. Empty means "directly in the owner"
+    fn path_from_owner(&self) -> Vec<String> {
+        self.path
+            .get(self.owner_depth + 1..)
+            .unwrap_or(&[])
+            .to_vec()
+    }
+
+    // read_tags! keeps the path: every nested reader goes through the macro, so a new node of
+    // the format is covered without touching this file
+    fn enter_tag(&mut self, tag: &[u8]) {
+        self.path.push(String::from_utf8_lossy(tag).into_owned());
+    }
+
+    fn leave_tag(&mut self) {
+        self.path.pop();
+    }
+
+    // Starts an owner of unknown elements (Meta, Root, a group, an entry): its elements are
+    // collected apart and paths are counted from it. Returns the outer owner's state
+    fn begin_owner(&mut self) -> (UnknownElements, usize) {
+        let outer = std::mem::take(&mut self.unknown_elements);
+        let outer_depth = self.owner_depth;
+        // The owner's own tag is pushed by read_tags! right after this call
+        self.owner_depth = self.path.len();
+        (outer, outer_depth)
+    }
+
+    // Ends the owner and gives back what it collected, restoring the outer one
+    fn end_owner(&mut self, (outer, outer_depth): (UnknownElements, usize)) -> UnknownElements {
+        self.owner_depth = outer_depth;
+        std::mem::replace(&mut self.unknown_elements, outer)
+    }
+
+    // Reads a repeated child (a String, an Item, an Icon...) collecting its unknown elements
+    // apart: only after reading do we know its key, which goes into the path. These children
+    // have no store of their own - the UI rebuilds them when an entry is edited
+    fn read_keyed<T>(
+        &mut self,
+        read: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<(T, UnknownElements)> {
+        let outer = self.begin_owner();
+        let value = read(self);
+        let collected = self.end_owner(outer);
+        Ok((value?, collected))
+    }
+
+    // Stores what a repeated child collected under "<tag>/<key>"
+    fn keep_keyed(&mut self, tag: &[u8], key: &str, collected: UnknownElements) {
+        if collected.is_empty() {
+            return;
         }
+        let mut prefix = self.path_from_owner();
+        prefix.push(String::from_utf8_lossy(tag).into_owned());
+        prefix.push(key.to_string());
+        self.unknown_elements.extend_with_prefix(&prefix, collected);
     }
 
     pub fn parse(&mut self) -> Result<KeepassFile> {
@@ -363,9 +482,7 @@ impl<'a> XmlReader<'a> {
                     // }
                     match e.name().as_ref() {
                         KEEPASS_FILE => {
-                            let r = self.read_top_level()?;
-                            kp.meta = r.0;
-                            kp.root = r.1;
+                            self.read_top_level(&mut kp)?;
                         }
                         x => {
                             //debug!("MAIN: in match {:?}", std::str::from_utf8(e.name()).unwrap());
@@ -401,7 +518,7 @@ impl<'a> XmlReader<'a> {
         Ok(kp)
     }
 
-    fn read_top_level(&mut self) -> Result<(Meta, Root)> {
+    fn read_top_level(&mut self, kp: &mut KeepassFile) -> Result<()> {
         let mut meta = Meta::new();
         let mut root = Root::new();
 
@@ -418,11 +535,15 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             KEEPASS_FILE);
 
-        Ok((meta, root))
+        kp.meta = meta;
+        kp.root = root;
+        // What stood directly under <KeePassFile>: no other owner could hold it
+        kp.unknown_elements = std::mem::take(&mut self.unknown_elements);
+        Ok(())
     }
 
     fn read_meta(&mut self, meta: &mut Meta) -> Result<()> {
-        let outer_unknown = std::mem::take(&mut self.unknown_elements);
+        let outer_unknown = self.begin_owner();
         read_tags! (
             self,
             start_tag_fns {
@@ -516,7 +637,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             META
         );
-        meta.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
+        meta.unknown_elements = self.end_owner(outer_unknown);
         Ok(())
     }
 
@@ -556,7 +677,9 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {},
             start_tag_blks {
                 ICON => {
-                    custom_icons.icons.push(self.read_custom_icon()?);
+                    let (icon, unknown) = self.read_keyed(|s| s.read_custom_icon())?;
+                    self.keep_keyed(ICON, &icon.uuid.to_string(), unknown);
+                    custom_icons.icons.push(icon);
                 }
             },
             empty_tags{},
@@ -593,7 +716,9 @@ impl<'a> XmlReader<'a> {
             start_tag_fns {},
             start_tag_blks {
                 ITEM => {
-                    custom_data.insert_item(self.read_custom_data_item()?);
+                    let (item, unknown) = self.read_keyed(|s| s.read_custom_data_item())?;
+                    self.keep_keyed(ITEM, &item.key, unknown);
+                    custom_data.insert_item(item);
                 }
             },
             empty_tags{},
@@ -631,6 +756,7 @@ impl<'a> XmlReader<'a> {
     }
 
     fn read_root(&mut self, root: &mut Root) -> Result<()> {
+        let outer_unknown = self.begin_owner();
         read_tags!(self,
             start_tag_fns {},
             start_tag_blks {
@@ -647,6 +773,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             ROOT
         );
+        root.unknown_elements = self.end_owner(outer_unknown);
         Ok(())
     }
 
@@ -655,7 +782,10 @@ impl<'a> XmlReader<'a> {
         read_tags!(self,start_tag_fns {},
             start_tag_blks {
                 DELETED_OBJECT => {
-                    self.read_deleted_object(root)?;
+                    let (deleted_object, unknown) =
+                        self.read_keyed(|s| s.read_deleted_object())?;
+                    self.keep_keyed(DELETED_OBJECT, &deleted_object.uuid.to_string(), unknown);
+                    root.add_deleted_object(deleted_object);
                 }
             },
             empty_tags {},
@@ -665,7 +795,7 @@ impl<'a> XmlReader<'a> {
     }
 
     // Reads one or more element <DeletedObject> ..</DeletedObject> and its child tgas
-    fn read_deleted_object(&mut self, root: &mut Root) -> Result<()> {
+    fn read_deleted_object(&mut self) -> Result<DeletedObject> {
         let mut deleted_object = DeletedObject::default();
         read_tags!(self,
             start_tag_fns {
@@ -676,8 +806,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             DELETED_OBJECT
         );
-        root.add_deleted_object(deleted_object);
-        Ok(())
+        Ok(deleted_object)
     }
 
     fn read_group(
@@ -690,7 +819,7 @@ impl<'a> XmlReader<'a> {
         if let Some(gid) = parent_group_uuid {
             group.parent_group_uuid = gid;
         }
-        let outer_unknown = std::mem::take(&mut self.unknown_elements);
+        let outer_unknown = self.begin_owner();
         read_tags!(self,
             start_tag_fns {
                 NAME => (|content:String, _,  _| group.name = content),
@@ -736,7 +865,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             GROUP
         );
-        group.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
+        group.unknown_elements = self.end_owner(outer_unknown);
         // TODO: We may need to ensure all Entries of this group has its group_uuid is set to this group's UUID. See above comments in 'ENTRY'
         let gid = group.uuid; // copy to return
 
@@ -746,7 +875,7 @@ impl<'a> XmlReader<'a> {
 
     fn read_entry_data(&mut self) -> Result<Entry> {
         let mut entry = Entry::new();
-        let outer_unknown = std::mem::take(&mut self.unknown_elements);
+        let outer_unknown = self.begin_owner();
         read_tags!(self,
             start_tag_fns {
                 UUID => (|content:String, _,  _| entry.uuid = content_to_uuid(&content)),
@@ -769,10 +898,14 @@ impl<'a> XmlReader<'a> {
                     self.read_times(&mut entry.times)?;
                 },
                 STRING => {
-                    entry.entry_field.insert_key_value(self.read_key_value()?);
+                    let (kv, unknown) = self.read_keyed(|s| s.read_key_value())?;
+                    self.keep_keyed(STRING, &kv.key, unknown);
+                    entry.entry_field.insert_key_value(kv);
                 },
                 BINARY => {
-                    entry.binary_key_values.push(self.read_binary_key_value()?);
+                    let (kv, unknown) = self.read_keyed(|s| s.read_binary_key_value())?;
+                    self.keep_keyed(BINARY, &kv.key, unknown);
+                    entry.binary_key_values.push(kv);
                 },
                 HISTORY => {
                     entry.history = self.read_histrory()?;
@@ -787,7 +920,7 @@ impl<'a> XmlReader<'a> {
             empty_tags {},
             ENTRY
         );
-        entry.unknown_elements = std::mem::replace(&mut self.unknown_elements, outer_unknown);
+        entry.unknown_elements = self.end_owner(outer_unknown);
 
         Ok(entry)
     }
@@ -904,7 +1037,12 @@ impl<'a> XmlReader<'a> {
             },
             start_tag_blks {
                 ASSOCIATION => {
-                    auto_type.associations.push(self.read_auto_type_association()?);
+                    // Associations have no key of their own - addressed by position
+                    let (association, unknown) =
+                        self.read_keyed(|s| s.read_auto_type_association())?;
+                    let index = auto_type.associations.len().to_string();
+                    self.keep_keyed(ASSOCIATION, &index, unknown);
+                    auto_type.associations.push(association);
                 }
             },
             empty_tags {},
@@ -1106,11 +1244,15 @@ macro_rules! write_opt_val_tags_or_skip {
     };
 }
 
-macro_rules! write_parent_child_tags {
-    ($self:ident, $parent_tag:expr, $($tag_name:expr, $txt:expr),*) => {
+// The same, plus the unknown elements kept for this node's path - they go back inside it,
+// after the known children (see PendingUnknowns)
+macro_rules! write_parent_child_tags_keeping_unknown {
+    ($self:ident, $parent_tag:expr, $pending:expr, $path:expr, $($tag_name:expr, $txt:expr),*) => {
         let name_of_paren_tag  = std::str::from_utf8($parent_tag)?;
         $self.writer.write_event(Event::Start(BytesStart::new(name_of_paren_tag)))?;
         write_tags!($self, $($tag_name, $txt),*);
+        let kept = $pending.take($path);
+        $self.write_unknown_elements(kept)?;
         $self.writer.write_event(Event::End(BytesEnd::new(name_of_paren_tag)))?;
     }
 }
@@ -1140,6 +1282,18 @@ macro_rules! write_parent_child_with_attributes {
     }
 }
 
+// The same, plus the unknown elements kept for the path of this node (String, Binary)
+macro_rules! write_parent_child_with_attributes_keeping_unknown {
+    ($self:ident, $parent_tag:expr, $pending:expr, $path:expr, $($tag_name:expr, $attrs:expr,$txt:expr),*) => {
+        let name_of_paren_tag  = std::str::from_utf8($parent_tag)?;
+        $self.writer.write_event(Event::Start(BytesStart::new(name_of_paren_tag)))?;
+        write_tags_with_attributes!($self, $($tag_name, $attrs,$txt),*);
+        let kept = $pending.take($path);
+        $self.write_unknown_elements(kept)?;
+        $self.writer.write_event(Event::End(BytesEnd::new(name_of_paren_tag)))?;
+    }
+}
+
 pub struct XmlWriter<W: Write> {
     writer: QuickXmlWriter<W>,
     //stream_cipher: ProtectedContentStreamCipher,
@@ -1161,8 +1315,12 @@ impl<W: Write> XmlWriter<W> {
         }
     }
 
-    fn write_deleted_objects(&mut self, root: &Root) -> Result<()> {
-        if root.deleted_objects().is_empty() {
+    fn write_deleted_objects(
+        &mut self,
+        root: &Root,
+        pending: &mut PendingUnknowns,
+    ) -> Result<()> {
+        if root.deleted_objects().is_empty() && !pending.has_below(&["DeletedObjects"]) {
             return Ok(());
         }
 
@@ -1171,12 +1329,22 @@ impl<W: Write> XmlWriter<W> {
             .write_event(Event::Start(BytesStart::new(deleted_objects_tags)))?;
 
         for deleted_object in root.deleted_objects().iter() {
-            write_parent_child_tags! { self,
+            let object_path = [
+                "DeletedObjects",
+                "DeletedObject",
+                &deleted_object.uuid.to_string(),
+            ];
+            write_parent_child_tags_keeping_unknown! { self,
                DELETED_OBJECT,
+               pending,
+               &object_path,
                UUID, util::encode_uuid(&deleted_object.uuid),
                DELETION_TIME, util::encode_datetime(&deleted_object.deletion_time)
             };
         }
+
+        let kept = pending.take(&["DeletedObjects"]);
+        self.write_unknown_elements(kept)?;
 
         self.writer
             .write_event(Event::End(BytesEnd::new(deleted_objects_tags)))?;
@@ -1211,9 +1379,11 @@ impl<W: Write> XmlWriter<W> {
             write_tags! { self, MASTER_KEY_CHANGE_FORCE_ONCE, "True" };
         }
 
-        self.write_memory_protection(&meta.memory_protection)?;
+        let mut pending = PendingUnknowns::new(&meta.unknown_elements);
 
-        self.write_custom_icons(&meta.custom_icons)?;
+        self.write_memory_protection(&meta.memory_protection, &mut pending)?;
+
+        self.write_custom_icons(&meta.custom_icons, &mut pending)?;
 
         write_tags! { self,
             RECYCLE_BIN_ENABLED, if meta.recycle_bin_enabled {"True"} else {"False"},
@@ -1228,9 +1398,11 @@ impl<W: Write> XmlWriter<W> {
             SETTINGS_CHANGED, util::encode_datetime(&meta.settings_changed)
         };
 
-        self.write_custom_data(&meta.custom_data)?;
+        self.write_custom_data(&meta.custom_data, &mut pending)?;
 
-        self.write_unknown_elements(&meta.unknown_elements)?;
+        let kept = pending.take(&[]);
+        self.write_unknown_elements(kept)?;
+        report_unwritten(&pending, "Meta");
 
         self.writer
             .write_event(Event::End(BytesEnd::new(meta_tag)))?;
@@ -1240,7 +1412,10 @@ impl<W: Write> XmlWriter<W> {
 
     // Writes back elements the core does not know (read by read_unknown_element).
     // Protected leaves are encrypted here, in document order like every other protected value
-    fn write_unknown_elements(&mut self, elements: &[UnknownElement]) -> Result<()> {
+    fn write_unknown_elements<'e>(
+        &mut self,
+        elements: impl IntoIterator<Item = &'e UnknownElement>,
+    ) -> Result<()> {
         for element in elements {
             let mut start = BytesStart::new(element.tag.as_str());
             for (key, value) in element.attrs.iter() {
@@ -1269,10 +1444,16 @@ impl<W: Write> XmlWriter<W> {
         Ok(())
     }
 
-    fn write_memory_protection(&mut self, mp: &MemoryProtection) -> Result<()> {
-        write_parent_child_tags! {
+    fn write_memory_protection(
+        &mut self,
+        mp: &MemoryProtection,
+        pending: &mut PendingUnknowns,
+    ) -> Result<()> {
+        write_parent_child_tags_keeping_unknown! {
             self,
             MEMORY_PROTECTION,
+            pending,
+            &["MemoryProtection"],
             PROTECT_TITLE, bool_to_xml_bool(mp.protect_title),
             PROTECT_USER_NAME, bool_to_xml_bool(mp.protect_username),
             PROTECT_PASSWORD, bool_to_xml_bool(mp.protect_password),
@@ -1282,10 +1463,12 @@ impl<W: Write> XmlWriter<W> {
         Ok(())
     }
 
-    fn write_times(&mut self, times: &Times) -> Result<()> {
-        write_parent_child_tags! {
+    fn write_times(&mut self, times: &Times, pending: &mut PendingUnknowns) -> Result<()> {
+        write_parent_child_tags_keeping_unknown! {
             self,
             TIMES,
+            pending,
+            &["Times"],
             LAST_MODIFICATION_TIME, util::encode_datetime(&times.last_modification_time),
             CREATION_TIME, util::encode_datetime(&times.creation_time),
             LAST_ACCESS_TIME,util::encode_datetime(&times.last_access_time),
@@ -1298,8 +1481,13 @@ impl<W: Write> XmlWriter<W> {
         Ok(())
     }
 
-    fn write_custom_icons(&mut self, custom_icons: &CustomIcons) -> Result<()> {
-        if custom_icons.icons.is_empty() {
+    fn write_custom_icons(
+        &mut self,
+        custom_icons: &CustomIcons,
+        pending: &mut PendingUnknowns,
+    ) -> Result<()> {
+        // An empty container is skipped - unless it is the place of an unknown element
+        if custom_icons.icons.is_empty() && !pending.has_below(&["CustomIcons"]) {
             return Ok(());
         }
 
@@ -1307,9 +1495,12 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(custom_icons_tag)))?;
         for icon in custom_icons.icons.iter() {
-            write_parent_child_tags! {
+            let icon_path = ["CustomIcons", "Icon", &icon.uuid.to_string()];
+            write_parent_child_tags_keeping_unknown! {
                 self,
                 ICON,
+                pending,
+                &icon_path,
                 UUID, util::encode_uuid(&icon.uuid),
                 NAME, &icon.name.as_ref().map_or_else(util::empty_str, |s| s.to_string()),
                 DATA,  util::base64_encode(&icon.data),
@@ -1317,14 +1508,21 @@ impl<W: Write> XmlWriter<W> {
             };
         }
 
+        let kept = pending.take(&["CustomIcons"]);
+        self.write_unknown_elements(kept)?;
+
         self.writer
             .write_event(Event::End(BytesEnd::new(custom_icons_tag)))?;
 
         Ok(())
     }
 
-    fn write_custom_data(&mut self, custom_data: &CustomData) -> Result<()> {
-        if custom_data.get_items().is_empty() {
+    fn write_custom_data(
+        &mut self,
+        custom_data: &CustomData,
+        pending: &mut PendingUnknowns,
+    ) -> Result<()> {
+        if custom_data.get_items().is_empty() && !pending.has_below(&["CustomData"]) {
             return Ok(());
         }
 
@@ -1336,9 +1534,12 @@ impl<W: Write> XmlWriter<W> {
             // Need to evaluate 'last_modification_time' before passing it to the macro.
             // Otherwise this match will be evaluated twice - first time here
             // and again while executing the expanded code
-            write_parent_child_tags! {
+            let item_path = ["CustomData", "Item", &item.key];
+            write_parent_child_tags_keeping_unknown! {
                 self,
                 ITEM,
+                pending,
+                &item_path,
                 KEY, &item.key,
                 VALUE, &item.value,
                 LAST_MODIFICATION_TIME, match item.last_modification_time {
@@ -1350,6 +1551,9 @@ impl<W: Write> XmlWriter<W> {
                 }
             };
         }
+
+        let kept = pending.take(&["CustomData"]);
+        self.write_unknown_elements(kept)?;
 
         self.writer
             .write_event(Event::End(BytesEnd::new(custom_data_tag)))?;
@@ -1380,7 +1584,9 @@ impl<W: Write> XmlWriter<W> {
                 CUSTOM_ICON_UUID, group.custom_icon_uuid.map(|uuid|util::encode_uuid(&uuid))
             }
 
-            self.write_times(&group.times)?;
+            let mut pending = PendingUnknowns::new(&group.unknown_elements);
+
+            self.write_times(&group.times, &mut pending)?;
 
             write_tags! { self,
                 IS_EXPANDED, bool_to_xml_bool(group.is_expanded),
@@ -1391,13 +1597,15 @@ impl<W: Write> XmlWriter<W> {
             };
 
             //Custom Data
-            self.write_custom_data(&group.custom_data)?;
+            self.write_custom_data(&group.custom_data, &mut pending)?;
 
             if group.previous_parent_group != uuid::Uuid::default() {
                 write_tags! { self, PREVIOUS_PARENT_GROUP, util::encode_uuid(&group.previous_parent_group) };
             }
 
-            self.write_unknown_elements(&group.unknown_elements)?;
+            let kept = pending.take(&[]);
+            self.write_unknown_elements(kept)?;
+            report_unwritten(&pending, "Group");
 
             for e_uuid in group.entry_uuids.iter() {
                 self.write_entry(e_uuid, root.all_entries(), false)?;
@@ -1419,7 +1627,11 @@ impl<W: Write> XmlWriter<W> {
     }
 
     // Writes the AutoType tag and its children
-    fn write_entry_auto_type(&mut self, auto_type: &AutoType) -> Result<()> {
+    fn write_entry_auto_type(
+        &mut self,
+        auto_type: &AutoType,
+        pending: &mut PendingUnknowns,
+    ) -> Result<()> {
         let tag_element = std::str::from_utf8(AUTO_TYPE)?;
         self.writer
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
@@ -1429,15 +1641,22 @@ impl<W: Write> XmlWriter<W> {
             DEFAULT_SEQUENCE,  auto_type.default_sequence.as_ref().map_or("", |s| s)
         };
 
-        // Writes Association tag and its children
-        for association in auto_type.associations.iter() {
-            write_parent_child_tags! {
+        // Writes Association tag and its children. Associations have no key of their own,
+        // so an unknown element inside one is addressed by position (as read)
+        for (index, association) in auto_type.associations.iter().enumerate() {
+            let association_path = ["AutoType", "Association", &index.to_string()];
+            write_parent_child_tags_keeping_unknown! {
                 self,
                 ASSOCIATION,
+                pending,
+                &association_path,
                 WINDOW, association.window,
                 KEY_STROKE_SEQUENCE, association.key_stroke_sequence.as_ref().map_or("", |s| s)
             };
         }
+
+        let kept = pending.take(&["AutoType"]);
+        self.write_unknown_elements(kept)?;
 
         self.writer
             .write_event(Event::End(BytesEnd::new(tag_element)))?;
@@ -1470,8 +1689,10 @@ impl<W: Write> XmlWriter<W> {
             TAGS,entry.tags
         };
 
+        let mut pending = PendingUnknowns::new(&entry.unknown_elements);
+
         // Times tag and the children
-        self.write_times(&entry.times)?;
+        self.write_times(&entry.times, &mut pending)?;
 
         // KDBX 4.1 elements, written only when not default (as KeePass / KeePassXC)
         if !entry.quality_check {
@@ -1507,28 +1728,35 @@ impl<W: Write> XmlWriter<W> {
                 }
             }
 
-            write_parent_child_with_attributes! {
+            let string_path = ["String", &s.key];
+            write_parent_child_with_attributes_keeping_unknown! {
                 self,
                 STRING,
+                pending,
+                &string_path,
                 KEY, empty_attr, s.key,
                 VALUE, vp, content
             };
         }
         // Binary tag for attachment where Value tag has an attribute
         for b in entry.binary_key_values.iter() {
-            write_parent_child_with_attributes! {
+            let binary_path = ["Binary", &b.key];
+            write_parent_child_with_attributes_keeping_unknown! {
                 self,
                 BINARY,
+                pending,
+                &binary_path,
                 KEY, empty_attr, b.key,
                 VALUE, [("Ref", b.index_ref.to_string().as_str())],b.value
             };
         }
-        self.write_entry_auto_type(&entry.auto_type)?;
+        self.write_entry_auto_type(&entry.auto_type, &mut pending)?;
 
-        // Entry's Custom Data
-        self.write_custom_data(&entry.custom_data)?;
+        // Custom Data of the entry
+        self.write_custom_data(&entry.custom_data, &mut pending)?;
 
-        self.write_unknown_elements(&entry.unknown_elements)?;
+        let kept = pending.take(&[]);
+        self.write_unknown_elements(kept)?;
 
         // We need to exclude the History tag while writing the child Entry tag that comes under the History tag
         if !in_history {
@@ -1538,9 +1766,12 @@ impl<W: Write> XmlWriter<W> {
             for e in entry.history.entries.iter() {
                 self.write_entry_data(e, true)?;
             }
+            let kept = pending.take(&["History"]);
+            self.write_unknown_elements(kept)?;
             self.writer
                 .write_event(Event::End(BytesEnd::new(history_tag_element)))?;
         }
+        report_unwritten(&pending, "Entry");
 
         self.writer
             .write_event(Event::End(BytesEnd::new(tag_element)))?;
@@ -1570,7 +1801,13 @@ impl<W: Write> XmlWriter<W> {
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
         self.write_group(&kp.root.root_uuid(), &kp.root)?;
 
-        self.write_deleted_objects(&kp.root)?;
+        let mut pending = PendingUnknowns::new(&kp.root.unknown_elements);
+        self.write_deleted_objects(&kp.root, &mut pending)?;
+
+        let kept = pending.take(&[]);
+        self.write_unknown_elements(kept)?;
+        report_unwritten(&pending, "Root");
+
         self.writer
             .write_event(Event::End(BytesEnd::new(tag_element)))?;
         Ok(())
@@ -1590,6 +1827,12 @@ impl<W: Write> XmlWriter<W> {
             .write_event(Event::Start(BytesStart::new(tag_element)))?;
         self.write_meta(kp)?;
         self.write_root(kp)?;
+
+        let mut pending = PendingUnknowns::new(&kp.unknown_elements);
+        let kept = pending.take(&[]);
+        self.write_unknown_elements(kept)?;
+        report_unwritten(&pending, "KeePassFile");
+
         self.writer
             .write_event(Event::End(BytesEnd::new(tag_element)))?;
         Ok(())
@@ -1644,7 +1887,12 @@ impl<'a> FileKeyXmlReader<'a> {
     }
 
     // Key files are only read, never written back - unknown elements are not kept
+    // and the element path (see XmlReader) is not needed either
     fn keep_unknown(&mut self, _parent_tag: &[u8], _element: UnknownElement) {}
+
+    fn enter_tag(&mut self, _tag: &[u8]) {}
+
+    fn leave_tag(&mut self) {}
 
     pub fn parse(&mut self) -> Result<KeyFileData> {
         let mut buf: Vec<u8> = vec![];
@@ -1904,7 +2152,7 @@ mod tests {
 
     // --- Non-ignored unit tests ---
 
-    // Step 17: elements the core does not know are kept in Meta / Group / Entry
+    // Step 17 / 18: elements the core does not know are kept wherever they stood
     const UNKNOWN_XML: &str = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <KeePassFile>
   <Meta>
@@ -1929,35 +2177,47 @@ mod tests {
   </Root>
 </KeePassFile>"#;
 
+    // Tag of every unknown element of this owner, with the path it was read at
+    fn kept(store: &UnknownElements) -> Vec<(Vec<&str>, &str)> {
+        store
+            .iter()
+            .map(|(path, element)| {
+                (
+                    path.iter().map(|p| p.as_str()).collect(),
+                    element.tag.as_str(),
+                )
+            })
+            .collect()
+    }
+
     #[test]
-    fn unknown_elements_are_kept_in_meta_group_entry() {
+    fn unknown_elements_are_kept_with_their_path() {
         let kp = parse(UNKNOWN_XML.as_bytes(), None).unwrap();
 
-        let meta_unknown = &kp.meta.unknown_elements;
+        let meta_unknown: Vec<_> = kp.meta.unknown_elements.iter().collect();
         assert_eq!(meta_unknown.len(), 1);
-        assert_eq!(meta_unknown[0].tag, "XMeta");
+        assert!(meta_unknown[0].0.is_empty(), "directly in Meta");
+        assert_eq!(meta_unknown[0].1.tag, "XMeta");
         assert_eq!(
-            meta_unknown[0].attrs,
+            meta_unknown[0].1.attrs,
             vec![("a".to_string(), "1".to_string())]
         );
 
         let group = kp.root.group_by_id(&kp.root.root_uuid()).unwrap();
         // <Tags/> is a known empty element, not an unknown one
-        assert_eq!(group.unknown_elements.len(), 1);
-        let x_group = &group.unknown_elements[0];
-        assert_eq!(x_group.tag, "XGroup");
+        assert_eq!(kept(&group.unknown_elements), vec![(vec![], "XGroup")]);
+        let x_group = group.unknown_elements.iter().next().unwrap().1;
         assert_eq!(x_group.text, "text & more");
         assert_eq!(x_group.children[0].tag, "Inner");
         assert_eq!(x_group.children[0].text, "x");
 
         let entry = kp.root.all_entries().values().next().unwrap();
-        // <OverrideURL/> is known; <XInTimes> has no place to go back to and is dropped
-        let tags: Vec<&str> = entry
-            .unknown_elements
-            .iter()
-            .map(|e| e.tag.as_str())
-            .collect();
-        assert_eq!(tags, vec!["XEntry"]);
+        // <OverrideURL/> is known; <XInTimes> is kept with the path it stood at (Step 18:
+        // before that it was dropped, as nothing held elements below an entry)
+        assert_eq!(
+            kept(&entry.unknown_elements),
+            vec![(vec!["Times"], "XInTimes"), (vec![], "XEntry")]
+        );
     }
 
     // Text fields are unescaped once on read and escaped once on write: "A & B" stays "A & B"
@@ -2012,7 +2272,12 @@ mod tests {
             xml
         );
         assert!(xml.contains("<XEntry/>"), "{}", xml);
-        assert!(!xml.contains("XInTimes"), "{}", xml);
+        // Back inside <Times>, where it was read - not at the end of the entry
+        assert!(
+            xml.contains("<UsageCount>0</UsageCount><XInTimes>dropped</XInTimes></Times>"),
+            "{}",
+            xml
+        );
         assert_eq!(xml.matches("<Tags").count(), 1, "{}", xml);
     }
 

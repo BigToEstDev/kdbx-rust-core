@@ -15,7 +15,7 @@ pub(crate) use self::meta::Meta;
 pub(crate) use self::otp::OtpData;
 pub(crate) use self::root::DeletedObject;
 pub(crate) use self::root::Root;
-pub(crate) use self::unknown_element::UnknownElement;
+pub(crate) use self::unknown_element::{UnknownElement, UnknownElements};
 
 pub use self::entry::{
     Association, AutoType, BinaryKeyValue, Entry, EntryField, History, KeyValue,

@@ -1,4 +1,4 @@
-use crate::db_content::{CustomData, Times, UnknownElement};
+use crate::db_content::{CustomData, Times, UnknownElements};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ pub struct Group {
 
     // Elements of <Group> the core does not know - written back as read
     #[serde(skip)]
-    pub(crate) unknown_elements: Vec<UnknownElement>,
+    pub(crate) unknown_elements: UnknownElements,
 
     // Only the child group uuids are kept here and used to do lookup in 'root.all_groups'
     #[serde(default)]
@@ -150,7 +150,7 @@ impl Group {
             enable_auto_type: None,
             enable_searching: None,
             default_auto_type_sequence: None,
-            unknown_elements: vec![],
+            unknown_elements: UnknownElements::default(),
 
             group_uuids: vec![],
             entry_uuids: vec![],
