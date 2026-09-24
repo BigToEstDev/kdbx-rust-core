@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::db_content::{AttachmentHashValue, Entry, Meta, Root};
+use crate::db_content::{AttachmentHashValue, Entry, Meta, Root, UnknownElements};
 
 use crate::error::{self, Result};
 use crate::util;
@@ -12,6 +12,9 @@ use super::EntryType;
 pub(crate) struct KeepassFile {
     pub(crate) meta: Meta,
     pub(crate) root: Root,
+
+    // Unknown elements read directly under <KeePassFile> (see db_content/unknown_element.rs)
+    pub(crate) unknown_elements: UnknownElements,
 }
 
 impl KeepassFile {
@@ -27,6 +30,7 @@ impl KeepassFile {
         KeepassFile {
             meta: Meta::new(),
             root: Root::new(),
+            unknown_elements: UnknownElements::default(),
         }
     }
 

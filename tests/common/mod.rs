@@ -1,3 +1,5 @@
+pub mod xml;
+
 use log::debug;
 use secstr::SecVec;
 use std::{

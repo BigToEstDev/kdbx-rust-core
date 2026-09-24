@@ -1,7 +1,11 @@
 mod common;
 mod icon_merge;
 
-use crate::{constants::entry_keyvalue_key::TITLE, db_content::Group, util};
+use crate::{
+    constants::entry_keyvalue_key::TITLE,
+    db_content::{Group, UnknownElement},
+    util,
+};
 use common::*;
 
 use test_context::{test_context, TestContext};
@@ -84,6 +88,115 @@ fn verify_updated_group(_ctx: &mut MergeTestContext) {
     // println!("groups in final target db are {:?}", &groups);
 
     assert!(groups.contains(&"group1 changed".to_string()));
+}
+
+// Step 18: what the core does not show must travel with the object it belongs to. The
+// newer source group and entry carry unknown elements - inside <Times> too - and the
+// target has none of them; after the merge the target must carry them
+#[test_context(MergeTestContext)]
+#[test]
+fn verify_unknown_elements_of_newer_source_are_merged_in(_ctx: &mut MergeTestContext) {
+    let (mut source, mut target) = create_test_dbs_4();
+
+    let source_db = source.keepass_main_content.as_mut().unwrap();
+
+    util::test_clock::advance_by(1);
+
+    let group_uuid = {
+        let g1 = source_db.root.group_by_name_mut("group1").unwrap();
+        g1.unknown_elements
+            .push(vec![], UnknownElement::new("XGroup".into(), vec![]));
+        g1.unknown_elements.push(
+            vec!["Times".to_string()],
+            UnknownElement::new("XGroupTimes".into(), vec![]),
+        );
+        g1.update_modification_time_now();
+        g1.get_uuid()
+    };
+
+    let mut e1 = source_db
+        .root
+        .entry_by_matching_kv(TITLE, "entry1")
+        .unwrap()
+        .clone();
+    let entry_uuid = e1.get_uuid();
+    source_db
+        .root
+        .entry_by_id_mut(&entry_uuid)
+        .unwrap()
+        .unknown_elements
+        .push(
+            vec!["Times".to_string()],
+            UnknownElement::new("XEntryTimes".into(), vec![]),
+        );
+
+    // Правка записи идёт через форму и не несёт неизвестных элементов: Entry::update
+    // намеренно оставляет их от прочитанного файла, иначе правка теряла бы чужие данные
+    e1.entry_field.update_value(TITLE, "entry1 changed");
+    source_db.root.update_entry(e1).unwrap();
+    assert_eq!(
+        source_db
+            .root
+            .entry_by_id(&entry_uuid)
+            .unwrap()
+            .unknown_elements
+            .iter()
+            .count(),
+        1,
+        "правка записи потеряла неизвестные элементы"
+    );
+
+    // В цели этих элементов нет - иначе тест прошёл бы и без переноса
+    let target_db = target.keepass_main_content.as_ref().unwrap();
+    assert!(target_db
+        .root
+        .group_by_id(&group_uuid)
+        .unwrap()
+        .unknown_elements
+        .is_empty());
+    assert!(target_db
+        .root
+        .entry_by_id(&entry_uuid)
+        .unwrap()
+        .unknown_elements
+        .is_empty());
+
+    Merger::from_kdbx_file(&source, &mut target)
+        .merge()
+        .unwrap();
+
+    let target_db = target.keepass_main_content.as_ref().unwrap();
+
+    let merged_group: Vec<_> = target_db
+        .root
+        .group_by_id(&group_uuid)
+        .unwrap()
+        .unknown_elements
+        .iter()
+        .map(|(path, element)| (path.to_vec(), element.tag.clone()))
+        .collect();
+    assert_eq!(
+        merged_group,
+        vec![
+            (vec![], "XGroup".to_string()),
+            (vec!["Times".to_string()], "XGroupTimes".to_string())
+        ],
+        "неизвестные элементы группы не перенеслись при слиянии"
+    );
+
+    let merged_entry: Vec<_> = target_db
+        .root
+        .entry_by_id(&entry_uuid)
+        .unwrap()
+        .unknown_elements
+        .iter()
+        .map(|(path, element)| (path.to_vec(), element.tag.clone()))
+        .collect();
+    assert_eq!(
+        merged_entry,
+        vec![(vec!["Times".to_string()], "XEntryTimes".to_string())],
+        "неизвестные элементы записи не перенеслись при слиянии"
+    );
 }
 
 #[test_context(MergeTestContext)]

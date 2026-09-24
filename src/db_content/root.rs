@@ -6,7 +6,7 @@ use std::vec;
 use crate::constants::entry_keyvalue_key::{PASSWORD, TITLE, USER_NAME};
 use crate::constants::general_category_names::FAVORITES;
 use crate::db_content::{
-    move_to_recycle_bin, verify_uuid, AttachmentHashValue, Entry, Group, KeyValue,
+    move_to_recycle_bin, verify_uuid, AttachmentHashValue, Entry, Group, KeyValue, UnknownElements,
 };
 use crate::error::{Error, Result};
 use crate::util;
@@ -97,6 +97,10 @@ pub struct Root {
 
     // All entries data for easy lookup by uuid
     all_entries: HashMap<Uuid, Entry>,
+
+    // Unknown elements read under <Root> itself (e.g. inside <DeletedObjects>), with their
+    // paths - groups and entries keep their own (see db_content/unknown_element.rs)
+    pub(crate) unknown_elements: UnknownElements,
 }
 
 impl Root {
@@ -107,6 +111,7 @@ impl Root {
             deleted_objects: vec![],
             all_groups: HashMap::new(),
             all_entries: HashMap::new(),
+            unknown_elements: UnknownElements::default(),
         }
     }
 

@@ -2,7 +2,7 @@ use crate::constants::custom_data_key::OKP_ENTRY_TYPE_MAP_DATA;
 use crate::constants::GENERATOR_NAME;
 use crate::crypto;
 use crate::db_content::EntryType;
-use crate::db_content::{CustomData, CustomIcons, MemoryProtection, UnknownElement};
+use crate::db_content::{CustomData, CustomIcons, MemoryProtection, UnknownElements};
 use crate::error::Result;
 use crate::util;
 use chrono::NaiveDateTime;
@@ -128,7 +128,7 @@ pub struct Meta {
     pub(crate) entry_template_group_changed: NaiveDateTime,
 
     // Elements of <Meta> the core does not know - written back as read
-    pub(crate) unknown_elements: Vec<UnknownElement>,
+    pub(crate) unknown_elements: UnknownElements,
 
     // history_max_items and history_max_size are moved to MetaShare
     pub(crate) meta_share: Arc<MetaShare>,
@@ -168,7 +168,7 @@ impl Meta {
             master_key_changed: current_time,
             entry_template_group_changed: current_time,
 
-            unknown_elements: vec![],
+            unknown_elements: UnknownElements::default(),
 
             meta_share: Arc::default(),
         }

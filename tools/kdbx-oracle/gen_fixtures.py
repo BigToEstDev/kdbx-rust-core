@@ -486,6 +486,239 @@ def build_all_fields_fixture():
     return db_path
 
 
+# --- Фикстура «ёршик»: неизвестные элементы на всех уровнях (Step 18) ---------
+#
+# Ядро хранит и пишет обратно незнакомый тег только у Meta / Group / Entry
+# (XmlReader::keep_unknown). Глубже — внутри Times, AutoType, CustomData/Item,
+# MemoryProtection, CustomIcons, DeletedObject, на уровне Root / KeePassFile —
+# элемент читается и молча выбрасывается: пересохранение чужой базы теряет данные.
+#
+# Здесь незнакомый тег стоит на КАЖДОМ уровне сразу, свой на каждом месте — по
+# имени в diff видно, какой уровень потерян. Плюс вложенность (тег в теге) и
+# protected-значения внутри неизвестных элементов: inner stream идёт по порядку
+# документа, и если такое значение не вернуть на то же место, все следующие
+# пароли расшифруются мусором.
+UNKNOWN_FIXTURE = "unknown_everywhere_41.kdbx"
+
+UNK_UUIDS = {
+    "group": "7b1e5c60-0000-4000-8000-000000000001",
+    "entry": "7b1e5c60-0000-4000-8000-000000000010",
+    "icon": "7b1e5c60-0000-4000-8000-000000000020",
+    "deleted": "7b1e5c60-0000-4000-8000-000000000030",
+}
+
+# Тег на каждое место: имя = где стоит. По имени в diff видно потерянный уровень.
+UNK_TAGS = {
+    "file": "XFileUnknown",
+    "meta": "XMetaUnknown",
+    "memory_protection": "XProtectUnknown",
+    "custom_icons": "XIconsUnknown",
+    "icon": "XIconUnknown",
+    "meta_item": "XMetaItemUnknown",
+    "root": "XRootUnknown",
+    "deleted_objects": "XDeletedObjectsUnknown",
+    "deleted_object": "XDeletedObjectUnknown",
+    "group": "XGroupUnknown",
+    "group_times": "XGroupTimesUnknown",
+    "group_item": "XGroupItemUnknown",
+    "entry": "XEntryUnknown",
+    "entry_times": "XEntryTimesUnknown",
+    "auto_type": "XAutoTypeUnknown",
+    "association": "XAssociationUnknown",
+    "string": "XStringUnknown",
+    "binary": "XBinaryUnknown",
+    "entry_item": "XEntryItemUnknown",
+    "history_entry": "XHistoryEntryUnknown",
+    "history_times": "XHistoryTimesUnknown",
+}
+
+UNK_ATTR = ("Origin", "step-18 & <fixture>")
+UNK_NESTED_TAGS = ("Level1", "Level2", "Level3")
+UNK_NESTED_TEXT = "deep & nested"
+# Два protected-значения в разных местах дерева: одно до String записи (Times),
+# одно после (CustomData) — сдвиг inner stream в любую сторону портит пароли.
+UNK_SECRET_TIMES = "secret-in-times"
+UNK_SECRET_ITEM = "secret-in-custom-data"
+
+
+def unk_uuid(key):
+    return base64.b64encode(uuid_mod.UUID(UNK_UUIDS[key]).bytes).decode("ascii")
+
+
+def set_unk_uuid(obj, key):
+    obj._element.find("UUID").text = unk_uuid(key)
+
+
+def add_unknown(parent, where, secret=None, nested=False):
+    """Неизвестный элемент в parent: атрибут, текстовый лист, опционально вложенность."""
+    el = SubElement(parent, UNK_TAGS[where])
+    el.set(*UNK_ATTR)
+    SubElement(el, "Inner").text = "value for %s" % where
+    if nested:
+        # Тег в теге в теге: хранение с путём должно работать на любой глубине.
+        node = el
+        for tag in UNK_NESTED_TAGS:
+            node = SubElement(node, tag)
+        node.text = UNK_NESTED_TEXT
+    if secret is not None:
+        # pykeepass шифрует при сохранении любой Value[@Protected='True']
+        SubElement(el, "Value", Protected="True").text = secret
+    return el
+
+
+def fill_unknown_meta(kp):
+    meta = kp.tree.getroot().find("Meta")
+
+    protection = meta.find("MemoryProtection")
+    if protection is None:
+        protection = put(meta, "MemoryProtection", None)
+    add_unknown(protection, "memory_protection")
+
+    icons = meta.find("CustomIcons")
+    if icons is None:
+        icons = put(meta, "CustomIcons", None)
+    icon = SubElement(icons, "Icon")
+    SubElement(icon, "UUID").text = unk_uuid("icon")
+    SubElement(icon, "Data").text = base64.b64encode(AF_ICON_PNG).decode("ascii")
+    add_unknown(icon, "icon")
+    add_unknown(icons, "custom_icons")
+
+    custom_data = meta.find("CustomData")
+    if custom_data is None:
+        custom_data = put(meta, "CustomData", None)
+    item = SubElement(custom_data, "Item")
+    SubElement(item, "Key").text = "X-Meta-Key"
+    SubElement(item, "Value").text = "meta-value"
+    add_unknown(item, "meta_item")
+    add_unknown(meta, "meta")
+
+
+def fill_unknown_group(kp):
+    group = kp.add_group(kp.root_group, "Unknown & Co")
+    set_unk_uuid(group, "group")
+    el = group._element
+    put_times(kp, el, 10)
+    add_unknown(el.find("Times"), "group_times")
+    custom_data = put(el, "CustomData", None)
+    item = SubElement(custom_data, "Item")
+    SubElement(item, "Key").text = "X-Group-Key"
+    SubElement(item, "Value").text = "group-value"
+    add_unknown(item, "group_item")
+    add_unknown(el, "group")
+    return group
+
+
+def fill_unknown_entry(kp, group):
+    entry = kp.add_entry(group, "Unknown Everywhere", "unk-user", "unk-pass-1",
+                         url="https://unknown.example.com", notes="entry with unknown elements")
+    set_unk_uuid(entry, "entry")
+    entry.set_custom_property("Custom Secret", "secret-value", protect=True)
+    entry.add_attachment(kp.add_binary(ATTACHMENT_DATA), ATTACHMENT_NAME)
+
+    el = entry._element
+    put_times(kp, el, 20)
+
+    # История создаётся ДО неизвестных элементов: иначе их копии попадут в версию
+    # истории и каждый тег встретится в файле дважды. Версии истории нужны свои.
+    entry.save_history()
+    entry.password = "unk-pass-2"
+
+    # Секрет внутри Times — по порядку документа раньше String записи.
+    add_unknown(el.find("Times"), "entry_times", secret=UNK_SECRET_TIMES)
+
+    auto_type = el.find("AutoType")
+    if auto_type is None:
+        auto_type = put(el, "AutoType", None)
+    # В шаблоне pykeepass пустая Association — у настоящих клиентов её нет
+    for assoc in auto_type.findall("Association"):
+        if not assoc.findtext("Window"):
+            auto_type.remove(assoc)
+    association = SubElement(auto_type, "Association")
+    SubElement(association, "Window").text = "Firefox*"
+    SubElement(association, "KeystrokeSequence").text = "{USERNAME}"
+    add_unknown(association, "association")
+    add_unknown(auto_type, "auto_type")
+
+    for string_el in el.findall("String"):
+        if string_el.findtext("Key") == "Title":
+            add_unknown(string_el, "string")
+    for binary_el in el.findall("Binary"):
+        add_unknown(binary_el, "binary")
+
+    custom_data = put(el, "CustomData", None)
+    item = SubElement(custom_data, "Item")
+    SubElement(item, "Key").text = "X-Entry-Key"
+    SubElement(item, "Value").text = "entry-value"
+    # Секрет внутри CustomData — позже String записи.
+    add_unknown(item, "entry_item", secret=UNK_SECRET_ITEM)
+    add_unknown(el, "entry", nested=True)
+
+    history_entry = el.find("History/Entry")
+    add_unknown(history_entry, "history_entry")
+    add_unknown(history_entry.find("Times"), "history_times")
+    return entry
+
+
+def fill_unknown_root(kp):
+    root_el = kp.tree.getroot()
+    root_group_el = root_el.find("Root")
+    deleted = root_group_el.find("DeletedObjects")
+    if deleted is None:
+        deleted = SubElement(root_group_el, "DeletedObjects")
+    obj = SubElement(deleted, "DeletedObject")
+    SubElement(obj, "UUID").text = unk_uuid("deleted")
+    SubElement(obj, "DeletionTime").text = af_time(kp, 28)
+    add_unknown(obj, "deleted_object")
+    add_unknown(deleted, "deleted_objects")
+    add_unknown(root_group_el, "root")
+    add_unknown(root_el, "file")
+
+
+def verify_unknown_fixture(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    assert kp.kdbx.header.value.minor_version == 1, "ожидался KDBX 4.1"
+    root = kp.tree.getroot()
+    for where, tag in UNK_TAGS.items():
+        found = root.findall(".//" + tag)
+        assert len(found) == 1, "%s: %d" % (where, len(found))
+        assert found[0].get(UNK_ATTR[0]) == UNK_ATTR[1], where
+        assert found[0].findtext("Inner") == "value for %s" % where, where
+    entry = kp.find_entries(title="Unknown Everywhere", first=True)
+    assert entry.password == "unk-pass-2"
+    assert len(entry.history) == 1 and entry.history[0].password == "unk-pass-1"
+    assert entry.get_custom_property("Custom Secret") == "secret-value"
+    deep = root.find(".//%s/%s" % (UNK_TAGS["entry"], "/".join(UNK_NESTED_TAGS)))
+    assert deep is not None and deep.text == UNK_NESTED_TEXT
+    times_secret = entry._element.findtext("Times/%s/Value" % UNK_TAGS["entry_times"])
+    assert times_secret == UNK_SECRET_TIMES, times_secret
+
+
+def build_unknown_fixture():
+    db_path = OUT_DIR / UNKNOWN_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    fill_unknown_meta(kp)
+    group = fill_unknown_group(kp)
+    fill_unknown_entry(kp, group)
+    fill_unknown_root(kp)
+    kp.save()
+    verify_unknown_fixture(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -615,6 +848,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (KDBX 4.1, все элементы не по умолчанию)"
         % (ALL_FIELDS_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_unknown_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (неизвестные элементы на всех уровнях)"
+        % (UNKNOWN_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 
