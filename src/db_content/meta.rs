@@ -558,7 +558,7 @@ impl Meta {
         let icon = super::Icon {
             uuid: Uuid::new_v4(),
             data: icon_data.to_owned(),
-            last_modification_time: util::now_utc(),
+            last_modification_time: Some(util::now_utc()),
             ..Default::default()
         };
         self.custom_icons.icons.push(icon);

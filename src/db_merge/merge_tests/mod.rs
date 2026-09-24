@@ -199,6 +199,76 @@ fn verify_unknown_elements_of_newer_source_are_merged_in(_ctx: &mut MergeTestCon
     );
 }
 
+// Step 19: поля, которые наш UI не редактирует (цвета записи, OverrideURL, флаги группы),
+// ядро читает из чужого файла - и при слиянии они должны переезжать из более новой базы
+// вместе с объектом, а не теряться по дороге
+#[test_context(MergeTestContext)]
+#[test]
+fn verify_foreign_fields_of_newer_source_are_merged_in(_ctx: &mut MergeTestContext) {
+    let (mut source, mut target) = create_test_dbs_4();
+
+    let source_db = source.keepass_main_content.as_mut().unwrap();
+
+    util::test_clock::advance_by(1);
+
+    let group_uuid = {
+        let g1 = source_db.root.group_by_name_mut("group1").unwrap();
+        g1.default_auto_type_sequence = Some("{USERNAME}{ENTER}".to_string());
+        g1.enable_auto_type = Some(false);
+        g1.enable_searching = Some(false);
+        g1.is_expanded = false;
+        g1.update_modification_time_now();
+        g1.get_uuid()
+    };
+
+    let entry_uuid = {
+        let e1 = source_db
+            .root
+            .entry_by_matching_kv(TITLE, "entry1")
+            .unwrap()
+            .get_uuid();
+        let entry = source_db.root.entry_by_id_mut(&e1).unwrap();
+        entry.foreground_color = "#112233".to_string();
+        entry.background_color = "#445566".to_string();
+        entry.override_url = "cmd://firefox {URL}".to_string();
+        entry.quality_check = false;
+        entry.times.last_modification_time = util::now_utc();
+        e1
+    };
+
+    // В цели этих значений нет — иначе тест прошёл бы и без переноса
+    let target_db = target.keepass_main_content.as_ref().unwrap();
+    let target_group = target_db.root.group_by_id(&group_uuid).unwrap();
+    assert_eq!(target_group.default_auto_type_sequence, None);
+    let target_entry = target_db.root.entry_by_id(&entry_uuid).unwrap();
+    assert_eq!(target_entry.override_url, "");
+
+    Merger::from_kdbx_file(&source, &mut target)
+        .merge()
+        .unwrap();
+
+    let target_db = target.keepass_main_content.as_ref().unwrap();
+
+    let group = target_db.root.group_by_id(&group_uuid).unwrap();
+    assert_eq!(
+        group.default_auto_type_sequence,
+        Some("{USERNAME}{ENTER}".to_string()),
+        "последовательность автоввода группы не перенеслась"
+    );
+    assert_eq!(group.enable_auto_type, Some(false), "флаг автоввода группы");
+    assert_eq!(group.enable_searching, Some(false), "флаг поиска группы");
+    assert!(!group.is_expanded, "флаг раскрытия группы");
+
+    let entry = target_db.root.entry_by_id(&entry_uuid).unwrap();
+    assert_eq!(entry.foreground_color, "#112233", "цвет текста записи");
+    assert_eq!(entry.background_color, "#445566", "цвет фона записи");
+    assert_eq!(
+        entry.override_url, "cmd://firefox {URL}",
+        "OverrideURL записи"
+    );
+    assert!(!entry.quality_check, "флаг проверки качества пароля");
+}
+
 #[test_context(MergeTestContext)]
 #[test]
 fn verify_group_location_changed(_ctx: &mut MergeTestContext) {

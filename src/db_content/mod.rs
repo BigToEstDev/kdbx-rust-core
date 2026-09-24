@@ -90,7 +90,9 @@ pub(crate) struct Icon {
     pub(crate) uuid: Uuid,
     pub(crate) data: Vec<u8>,
     pub(crate) name: Option<String>, //KDBX 4.1
-    pub(crate) last_modification_time: NaiveDateTime,
+    // KDBX 4.1: элемент необязательный. None - его не было в файле, и дописывать его
+    // (эпохой или «сейчас») нельзя: это меняет чужой файл (Step 19)
+    pub(crate) last_modification_time: Option<NaiveDateTime>,
 }
 
 // Called to verify a given entry's or group's uuid is a valid value (i.e not default one) and this

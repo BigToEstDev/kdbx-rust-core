@@ -36,7 +36,7 @@ fn push_icon(keepass: &mut crate::db_content::KeepassFile, uuid: Uuid, data: Vec
         uuid,
         data,
         name: None,
-        last_modification_time: util::now_utc(),
+        last_modification_time: Some(util::now_utc()),
     });
 }
 

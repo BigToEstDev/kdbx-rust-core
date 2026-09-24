@@ -18,7 +18,18 @@ use crate::db::KeyFileData;
 use crate::db_content::*;
 use crate::error::{Error, Result};
 use crate::util::{self, empty_str};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+
+// Предел вложенности XML. И знакомые элементы (вложенные группы - read_group), и незнакомые
+// (read_unknown_element) читаются рекурсией, поэтому глубокий документ снимает стек, а
+// переполнение стека не ловится и убивает процесс целиком. В настоящем KDBX глубина - единицы
+// уровней; предел нужен только против испорченного или недоброжелательного файла.
+// Считается вся цепочка тегов от корня: KeePassFile (1), Root (2), каждая Group (+1), Entry (+1),
+// Times / String (+1), дети неизвестного элемента (+1 каждый). При 32 это 30 уровней вложенных
+// групп или 28 с записью внутри самой глубокой (замерено 2026-09-24) - на порядок больше любого
+// реального дерева. Сильно выше поднимать нельзя без роста стека: кадр read_group в debug
+// ~10 КиБ, при пределе 200 тест-поток с 2 МиБ стека переполнялся
+const MAX_XML_DEPTH: usize = 32;
 
 pub struct XmlReader<'a> {
     reader: QuickXmlReader<&'a [u8]>,
@@ -41,7 +52,7 @@ macro_rules! read_tags {
         empty_tags {$($empty_tag:pat => $empty_tag_action:tt),*} , $end_tag:expr   )
         => {
         let mut buf:Vec<u8> = vec![];
-        $self.enter_tag($end_tag);
+        $self.enter_tag($end_tag)?;
         loop {
 
             match $self.reader.read_event_into(&mut buf) {
@@ -72,7 +83,13 @@ macro_rules! read_tags {
                         _ => {
                             // A tag not listed above: read it whole - protected values inside are
                             // decrypted, keeping the inner stream in step - and keep it or drop it
-                            let unknown = read_unknown_element(&mut $self.reader, &mut $self.stream_cipher, e)?;
+                            let depth = $self.depth();
+                            let unknown = read_unknown_element(
+                                &mut $self.reader,
+                                &mut $self.stream_cipher,
+                                e,
+                                depth,
+                            )?;
                             $self.keep_unknown($end_tag, unknown);
                         }
                     }
@@ -111,9 +128,10 @@ macro_rules! read_tags {
                     return Err(Error::XmlReadingFailed(format!("Reached end before seeing the end tag {:?}", ep)));
                 }
                 Ok(ref x) => {
-                    //TODO: Log any other events for debugging
+                    // Comments, CDATA, processing instructions: not part of our model, skipped.
+                    // On Android a println! goes nowhere, on desktop it litters stdout
                     let ep = std::str::from_utf8($end_tag);
-                    println!("Unhandled event {:?} before seeing the end tag {:?}", x,ep);
+                    log::warn!("Skipped XML event {:?} inside {:?}", x, ep);
                 }
                 Err(e) => {
                     return Err(Error::from(e));
@@ -121,6 +139,19 @@ macro_rules! read_tags {
             }
         }
     };
+}
+
+// Текст элемента для записи. XML при чтении нормализует "\r\n" и одиночный "\r" в "\n"
+// (спецификация XML, 2.11), поэтому возврат каретки переживает сохранение, только если записан
+// как ссылка &#13; - так его пишут KeePass и KeePassXC. Без этого многострочная заметка,
+// созданная в Windows, при каждом нашем сохранении теряла "\r" (Step 19)
+fn text_event(content: &str) -> BytesText<'static> {
+    let escaped = quick_xml::escape::escape(content).into_owned();
+    if escaped.contains('\r') {
+        BytesText::from_escaped(escaped.replace('\r', "&#13;"))
+    } else {
+        BytesText::from_escaped(escaped)
+    }
 }
 
 // Tag name and attributes of an element the core does not know
@@ -143,7 +174,15 @@ fn read_unknown_element<B: BufRead>(
     reader: &mut QuickXmlReader<B>,
     stream_cipher: &mut Option<ProtectedContentStreamCipher>,
     start: &BytesStart,
+    depth: usize,
 ) -> Result<UnknownElement> {
+    if depth >= MAX_XML_DEPTH {
+        return Err(Error::XmlReadingFailed(format!(
+            "XML nesting is deeper than {} levels at {:?}",
+            MAX_XML_DEPTH,
+            String::from_utf8_lossy(start.name().as_ref())
+        )));
+    }
     let mut element = unknown_element_start(start)?;
 
     // The reader trims text events, and text around an entity comes as separate events:
@@ -153,7 +192,7 @@ fn read_unknown_element<B: BufRead>(
         reader.config().trim_text_end,
     );
     reader.config_mut().trim_text(false);
-    let content = read_unknown_content(reader, stream_cipher, &mut element);
+    let content = read_unknown_content(reader, stream_cipher, &mut element, depth);
     reader.config_mut().trim_text_start = trim_start;
     reader.config_mut().trim_text_end = trim_end;
     content?;
@@ -176,12 +215,13 @@ fn read_unknown_content<B: BufRead>(
     reader: &mut QuickXmlReader<B>,
     stream_cipher: &mut Option<ProtectedContentStreamCipher>,
     element: &mut UnknownElement,
+    depth: usize,
 ) -> Result<()> {
     let mut buf = vec![];
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(ref e) => {
-                let child = read_unknown_element(reader, stream_cipher, e)?;
+                let child = read_unknown_element(reader, stream_cipher, e, depth + 1)?;
                 element.children.push(child);
             }
             Event::Empty(ref e) => element.children.push(unknown_element_start(e)?),
@@ -233,15 +273,14 @@ fn content_unescape(content: &str) -> String {
 }
 
 #[inline]
+// A value we cannot parse is a damaged file, not a normal one: we log what stood there and fall
+// back, but we never invent a value that looks meaningful (see content_to_dt). Keeping the original
+// text and writing it back is variant B in plan/todo/core/rust-core-bugs.md - not done
 fn content_to_int(content: String) -> i32 {
     if let Ok(i) = content.parse::<i32>() {
         i
     } else {
-        // TODO accept some default value and return in case of parsing failure
-        error!(
-            "Parsing of content {} as i32 failed and returning -1",
-            content
-        );
+        warn!("Content {:?} is not an i32, falling back to -1", content);
         -1
     }
 }
@@ -253,17 +292,26 @@ fn content_to_i64(content: String) -> i64 {
     if let Ok(i) = content.parse::<i64>() {
         i
     } else {
-        error!(
-            "Parsing of content {} as i64 failed and returning -1",
-            content
-        );
+        warn!("Content {:?} is not an i64, falling back to -1", content);
         -1
     }
 }
 
+// KeePass writes "True" / "False"; anything else is a damaged value, reported once and read as false
 #[inline]
 fn content_to_bool(content: String) -> bool {
-    content.to_lowercase() == "true"
+    let value = content.trim();
+    if value.eq_ignore_ascii_case("true") {
+        true
+    } else {
+        if !value.is_empty() && !value.eq_ignore_ascii_case("false") {
+            warn!(
+                "Content {:?} is not a boolean, falling back to false",
+                value
+            );
+        }
+        false
+    }
 }
 
 // Three-state KeePass flag (EnableAutoType, EnableSearching): "null" = inherit from the parent
@@ -279,23 +327,31 @@ fn opt_bool_to_xml(flag: Option<bool>) -> String {
     flag.map_or_else(|| "null".into(), bool_to_xml_bool)
 }
 
+// An unreadable time falls back to the KDBX zero date - KeePass writes the same value for
+// "not set". Before Step 19 this returned "now": a damaged timestamp of someone else's file was
+// silently replaced with the moment we happened to read it, and saved back that way
 #[inline]
 fn content_to_dt(content: String) -> chrono::NaiveDateTime {
     if let Some(d) = util::decode_datetime_b64(&content) {
         d
     } else {
-        error!(
-            "Parsing of content {} to date failed and returning now",
+        warn!(
+            "Content {:?} is not a date, falling back to the zero date",
             content
         );
-        util::now_utc()
+        util::datetime_epoch()
     }
 }
 
+// A nil uuid is what KeePass itself writes for "no reference"
 #[inline]
 fn content_to_uuid(content: &str) -> uuid::Uuid {
-    //TODO: Log the uuid conversion error
-    util::decode_uuid(content).unwrap_or_default()
+    util::decode_uuid(content).unwrap_or_else(|| {
+        if !content.trim().is_empty() {
+            warn!("Content {:?} is not a uuid, falling back to nil", content);
+        }
+        uuid::Uuid::default()
+    })
 }
 
 #[inline]
@@ -413,12 +469,24 @@ impl<'a> XmlReader<'a> {
 
     // read_tags! keeps the path: every nested reader goes through the macro, so a new node of
     // the format is covered without touching this file
-    fn enter_tag(&mut self, tag: &[u8]) {
+    fn enter_tag(&mut self, tag: &[u8]) -> Result<()> {
+        if self.path.len() >= MAX_XML_DEPTH {
+            return Err(Error::XmlReadingFailed(format!(
+                "XML nesting is deeper than {} levels at {:?}",
+                MAX_XML_DEPTH,
+                String::from_utf8_lossy(tag)
+            )));
+        }
         self.path.push(String::from_utf8_lossy(tag).into_owned());
+        Ok(())
     }
 
     fn leave_tag(&mut self) {
         self.path.pop();
+    }
+
+    fn depth(&self) -> usize {
+        self.path.len()
     }
 
     // Starts an owner of unknown elements (Meta, Root, a group, an entry): its elements are
@@ -464,6 +532,9 @@ impl<'a> XmlReader<'a> {
     pub fn parse(&mut self) -> Result<KeepassFile> {
         log::trace!("Going to parse read the the xml  ...");
         let mut kp = KeepassFile::new();
+        // Step 19: without this an empty or tagless payload parsed into an empty database -
+        // and the next save would write that emptiness over the user's file
+        let mut keepass_file_seen = false;
         let mut buf: Vec<u8> = vec![];
         // XML declarations are optional according to the XML specification.
         // let mut xml_decl_available = false;
@@ -488,6 +559,7 @@ impl<'a> XmlReader<'a> {
                     match e.name().as_ref() {
                         KEEPASS_FILE => {
                             self.read_top_level(&mut kp)?;
+                            keepass_file_seen = true;
                         }
                         x => {
                             //debug!("MAIN: in match {:?}", std::str::from_utf8(e.name()).unwrap());
@@ -519,6 +591,12 @@ impl<'a> XmlReader<'a> {
                     return Err(Error::from(e));
                 }
             }
+        }
+
+        if !keepass_file_seen {
+            return Err(Error::XmlReadingFailed(
+                "No KeePassFile element was found in the xml content".into(),
+            ));
         }
         Ok(kp)
     }
@@ -705,7 +783,7 @@ impl<'a> XmlReader<'a> {
                 }),
                 NAME => (|content:String, _,  _|  icon.name = Some(content)),
                 LAST_MODIFICATION_TIME => (
-                    |content:String, _,  _| icon.last_modification_time = content_to_dt(content)
+                    |content:String, _,  _| icon.last_modification_time = Some(content_to_dt(content))
                 )
             },
             start_tag_blks {},
@@ -855,12 +933,9 @@ impl<'a> XmlReader<'a> {
                     group.group_uuids.push(self.read_group(Some(group.uuid),root)?);
                 },
                 ENTRY => {
-                    // group.entries.push(self.read_entry()?);
-                    // It is assumed that Entry tag of a group is seen after UUID tag of Group so group.uuid should have valid uuid. See next comment
-                    // TODO:
-                    // If entry tag of a group comes before UUID tag of Group, then group.uuid will be a Uuid:Default vlaue.
-                    // May need to fix when that happens with other KeePass app generated xml content.
-                    // So far a group's entry always come after the group's uuid read
+                    // KeePass and KeePassXC write <UUID> before the entries, so the uuid is
+                    // known here - but the format does not require that order, and an entry
+                    // read earlier would get a nil parent. Fixed up after the group is read
                     group.entry_uuids.push(self.read_entry(group.uuid, root)?);
                 },
                 CUSTOM_DATA => {
@@ -871,8 +946,17 @@ impl<'a> XmlReader<'a> {
             GROUP
         );
         group.unknown_elements = self.end_owner(outer_unknown);
-        // TODO: We may need to ensure all Entries of this group has its group_uuid is set to this group's UUID. See above comments in 'ENTRY'
-        let gid = group.uuid; // copy to return
+
+        // If <UUID> came after the entries, they were read with a nil parent: set it now that
+        // the group's uuid is known (Step 19)
+        let gid = group.uuid;
+        for entry_uuid in group.entry_uuids.iter() {
+            if let Some(entry) = root.entry_by_id_mut(entry_uuid) {
+                if entry.parent_group_uuid != gid {
+                    entry.parent_group_uuid = gid;
+                }
+            }
+        }
 
         root.insert_to_all_groups(group);
         Ok(gid)
@@ -1203,7 +1287,7 @@ macro_rules! write_tags {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
             }
         )*
@@ -1222,7 +1306,7 @@ macro_rules! write_tags_or_skip_empty {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
 
             }
@@ -1242,7 +1326,7 @@ macro_rules! write_opt_val_tags_or_skip {
                 $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
                 // Creates a new BytesText from a string. The string is expected not to be escaped
                 // quick_xml escapes the text content internally
-                $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+                $self.writer.write_event(Event::Text(text_event(val)))?;
                 $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
             }
         )*
@@ -1272,7 +1356,7 @@ macro_rules! write_tags_with_attributes {
             }
             let s:&str = $txt.as_ref();
             $self.writer.write_event(Event::Start(my_element))?;
-            $self.writer.write_event(Event::Text(BytesText::new(s)))?; //&$txt
+            $self.writer.write_event(Event::Text(text_event(s)))?; //&$txt
             $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
         )*
     };
@@ -1435,8 +1519,7 @@ impl<W: Write> XmlWriter<W> {
                         text = cipher.process_content_b64_str(&element.text)?;
                     }
                 }
-                self.writer
-                    .write_event(Event::Text(BytesText::new(&text)))?;
+                self.writer.write_event(Event::Text(text_event(&text)))?;
             }
             self.write_unknown_elements(&element.children)?;
             self.writer
@@ -1496,17 +1579,28 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(custom_icons_tag)))?;
         for icon in custom_icons.icons.iter() {
-            let icon_path = ["CustomIcons", "Icon", &icon.uuid.to_string()];
-            write_parent_child_tags_keeping_unknown! {
-                self,
-                ICON,
-                pending,
-                &icon_path,
+            let icon_tag = std::str::from_utf8(ICON)?;
+            self.writer
+                .write_event(Event::Start(BytesStart::new(icon_tag)))?;
+
+            write_tags! { self,
                 UUID, util::encode_uuid(&icon.uuid),
-                NAME, &icon.name.as_ref().map_or_else(util::empty_str, |s| s.to_string()),
-                DATA,  util::base64_encode(&icon.data),
-                LAST_MODIFICATION_TIME, util::encode_datetime(&icon.last_modification_time)
+                DATA, util::base64_encode(&icon.data)
             };
+            // Name и LastModificationTime в KDBX 4.1 необязательны: пишем, только если они
+            // были в файле, иначе чужая иконка получает элементы, которых у неё не было
+            write_opt_val_tags_or_skip! { self,
+                NAME, icon.name.clone()
+            }
+            write_opt_val_tags_or_skip! { self,
+                LAST_MODIFICATION_TIME, icon.last_modification_time.map(|t| util::encode_datetime(&t))
+            }
+
+            let kept = pending.take(&["CustomIcons", "Icon", &icon.uuid.to_string()]);
+            self.write_unknown_elements(kept)?;
+
+            self.writer
+                .write_event(Event::End(BytesEnd::new(icon_tag)))?;
         }
 
         let kept = pending.take(&["CustomIcons"]);
@@ -1891,9 +1985,16 @@ impl<'a> FileKeyXmlReader<'a> {
     // and the element path (see XmlReader) is not needed either
     fn keep_unknown(&mut self, _parent_tag: &[u8], _element: UnknownElement) {}
 
-    fn enter_tag(&mut self, _tag: &[u8]) {}
+    fn enter_tag(&mut self, _tag: &[u8]) -> Result<()> {
+        Ok(())
+    }
 
     fn leave_tag(&mut self) {}
+
+    // Key files are flat: their nesting never comes from the file content
+    fn depth(&self) -> usize {
+        0
+    }
 
     pub fn parse(&mut self) -> Result<KeyFileData> {
         let mut buf: Vec<u8> = vec![];
@@ -2280,6 +2381,87 @@ mod tests {
             xml
         );
         assert_eq!(xml.matches("<Tags").count(), 1, "{}", xml);
+    }
+
+    // Step 19: XML из чужого файла может быть каким угодно - ядро отвечает ошибкой, но не падает.
+    // Паника здесь после FFI роняет Android-процесс, а пользователь не узнаёт, что с файлом
+    fn parse_fails(xml: &str, what: &str) {
+        let result = parse(xml.as_bytes(), None);
+        assert!(result.is_err(), "{}: ожидалась ошибка, получено Ok", what);
+    }
+
+    // Порядок элементов внутри <Group> формат не задаёт: KeePass и KeePassXC пишут <UUID>
+    // раньше записей, но чужой клиент может иначе. До Step 19 такие записи получали нулевой
+    // parent_group_uuid - то есть теряли свою группу
+    #[test]
+    fn entries_read_before_the_group_uuid_keep_their_group() {
+        let group_uuid = "Wg46TgAAQACAAAAAAAAAAQ==";
+        let xml = format!(
+            r#"<KeePassFile><Root><Group>
+                 <Entry><UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID></Entry>
+                 <UUID>{}</UUID>
+                 <Name>Group with the uuid after its entries</Name>
+               </Group></Root></KeePassFile>"#,
+            group_uuid
+        );
+
+        let kp = parse(xml.as_bytes(), None).unwrap();
+        let gid = kp.root.root_uuid();
+        assert_eq!(util::encode_uuid(&gid), group_uuid, "uuid группы прочитан");
+
+        let entry = kp.root.all_entries().values().next().unwrap();
+        assert_eq!(
+            entry.parent_group_uuid, gid,
+            "запись, прочитанная до <UUID> группы, осталась без группы"
+        );
+    }
+
+    #[test]
+    fn malformed_xml_gives_an_error() {
+        parse_fails("", "пустое содержимое");
+        parse_fails("not xml at all", "текст вместо XML");
+        parse_fails("<KeePassFile><Meta>", "незакрытые теги");
+        parse_fails(
+            "<KeePassFile><Meta></Root></KeePassFile>",
+            "закрывающий тег не от того элемента",
+        );
+        parse_fails("<Something><A/></Something>", "чужой корневой тег");
+        parse_fails(
+            "<KeePassFile><Meta><Generator>test",
+            "обрезка посередине элемента",
+        );
+    }
+
+    // И знакомые элементы, и незнакомые читаются рекурсией: до Step 19 документ с глубокой
+    // вложенностью снимал стек (STATUS_STACK_OVERFLOW), а это не ловится и убивает процесс
+    fn nested(tag: &str, depth: usize) -> String {
+        let mut xml = String::from("<KeePassFile><Meta>");
+        xml.push_str(&format!("<{}>", tag).repeat(depth));
+        xml.push_str(&format!("</{}>", tag).repeat(depth));
+        xml.push_str("</Meta></KeePassFile>");
+        xml
+    }
+
+    #[test]
+    fn deeply_nested_unknown_elements_give_an_error() {
+        parse_fails(&nested("X", 20_000), "20000 вложенных неизвестных тегов");
+    }
+
+    #[test]
+    fn deeply_nested_known_elements_give_an_error() {
+        // Вложенные группы - тоже рекурсия (read_group)
+        let mut xml = String::from("<KeePassFile><Root>");
+        xml.push_str(&"<Group><UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>".repeat(20_000));
+        xml.push_str(&"</Group>".repeat(20_000));
+        xml.push_str("</Root></KeePassFile>");
+        parse_fails(&xml, "20000 вложенных групп");
+    }
+
+    #[test]
+    fn nesting_within_the_limit_is_read() {
+        // Предел не должен мешать обычным файлам: вложенность в единицы уровней
+        let kp = parse(nested("X", 10).as_bytes(), None).unwrap();
+        assert_eq!(kp.meta.unknown_elements.iter().count(), 1);
     }
 
     #[test]
@@ -2907,7 +3089,7 @@ mod tests {
 //                     $self.writer.write_event(Event::Start(BytesStart::new(name_of_tag)))?;
 //                     // Creates a new BytesText from a string. The string is expected not to be escaped
 //                     // quick_xml escapes the text content internally
-//                     $self.writer.write_event(Event::Text(BytesText::new(val)))?;
+//                     $self.writer.write_event(Event::Text(text_event(val)))?;
 //                     $self.writer.write_event(Event::End(BytesEnd::new(name_of_tag)))?;
 //                 }
 //             }
