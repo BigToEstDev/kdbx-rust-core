@@ -30,6 +30,7 @@ resave_db`), затем pykeepass расшифровывает оба файла
 
 import base64
 import hashlib
+import re
 import shutil
 import struct
 import subprocess
@@ -171,8 +172,8 @@ def flatten(kp, el, path, out):
         flatten(kp, child, path + "/" + segment, out)
 
 
-def load_flat(db_path):
-    kp = PyKeePass(str(db_path), password=PASSWORD)
+def load_flat(db_path, key_file=None):
+    kp = open_db(db_path, key_file)
     root = kp.tree.getroot()
     out = {}
     for top in root:
@@ -200,16 +201,38 @@ def diff(before, after):
 
 
 def generic(path):
-    """Путь без ключей в скобках: Meta/Generator, Root/Group/Entry/OverrideURL…"""
-    parts = []
-    for part in path.split("/"):
-        parts.append(part.split("[", 1)[0])
-    return "/".join(parts)
+    """Путь без ключей в скобках: Meta/Generator, Root/Group/Entry/OverrideURL…
+
+    Ключи убираются ДО разбиения по "/": UUID в base64 законно содержит "/" и "+",
+    и путь Entry[XCr/BLL...] иначе разваливается на лишние сегменты - тогда значение
+    по умолчанию для элемента не находится и целый элемент попадает в diff как
+    «добавлен» (Step 19).
+    """
+    without_keys = re.sub(r"\[[^\]]*\]", "", path)
+    return without_keys
 
 
-def resave_with_core(source, target):
+def key_file_for(db_path):
+    """Фикстуре с ключевым файлом соответствует .keyx рядом (gen_fixtures.py)."""
+    candidate = Path(db_path).with_suffix(".keyx")
+    return candidate if candidate.exists() else None
+
+
+def open_db(path, key_file=None):
+    return PyKeePass(
+        str(path),
+        password=PASSWORD,
+        keyfile=str(key_file) if key_file else None,
+    )
+
+
+def resave_with_core(source, target, key_file=None):
+    command = ["cargo", "run", "--quiet", "--example", "resave_db", "--",
+               str(source), str(target), PASSWORD]
+    if key_file:
+        command.append(str(key_file))
     subprocess.run(
-        ["cargo", "run", "--quiet", "--example", "resave_db", "--", str(source), str(target), PASSWORD],
+        command,
         cwd=REPO_ROOT,
         check=True,
     )
@@ -257,14 +280,15 @@ def compare_fixture(fixture, show_all, workdir):
     source = Path(fixture)
     if not source.is_absolute() and not source.exists():
         source = RESOURCES / fixture
-    kp_before, before = load_flat(source)
+    key_file = key_file_for(source)
+    kp_before, before = load_flat(source, key_file)
     labels = object_labels(kp_before)
 
     # Контроль оракула: pykeepass пересохраняет сам себя — отличий быть не должно.
     control = workdir / ("control_" + source.name)
-    kp = PyKeePass(str(source), password=PASSWORD)
+    kp = open_db(source, key_file)
     kp.save(str(control))
-    _, control_flat = load_flat(control)
+    _, control_flat = load_flat(control, key_file)
     control_bad = print_rows("%s — контроль (pykeepass → pykeepass)" % source.name,
                              diff(before, control_flat), False)
     if control_bad:
@@ -272,8 +296,8 @@ def compare_fixture(fixture, show_all, workdir):
         return control_bad
 
     target = workdir / ("core_" + source.name)
-    resave_with_core(source, target)
-    _, after = load_flat(target)
+    resave_with_core(source, target, key_file)
+    _, after = load_flat(target, key_file)
     return print_rows("%s — наше ядро" % source.name, diff(before, after), show_all, labels)
 
 

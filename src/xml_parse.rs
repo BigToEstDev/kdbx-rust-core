@@ -783,7 +783,7 @@ impl<'a> XmlReader<'a> {
                 }),
                 NAME => (|content:String, _,  _|  icon.name = Some(content)),
                 LAST_MODIFICATION_TIME => (
-                    |content:String, _,  _| icon.last_modification_time = content_to_dt(content)
+                    |content:String, _,  _| icon.last_modification_time = Some(content_to_dt(content))
                 )
             },
             start_tag_blks {},
@@ -1579,17 +1579,28 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .write_event(Event::Start(BytesStart::new(custom_icons_tag)))?;
         for icon in custom_icons.icons.iter() {
-            let icon_path = ["CustomIcons", "Icon", &icon.uuid.to_string()];
-            write_parent_child_tags_keeping_unknown! {
-                self,
-                ICON,
-                pending,
-                &icon_path,
+            let icon_tag = std::str::from_utf8(ICON)?;
+            self.writer
+                .write_event(Event::Start(BytesStart::new(icon_tag)))?;
+
+            write_tags! { self,
                 UUID, util::encode_uuid(&icon.uuid),
-                NAME, &icon.name.as_ref().map_or_else(util::empty_str, |s| s.to_string()),
-                DATA,  util::base64_encode(&icon.data),
-                LAST_MODIFICATION_TIME, util::encode_datetime(&icon.last_modification_time)
+                DATA, util::base64_encode(&icon.data)
             };
+            // Name и LastModificationTime в KDBX 4.1 необязательны: пишем, только если они
+            // были в файле, иначе чужая иконка получает элементы, которых у неё не было
+            write_opt_val_tags_or_skip! { self,
+                NAME, icon.name.clone()
+            }
+            write_opt_val_tags_or_skip! { self,
+                LAST_MODIFICATION_TIME, icon.last_modification_time.map(|t| util::encode_datetime(&t))
+            }
+
+            let kept = pending.take(&["CustomIcons", "Icon", &icon.uuid.to_string()]);
+            self.write_unknown_elements(kept)?;
+
+            self.writer
+                .write_event(Event::End(BytesEnd::new(icon_tag)))?;
         }
 
         let kept = pending.take(&["CustomIcons"]);

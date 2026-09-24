@@ -31,8 +31,8 @@ pub(crate) fn list_custom_icons(k: &KeepassFile) -> Result<Vec<CustomIconSummary
             name: icon.name.clone().unwrap_or_default(),
             last_modification_time: icon
                 .last_modification_time
-                .format("%Y-%m-%dT%H:%M:%S")
-                .to_string(),
+                .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string())
+                .unwrap_or_default(),
         })
         .collect();
     Ok(summaries)
@@ -77,7 +77,7 @@ pub(crate) fn add_custom_icon(
         uuid: Uuid::new_v4(),
         data: png_bytes,
         name: if name.is_empty() { None } else { Some(name) },
-        last_modification_time: util::now_utc(),
+        last_modification_time: Some(util::now_utc()),
     };
     let uuid_str = icon.uuid.to_string();
     k.meta.custom_icons.icons.push(icon);
