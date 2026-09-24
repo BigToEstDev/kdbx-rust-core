@@ -546,8 +546,12 @@ impl Entry {
             if let Some(idx) = hash_index_ref.get(&bv.data_hash) {
                 bv.index_ref = *idx;
             } else {
-                println!("Error: Index ref for the attachment with hash {} and name {} of entry uuuid {:?} is not found after writing to inner header", 
-                bv.data_hash, bv.key, self.uuid);
+                log::error!(
+                    "Index ref for the attachment with hash {} and name {} of entry {:?} is not found after writing to inner header",
+                    bv.data_hash,
+                    bv.key,
+                    self.uuid
+                );
             }
         }
         // We call also the histories entries.

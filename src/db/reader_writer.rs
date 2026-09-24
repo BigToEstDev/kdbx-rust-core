@@ -157,7 +157,8 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
 
     fn read_header_field(&mut self) -> Result<Vec<u8>> {
         let mut buf = [0; 4];
-        self.reader.read_exact(&mut buf).unwrap();
+        // A truncated file ends here: an error, never a panic - the file comes from the user
+        self.reader.read_exact(&mut buf)?;
         let size = u32::from_le_bytes(buf);
         let mut buffer = Vec::new();
         let r = self.reader.by_ref();
@@ -168,7 +169,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
     fn verify_stored_hash(&mut self) -> Result<()> {
         //Following header data we can find the hash data
         let mut stored_hash = [0; 32];
-        self.reader.read_exact(&mut stored_hash).unwrap();
+        self.reader.read_exact(&mut stored_hash)?;
         //at this point, the stream is 32 bytes after the header data
 
         let header_data = read_stream_data(
@@ -342,19 +343,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
     }
 
     fn read_xml_content(&mut self, xml_bytes: &[u8]) -> Result<()> {
-        // TODO:
-        // Following are used for any debugging to see the XML content during development.
-        // This should be removed after making some command line program
-        // Need to introduce cargo 'feature' to do this automatically on demand during dev test time
-
-        /*
-         // Dumps the raw xml content that has been decrypted
-         let dump_xml_file_name = temp_raw_xml_dump_file_name("test_read.xml");
-         super::write_xml_to_file(&dump_xml_file_name,xml_bytes).unwrap();
-         println!("Wrote the raw xml to the file {}",&dump_xml_file_name);
-        */
-
-        //println!("xml: {}", std::str::from_utf8(xml_bytes).expect("utf conversion failed"));
+        // To see the decrypted XML during development: db_service::export_as_xml
 
         let cipher = ProtectedContentStreamCipher::try_from(
             self.kdbx_file.inner_header.stream_cipher_id,
@@ -385,15 +374,6 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
         self.kdbx_file.keepass_main_content = Some(r);
         Ok(())
     }
-}
-
-#[allow(dead_code)]
-fn temp_raw_xml_dump_file_name(name: &str) -> String {
-    let mut path = std::env::temp_dir();
-    //println!("The current directory is {}", path.display());
-    path.push(name);
-    //println!("The current directory is {}", path.display());
-    path.to_str().unwrap().into()
 }
 
 /////

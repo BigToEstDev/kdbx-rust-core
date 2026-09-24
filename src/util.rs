@@ -43,7 +43,8 @@ pub fn encode_uuid(uuid: &Uuid) -> String {
 // The .NET epoch is 0001-01-01T00:00:00, which is better known as DateTime.MinValue
 // This is the epoch (starting point of time) used in KeePass as reference
 // We need to calculate seconds with reference to this point
-fn datetime_epoch() -> NaiveDateTime {
+// KDBX zero date (0001-01-01): what KeePass writes for "not set"
+pub(crate) fn datetime_epoch() -> NaiveDateTime {
     NaiveDate::from_ymd_opt(1, 1, 1)
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .expect("Forming NaiveDateTime for epoh failed. Should never happen")
