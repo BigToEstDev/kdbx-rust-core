@@ -920,12 +920,9 @@ impl<'a> XmlReader<'a> {
                     group.group_uuids.push(self.read_group(Some(group.uuid),root)?);
                 },
                 ENTRY => {
-                    // group.entries.push(self.read_entry()?);
-                    // It is assumed that Entry tag of a group is seen after UUID tag of Group so group.uuid should have valid uuid. See next comment
-                    // TODO:
-                    // If entry tag of a group comes before UUID tag of Group, then group.uuid will be a Uuid:Default vlaue.
-                    // May need to fix when that happens with other KeePass app generated xml content.
-                    // So far a group's entry always come after the group's uuid read
+                    // KeePass and KeePassXC write <UUID> before the entries, so the uuid is
+                    // known here - but the format does not require that order, and an entry
+                    // read earlier would get a nil parent. Fixed up after the group is read
                     group.entry_uuids.push(self.read_entry(group.uuid, root)?);
                 },
                 CUSTOM_DATA => {
@@ -936,8 +933,17 @@ impl<'a> XmlReader<'a> {
             GROUP
         );
         group.unknown_elements = self.end_owner(outer_unknown);
-        // TODO: We may need to ensure all Entries of this group has its group_uuid is set to this group's UUID. See above comments in 'ENTRY'
-        let gid = group.uuid; // copy to return
+
+        // If <UUID> came after the entries, they were read with a nil parent: set it now that
+        // the group's uuid is known (Step 19)
+        let gid = group.uuid;
+        for entry_uuid in group.entry_uuids.iter() {
+            if let Some(entry) = root.entry_by_id_mut(entry_uuid) {
+                if entry.parent_group_uuid != gid {
+                    entry.parent_group_uuid = gid;
+                }
+            }
+        }
 
         root.insert_to_all_groups(group);
         Ok(gid)
@@ -2359,6 +2365,32 @@ mod tests {
     fn parse_fails(xml: &str, what: &str) {
         let result = parse(xml.as_bytes(), None);
         assert!(result.is_err(), "{}: ожидалась ошибка, получено Ok", what);
+    }
+
+    // Порядок элементов внутри <Group> формат не задаёт: KeePass и KeePassXC пишут <UUID>
+    // раньше записей, но чужой клиент может иначе. До Step 19 такие записи получали нулевой
+    // parent_group_uuid - то есть теряли свою группу
+    #[test]
+    fn entries_read_before_the_group_uuid_keep_their_group() {
+        let group_uuid = "Wg46TgAAQACAAAAAAAAAAQ==";
+        let xml = format!(
+            r#"<KeePassFile><Root><Group>
+                 <Entry><UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID></Entry>
+                 <UUID>{}</UUID>
+                 <Name>Group with the uuid after its entries</Name>
+               </Group></Root></KeePassFile>"#,
+            group_uuid
+        );
+
+        let kp = parse(xml.as_bytes(), None).unwrap();
+        let gid = kp.root.root_uuid();
+        assert_eq!(util::encode_uuid(&gid), group_uuid, "uuid группы прочитан");
+
+        let entry = kp.root.all_entries().values().next().unwrap();
+        assert_eq!(
+            entry.parent_group_uuid, gid,
+            "запись, прочитанная до <UUID> группы, осталась без группы"
+        );
     }
 
     #[test]
