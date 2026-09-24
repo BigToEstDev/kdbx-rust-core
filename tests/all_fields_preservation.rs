@@ -17,9 +17,8 @@ mod common;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use common::xml::{parse_xml, Node};
 use onekeepass_core::db_service;
-use quick_xml::events::Event;
-use quick_xml::Reader;
 
 const PASSWORD: &str = "test-pass-1234";
 const FIXTURE: &str = "all_fields_41.kdbx";
@@ -34,102 +33,6 @@ const ENTRY: &str = "Wg46TgAAQACAAAAAAAAAEA==";
 const UNKNOWN_TAG: &str = "XPassholderUnknown";
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
-
-// --- минимальное XML-дерево для проверок ------------------------------------------
-
-#[derive(Debug, Default)]
-struct Node {
-    tag: String,
-    attrs: Vec<(String, String)>,
-    text: String,
-    children: Vec<Node>,
-}
-
-impl Node {
-    fn child(&self, tag: &str) -> Option<&Node> {
-        self.children.iter().find(|c| c.tag == tag)
-    }
-
-    fn text_of(&self, tag: &str) -> Option<&str> {
-        self.child(tag).map(|c| c.text.as_str())
-    }
-
-    fn attr(&self, name: &str) -> Option<&str> {
-        self.attrs
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.as_str())
-    }
-
-    /// Первый (в порядке документа) объект `tag` с `<UUID>` = `uuid`. Основная запись
-    /// идёт раньше своей истории, поэтому для записи это всегда текущая версия.
-    fn find_by_uuid(&self, tag: &str, uuid: &str) -> Option<&Node> {
-        if self.tag == tag && self.text_of("UUID") == Some(uuid) {
-            return Some(self);
-        }
-        self.children.iter().find_map(|c| c.find_by_uuid(tag, uuid))
-    }
-
-    /// Значение строкового поля записи `<String><Key>key</Key><Value>…</Value></String>`.
-    fn string_field(&self, key: &str) -> Option<&Node> {
-        self.children
-            .iter()
-            .filter(|c| c.tag == "String")
-            .find(|c| c.text_of("Key") == Some(key))
-            .and_then(|c| c.child("Value"))
-    }
-}
-
-fn parse_xml(xml: &str) -> Node {
-    let mut reader = Reader::from_str(xml);
-    let mut stack: Vec<Node> = vec![Node::default()];
-    loop {
-        match reader.read_event().expect("XML не разбирается") {
-            Event::Start(e) => stack.push(start_node(&e)),
-            Event::Empty(e) => {
-                let node = start_node(&e);
-                stack.last_mut().unwrap().children.push(node);
-            }
-            Event::Text(t) => {
-                let text = t.decode().unwrap();
-                stack.last_mut().unwrap().text.push_str(&text);
-            }
-            Event::GeneralRef(r) => {
-                // Сущности (&amp; и т.п.) приходят отдельным событием с quick-xml 0.38.
-                let name = r.decode().unwrap();
-                let resolved = quick_xml::escape::unescape(&format!("&{};", name))
-                    .unwrap()
-                    .into_owned();
-                stack.last_mut().unwrap().text.push_str(&resolved);
-            }
-            Event::End(_) => {
-                let node = stack.pop().unwrap();
-                stack.last_mut().unwrap().children.push(node);
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    let mut document = stack.pop().unwrap();
-    document.children.pop().expect("пустой XML")
-}
-
-fn start_node(e: &quick_xml::events::BytesStart) -> Node {
-    Node {
-        tag: String::from_utf8(e.name().as_ref().to_vec()).unwrap(),
-        attrs: e
-            .attributes()
-            .map(|a| {
-                let a = a.unwrap();
-                (
-                    String::from_utf8(a.key.as_ref().to_vec()).unwrap(),
-                    String::from_utf8(a.value.to_vec()).unwrap(),
-                )
-            })
-            .collect(),
-        ..Default::default()
-    }
-}
 
 // --- открыть, сохранить, выгрузить --------------------------------------------------
 
