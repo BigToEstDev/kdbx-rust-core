@@ -6,7 +6,7 @@
 
 mod common;
 
-use onekeepass_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::db_service::{self, NewDatabase};
 use uuid::Uuid;
 
 const PASSWORD: &str = "group-category-1234";

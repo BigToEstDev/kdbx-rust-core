@@ -789,6 +789,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdbx-rust-core"
+version = "0.25.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "argon2",
+ "base64",
+ "cbc",
+ "cfg-if",
+ "chacha20",
+ "chrono",
+ "chrono-tz",
+ "csv",
+ "data-encoding",
+ "env_logger",
+ "flate2",
+ "getrandom 0.4.3",
+ "hex",
+ "hmac",
+ "kdbx-rust-core",
+ "lazy_static",
+ "log",
+ "nom",
+ "once_cell",
+ "passwords",
+ "psl",
+ "quick-xml",
+ "regex",
+ "rmp-serde",
+ "secstr",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "test-context",
+ "thiserror",
+ "tokio",
+ "url",
+ "urlencoding",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,50 +908,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "onekeepass-core"
-version = "0.25.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "argon2",
- "base64",
- "cbc",
- "cfg-if",
- "chacha20",
- "chrono",
- "chrono-tz",
- "csv",
- "data-encoding",
- "env_logger",
- "flate2",
- "getrandom 0.4.3",
- "hex",
- "hmac",
- "lazy_static",
- "log",
- "nom",
- "once_cell",
- "onekeepass-core",
- "passwords",
- "psl",
- "quick-xml",
- "regex",
- "rmp-serde",
- "secstr",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "test-context",
- "thiserror",
- "tokio",
- "url",
- "urlencoding",
- "uuid",
- "zeroize",
-]
 
 [[package]]
 name = "password-hash"

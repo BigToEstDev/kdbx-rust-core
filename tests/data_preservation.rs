@@ -17,7 +17,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use onekeepass_core::db_service::{self, EntryCategory};
+use kdbx_rust_core::db_service::{self, EntryCategory};
 
 const PASSWORD: &str = "test-pass-1234";
 const FIXTURE: &str = "okp_entry_types.kdbx";

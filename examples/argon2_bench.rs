@@ -15,7 +15,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use onekeepass_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::db_service::{self, NewDatabase};
 
 const PASSWORD: &str = "bench-pass-1234";
 const WARMUP_RUNS: usize = 1;
@@ -122,7 +122,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let dir = std::env::temp_dir().join("onekeepass_argon2_bench");
+    let dir = std::env::temp_dir().join("kdbx_argon2_bench");
     std::fs::create_dir_all(&dir).unwrap();
     common::init_key_main_store();
 

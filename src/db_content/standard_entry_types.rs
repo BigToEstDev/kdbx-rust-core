@@ -22,7 +22,8 @@ macro_rules! build_uuid {
 // IMPORTANT:
 // As we add more standard types, we need to ensure to add that name here
 // In 'STANDARD_TYPE_UUIDS_BY_NAME' and in 'UUID_TO_ENTRY_TYPE_MAP'
-// Also these names are to be added in 'src/main/onekeepass/frontend/constants.cljs'
+// These names are part of the file format, not of any one client: an entry type name written here
+// is what other programs read back. (The upstream project also mirrored them in its cljs frontend.)
 
 // All standard types available for UI to use
 pub const STANDARD_TYPE_NAMES: &[&str] = &[
@@ -84,7 +85,7 @@ lazy_static! {
     pub static ref DEFAULT_ENTRY_TYPE: EntryType = EntryType {
 
 
-        // onekeepass_core::db_content::entry_type::EntryTypeV  pub(crate) fn changed(&self, other: &EntryType) -> bool
+        // kdbx_rust_core::db_content::entry_type::EntryTypeV  pub(crate) fn changed(&self, other: &EntryType) -> bool
 
         // It appears we can add more sections or field defs to the standard entry types as long as FieldDef or Section are not changed
         // We should be able to read the previously stored entry types data and use the latest defined standard entry type
@@ -94,7 +95,7 @@ lazy_static! {
 
         // Similarly we can drop a section or field def from standard entry type definition (Not yet tested)
 
-        // Also see - pub(crate) fn changed(&self, other: &EntryType) -> bool of onekeepass_core::db_content::entry_type::EntryTypeV
+        // Also see - pub(crate) fn changed(&self, other: &EntryType) -> bool of kdbx_rust_core::db_content::entry_type::EntryTypeV
         // Here we compare the entry type's section by section to identify any changes between incoming and standard type
         // Not sure how this impacts if we add new section or field def, though did not see any issue so far.
 

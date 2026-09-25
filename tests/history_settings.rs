@@ -7,8 +7,8 @@
 
 mod common;
 
-use onekeepass_core::db_content;
-use onekeepass_core::db_service::{self, DbSettings, NewDatabase};
+use kdbx_rust_core::db_content;
+use kdbx_rust_core::db_service::{self, DbSettings, NewDatabase};
 use uuid::Uuid;
 
 const PASSWORD: &str = "history-settings-1234";

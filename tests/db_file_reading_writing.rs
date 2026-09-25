@@ -1,7 +1,7 @@
 mod common;
 
-use onekeepass_core::db_content;
-use onekeepass_core::db_service::{self, *};
+use kdbx_rust_core::db_content;
+use kdbx_rust_core::db_service::{self, *};
 use uuid::Uuid;
 
 // All the databases used by these tests are created on the fly under the OS temp dir

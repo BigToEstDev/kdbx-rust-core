@@ -23,9 +23,9 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use onekeepass_core::db_content;
-use onekeepass_core::db_service::{self, NewDatabase};
-use onekeepass_core::util;
+use kdbx_rust_core::db_content;
+use kdbx_rust_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::util;
 use uuid::Uuid;
 
 const PASSWORD: &str = "bench-pass-1234";
@@ -208,7 +208,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let dir = std::env::temp_dir().join("onekeepass_compression_bench");
+    let dir = std::env::temp_dir().join("kdbx_compression_bench");
     std::fs::create_dir_all(&dir).unwrap();
     common::init_key_main_store();
 

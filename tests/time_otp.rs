@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use onekeepass_core::db_service::{self, EntryCategory, OtpSettings};
+use kdbx_rust_core::db_service::{self, EntryCategory, OtpSettings};
 use uuid::Uuid;
 
 const PASSWORD: &str = "test-pass-1234";

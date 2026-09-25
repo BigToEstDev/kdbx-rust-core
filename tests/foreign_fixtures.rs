@@ -14,7 +14,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use onekeepass_core::db_service::{self, EntryCategory};
+use kdbx_rust_core::db_service::{self, EntryCategory};
 
 const PASSWORD: &str = "test-pass-1234";
 

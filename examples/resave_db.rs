@@ -12,7 +12,7 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use onekeepass_core::db_service;
+use kdbx_rust_core::db_service;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

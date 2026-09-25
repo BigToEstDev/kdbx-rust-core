@@ -2,7 +2,7 @@ mod common;
 
 use std::io::Read;
 
-use onekeepass_core::db_service::{self, *};
+use kdbx_rust_core::db_service::{self, *};
 
 fn temp_path(name: &str) -> String {
     let mut p = std::env::temp_dir();

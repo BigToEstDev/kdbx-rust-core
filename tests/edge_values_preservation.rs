@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::xml::{parse_xml, Node};
-use onekeepass_core::db_service;
+use kdbx_rust_core::db_service;
 
 const PASSWORD: &str = "test-pass-1234";
 const FIXTURE: &str = "edge_values_41.kdbx";

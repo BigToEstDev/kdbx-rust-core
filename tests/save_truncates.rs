@@ -11,7 +11,7 @@
 
 mod common;
 
-use onekeepass_core::db_service::{self, DbSettings, Error, NewDatabase};
+use kdbx_rust_core::db_service::{self, DbSettings, Error, NewDatabase};
 
 const PASSWORD: &str = "save-truncates-1234";
 // Несжимаемое имя такого размера делает старый файл заметно больше нового

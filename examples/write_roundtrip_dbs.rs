@@ -13,8 +13,8 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use onekeepass_core::db_content;
-use onekeepass_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::db_content;
+use kdbx_rust_core::db_service::{self, NewDatabase};
 use uuid::Uuid;
 
 // Значения должны совпадать с verify_roundtrip.py — он их проверяет

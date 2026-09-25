@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use onekeepass_core::{
+use kdbx_rust_core::{
     db_service as kp_service,
     db_service::{KeyStoreOperation, KeyStoreService},
 };

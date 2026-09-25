@@ -1,8 +1,12 @@
 [package]
-name = "onekeepass-core"
+name = "kdbx-rust-core"
 version = "0.25.0"
-authors = ["jeyasankar"]
+authors = ["BigToEstDev"]
 edition = "2021"
+## Originally onekeepass-core by jeyasankar (GPL-3.0). This is now an independent project: the api
+## and the internals have diverged far enough that upstream is no longer merged, but the code
+## descends from it and stays under the same licence -- see README.md and LICENSE.
+license = "GPL-3.0-only"
 ## Не попадает в архив при `cargo package` / публикации крейта. На `cargo build` и на
 ## сборку под Android не влияет — dev-инструменты и тестовые данные и так вне `src/`.
 exclude = ["tools/", "tests/resources/", ".venv/"]
@@ -96,7 +100,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
 ## Cyclic dev-dependency on purpose: it turns on `xml-dump` for the test build only, so the
 ## data-preservation tests can dump the database as xml, while normal and Android builds
 ## (and the FFI surface) have no such export.
-onekeepass-core = { path = ".", features = ["xml-dump", "csv-import"] }
+kdbx-rust-core = { path = ".", features = ["xml-dump", "csv-import"] }
 
 env_logger = "0.11.8"
 test-context = "=0.4.1"

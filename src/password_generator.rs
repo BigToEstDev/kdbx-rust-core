@@ -66,7 +66,7 @@ impl PasswordGenerationOptions {
             strict: self.strict,
         };
         // extern crate passwords returns error as static &str and this is
-        // converted to 'crate::onekeepass_core::error::Error implementing From trait
+        // converted to 'crate::kdbx_rust_core::error::Error implementing From trait
         Ok(pg.generate_one()?)
     }
 
