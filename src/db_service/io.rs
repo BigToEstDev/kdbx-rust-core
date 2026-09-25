@@ -16,14 +16,23 @@ use crate::kdbx_context_mut_action;
 use crate::error::{Error, Result};
 
 use crate::db::{
-    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file, KdbxFile,
+    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file,
 };
+// Used only by write_new_db_kdbx_file below (feature `csv-import`)
+#[cfg(feature = "csv-import")]
+use crate::db::KdbxFile;
 use crate::util::{self};
 
 // For now it is used in desktop
 // TODO: To use in mobile also, we need to fix calling 'save_kdbx_with_backup'
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+// Only the parked csv import creates a database through a path (feature `csv-import`); everything
+// else goes through create_and_write_to_writer. Step 20 p.2 keeps the desktop bound of the original
+// code: a stream-based variant is part of the import work when it is picked up.
+#[cfg(all(
+    feature = "csv-import",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 pub(crate) fn write_new_db_kdbx_file(kdbx_file: KdbxFile) -> Result<KdbxLoaded> {
     debug!("write_new_db_kdbx_file is called ");
 

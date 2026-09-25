@@ -49,7 +49,9 @@ quick-xml = "0.41.0"
 
 nom = "7.1.3"
 
-csv = "1.4.0"
+## Only the parked csv import uses it -- pulled in by the feature `csv-import`, so neither the
+## normal build nor the Android build carries it.
+csv = { version = "1.4.0", optional = true }
 
 
 ## rusqlite = { version = "0.32.0", features = ["bundled"] }
@@ -82,6 +84,10 @@ desktop-ssh-agent = []
 ## (all passwords in plain text) to a file. Off by default -- not part of the public API.
 ## Enabled for the test build through the self dev-dependency below.
 xml-dump = []
+## Dev-only: the parked csv import (src/import, upstream code). Off by default -- not in v1, not in
+## the FFI, see the comment on `mod import` in src/lib.rs. Enabled for the test build so its 63
+## tests keep running. Needs a desktop target (create_new_db writes through a path).
+csv-import = ["csv"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
@@ -90,7 +96,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
 ## Cyclic dev-dependency on purpose: it turns on `xml-dump` for the test build only, so the
 ## data-preservation tests can dump the database as xml, while normal and Android builds
 ## (and the FFI surface) have no such export.
-onekeepass-core = { path = ".", features = ["xml-dump"] }
+onekeepass-core = { path = ".", features = ["xml-dump", "csv-import"] }
 
 env_logger = "0.11.8"
 test-context = "=0.4.1"
