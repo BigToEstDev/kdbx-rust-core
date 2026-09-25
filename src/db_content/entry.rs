@@ -17,6 +17,7 @@ use crate::util;
 
 use super::meta::MetaShare;
 use super::otp::{CurrentOtpTokenData, OtpData};
+use super::time_otp;
 use super::Meta;
 
 // To carry additional entry field grouping and for easy KV data lookup
@@ -606,8 +607,13 @@ impl Entry {
     // Checks the whether the value of a field starts with otp url and parses if it is an valid otp url
     // and stores in the map with the field name as key and parsed value as value
     // However if parsing a otp url fails, then nothing is set for that field in this map
+    //
+    // Entries written by the original KeePass 2.47+ keep their totp in separate fields instead of
+    // an url (see db_content/time_otp.rs); those are read as a second source below and land in the
+    // same map, keyed by the field holding the secret. Everything downstream - the entry form, the
+    // list row and the polling - addresses a token by its field name and so needs no change
     fn parse_all_otp_fields(&mut self) {
-        let otp_vals: HashMap<String, OtpData> = self
+        let mut otp_vals: HashMap<String, OtpData> = self
             .entry_field
             .get_key_values()
             .into_iter()
@@ -625,6 +631,19 @@ impl Entry {
                 }
             })
             .collect();
+
+        // A field that cannot be used is skipped with a log line, exactly as an unparseable url is:
+        // the entry still opens, and its fields are left untouched so saving cannot damage them
+        if let Some(parsed) = time_otp::parse(&self.field_values()) {
+            match parsed
+                .and_then(|t| OtpData::from_otp_settings(&t.settings).map(|d| (t.secret_field, d)))
+            {
+                Ok((secret_field, otp_data)) => {
+                    otp_vals.insert(secret_field.to_string(), otp_data);
+                }
+                Err(e) => info!("TimeOtp fields parsing failed with error {}", e),
+            }
+        }
 
         if !otp_vals.is_empty() {
             self.parsed_otp_values = Some(otp_vals);
@@ -1433,6 +1452,81 @@ mod tests {
     fn list_otp_token_data_is_none_for_an_unparseable_url() {
         let e = entry_with_otp_fields(&[("otp", "otpauth://totp/no-secret-here")]);
         assert!(e.list_otp_token_data().is_none());
+    }
+    // TimeOtp fields of the original KeePass 2.47+ (Step 21) - see db_content/time_otp.rs
+
+    // The RFC 6238 test secret "12345678901234567890" as Base32
+    const TIME_OTP_TEST_SECRET: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    #[test]
+    fn a_time_otp_entry_gives_a_token_keyed_by_its_secret_field() {
+        let e = entry_with_otp_fields(&[("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET)]);
+
+        let token = e
+            .current_otp_token_data("TimeOtp-Secret-Base32")
+            .expect("a token is generated from the TimeOtp fields");
+        assert_eq!(token.token.len(), 6);
+        assert_eq!(token.period, 30);
+    }
+
+    #[test]
+    fn the_time_otp_period_and_length_reach_the_token() {
+        let e = entry_with_otp_fields(&[
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+            ("TimeOtp-Period", "60"),
+            ("TimeOtp-Length", "8"),
+        ]);
+
+        let token = e.current_otp_token_data("TimeOtp-Secret-Base32").unwrap();
+        assert_eq!(token.token.len(), 8);
+        assert_eq!(token.period, 60);
+    }
+
+    #[test]
+    fn an_entry_holding_both_formats_gives_a_token_for_each_field() {
+        let e = entry_with_otp_fields(&[
+            ("otp", &otp_url(TIME_OTP_TEST_SECRET)),
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+        ]);
+
+        assert!(e.current_otp_token_data("otp").is_some());
+        assert!(e.current_otp_token_data("TimeOtp-Secret-Base32").is_some());
+    }
+
+    // One list row has room for a single code, and the url field stays the one it shows
+    #[test]
+    fn a_list_row_prefers_the_url_field_when_an_entry_holds_both_formats() {
+        let e = entry_with_otp_fields(&[
+            ("otp", &otp_url(TIME_OTP_TEST_SECRET)),
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+        ]);
+
+        let (field_name, _data) = e.list_otp_token_data().expect("one code for the row");
+        assert_eq!(field_name, "otp");
+    }
+
+    #[test]
+    fn unusable_time_otp_fields_leave_the_entry_without_a_token() {
+        // An undecodable secret, and a period outside what the core supports (1 - 60 seconds)
+        for fields in [
+            vec![("TimeOtp-Secret-Base32", "not base32 !!")],
+            vec![
+                ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+                ("TimeOtp-Period", "90"),
+            ],
+        ] {
+            let e = entry_with_otp_fields(&fields);
+            assert!(
+                e.parsed_otp_values.is_none(),
+                "{:?} must not produce a token",
+                fields
+            );
+            // The fields themselves are left alone, so saving cannot damage them
+            assert!(e
+                .entry_field
+                .find_key_value("TimeOtp-Secret-Base32")
+                .is_some());
+        }
     }
 }
 

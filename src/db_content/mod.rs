@@ -7,6 +7,7 @@ mod meta;
 mod otp;
 mod root;
 mod standard_entry_types;
+mod time_otp;
 mod unknown_element;
 
 pub(crate) use self::custom_data::{CustomData, Item};
