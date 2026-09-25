@@ -855,6 +855,126 @@ def build_edge_fixture():
     return db_path
 
 
+# --- Фикстура TOTP формата KeePass 2.47+ (Step 21) ---------------------------
+#
+# Оригинальный KeePass хранит 2FA не в поле `otp` с `otpauth://` (так делают
+# KeePassXC / KeePassDX и мы), а в отдельных строковых полях `TimeOtp-*`.
+# Настоящего KeePass под рукой нет, поэтому поля пишутся по документации формата:
+# фикстура проверяет НАШ разбор и round-trip, но не совместимость с самим KeePass.
+# Секрет допускается в четырёх кодировках — каждая в своей записи.
+TIME_OTP_FIXTURE = "time_otp_41.kdbx"
+
+# Тестовый секрет RFC 6238 "12345678901234567890" в каждой кодировке
+TOTP_SECRET_BASE32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+TOTP_SECRET_HEX = "3132333435363738393031323334353637383930"
+TOTP_SECRET_BASE64 = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
+TOTP_SECRET_PLAIN = "12345678901234567890"
+
+# Значение алгоритма как URI XML-dsig — вторая из допустимых записей наряду с
+# коротким именем вида HMAC-SHA-256
+SHA256_URI = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha256"
+
+TIME_OTP_UUIDS = {
+    "group": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a01",
+    "base32": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a02",
+    "hex": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a03",
+    "base64": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a04",
+    "plain": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a05",
+    "params": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a06",
+    "broken": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a07",
+    "both": "b1f41f2c-6c1a-4f2e-9c0e-7a5d3e8c1a08",
+}
+
+# (ключ uuid, заголовок, поля TimeOtp, поле otp)
+TIME_OTP_ENTRIES = [
+    ("base32", "Base32 Secret", {"TimeOtp-Secret-Base32": TOTP_SECRET_BASE32}, None),
+    ("hex", "Hex Secret", {"TimeOtp-Secret-Hex": TOTP_SECRET_HEX}, None),
+    ("base64", "Base64 Secret", {"TimeOtp-Secret-Base64": TOTP_SECRET_BASE64}, None),
+    ("plain", "Plain Secret", {"TimeOtp-Secret": TOTP_SECRET_PLAIN}, None),
+    # Все параметры не по умолчанию: период, длина и алгоритм в виде URI
+    (
+        "params",
+        "All Parameters",
+        {
+            "TimeOtp-Secret-Base32": TOTP_SECRET_BASE32,
+            "TimeOtp-Period": "60",
+            "TimeOtp-Length": "8",
+            "TimeOtp-Algorithm": SHA256_URI,
+        },
+        None,
+    ),
+    # Нечитаемый секрет: ядро не должно ни падать, ни портить поле при сохранении
+    ("broken", "Broken Secret", {"TimeOtp-Secret-Base32": "not base32 !!"}, None),
+    # Оба формата в одной записи: у каждого поля свой код, в списке выигрывает otp
+    ("both", "Both Formats", {"TimeOtp-Secret-Base32": TOTP_SECRET_BASE32}, TOTP_URL),
+]
+
+# Поле-секрет KeePass помечает protected, параметры — нет
+TIME_OTP_PROTECTED = (
+    "TimeOtp-Secret",
+    "TimeOtp-Secret-Hex",
+    "TimeOtp-Secret-Base32",
+    "TimeOtp-Secret-Base64",
+)
+
+
+def time_otp_uuid(key):
+    # b64_uuid работает по таблице AF_UUIDS, здесь своя таблица
+    return base64.b64encode(uuid_mod.UUID(TIME_OTP_UUIDS[key]).bytes).decode("ascii")
+
+
+def fill_time_otp_entries(kp, group):
+    for key, title, fields, otp_url in TIME_OTP_ENTRIES:
+        entry = kp.add_entry(group, title, "totp-user", "totp-pass-1")
+        entry._element.find("UUID").text = time_otp_uuid(key)
+        for field, value in fields.items():
+            entry.set_custom_property(field, value, protect=field in TIME_OTP_PROTECTED)
+        if otp_url:
+            # 'otp' у pykeepass — зарезервированный ключ, ставится через свойство
+            entry.otp = otp_url
+
+
+def verify_time_otp_fixture(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    assert kp.kdbx.header.value.minor_version == 1, "ожидался KDBX 4.1"
+
+    for key, title, fields, otp_url in TIME_OTP_ENTRIES:
+        wanted = uuid_mod.UUID(TIME_OTP_UUIDS[key])
+        entry = next((e for e in kp.entries if e.uuid == wanted), None)
+        assert entry is not None, "запись %s не найдена" % title
+        for field, value in fields.items():
+            actual = entry.get_custom_property(field)
+            assert actual == value, "%s: %s = %r" % (title, field, actual)
+        if otp_url:
+            assert entry.otp == otp_url
+
+
+def build_time_otp_fixture():
+    db_path = OUT_DIR / TIME_OTP_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    group = kp.add_group(kp.root_group, "TimeOtp")
+    group._element.find("UUID").text = time_otp_uuid("group")
+    fill_time_otp_entries(kp, group)
+
+    kp.save()
+    verify_time_otp_fixture(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -996,6 +1116,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (граничные значения полей)"
         % (EDGE_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_time_otp_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (TOTP формата KeePass 2.47+)"
+        % (TIME_OTP_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 

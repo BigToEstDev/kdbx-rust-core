@@ -192,7 +192,19 @@ pub mod entry_keyvalue_key {
     pub const NOTES: &str = "Notes";
     pub const USER_NAME: &str = "UserName";
     pub const PASSWORD: &str = "Password";
+    // TOTP as KeePassXC / KeePassDX and we write it: one field holding an otpauth:// url
     pub const OTP: &str = "otp";
+
+    // TOTP as the original KeePass 2.47+ writes it: separate string fields. The secret may come in
+    // any one of the four encodings below; the rest are optional and default to 30 seconds,
+    // 6 digits and SHA1. See db_content/time_otp.rs
+    pub const TIME_OTP_SECRET: &str = "TimeOtp-Secret";
+    pub const TIME_OTP_SECRET_HEX: &str = "TimeOtp-Secret-Hex";
+    pub const TIME_OTP_SECRET_BASE32: &str = "TimeOtp-Secret-Base32";
+    pub const TIME_OTP_SECRET_BASE64: &str = "TimeOtp-Secret-Base64";
+    pub const TIME_OTP_PERIOD: &str = "TimeOtp-Period";
+    pub const TIME_OTP_LENGTH: &str = "TimeOtp-Length";
+    pub const TIME_OTP_ALGORITHM: &str = "TimeOtp-Algorithm";
     pub const URL: &str = "URL";
     pub const ADDITIONAL_URLS: &str = "Additional URLs";
 
