@@ -6,7 +6,7 @@ pub(crate) mod parsing;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{db::KdbxFile, db_content::Meta, util};
+use crate::{db::KdbxFile, db_content::Meta};
 
 pub use self::categories::*;
 pub use self::entry::*;
@@ -84,7 +84,7 @@ impl From<&KdbxFile> for KdbxLoaded {
 
         cfg_if::cfg_if! {
             if #[cfg(any(target_os = "macos",target_os = "windows",target_os = "linux"))] {
-                (file_name,key_file_name) = (util::file_name(kdbx_file.get_database_file_name()),kdbx_file.get_key_file_name());
+                (file_name,key_file_name) = (crate::util::file_name(kdbx_file.get_database_file_name()),kdbx_file.get_key_file_name());
             } else {
                 // In case of Mobile. Needs fixing to set 'file_name'
 

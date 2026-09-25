@@ -179,6 +179,10 @@ impl Default for KdbxContext {
     }
 }
 
+// Both callers are desktop only - create_kdbx and write_new_db_kdbx_file, which persist a new
+// database by path. On mobile a new database is created through create_and_write_to_writer and
+// reaches the cache from there, so without this cfg the Android build warns about dead code.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 impl KdbxContext {
     // Add the newly created KdbxFile to cache for UI use
     fn insert(kdbx_file: KdbxFile) {
