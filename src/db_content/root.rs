@@ -246,6 +246,8 @@ impl Root {
         self.all_groups.get_mut(group_uuid)
     }
 
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub fn group_by_name(&self, name: &str) -> Option<&Group> {
         // Returns the first matching group
         self.all_groups.values().find(|g| g.name == name)

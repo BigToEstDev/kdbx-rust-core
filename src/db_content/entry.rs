@@ -311,6 +311,8 @@ impl Entry {
         self
     }
 
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub(crate) fn set_tags(&mut self, tags: &str) -> &mut Self {
         self.tags = tags.into();
         self
@@ -334,6 +336,8 @@ impl Entry {
     }
 
     // An Entry with default login entry type
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub(crate) fn new_login_entry(parent_group_uuid: Option<&Uuid>) -> Self {
         let entry_type_uuid = crate::build_uuid!(crate::constants::entry_type_uuid::LOGIN);
         Entry::new_blank_entry_by_type_id(&entry_type_uuid, None, parent_group_uuid)
@@ -1152,6 +1156,8 @@ impl KeyValue {
         }
     }
 
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub(crate) fn from(key: String, value: String, protected: bool) -> Self {
         KeyValue {
             key,

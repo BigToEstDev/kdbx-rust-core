@@ -170,6 +170,8 @@ pub enum Error {
     #[error("UnRecoverableError: {0}")]
     UnRecoverableError(String),
 
+    // Only the csv import produces this, and it is behind the feature `csv-import`
+    #[cfg(feature = "csv-import")]
     #[error("CsvImportError: {0}")]
     CsvImportError(#[from] csv::Error),
 }

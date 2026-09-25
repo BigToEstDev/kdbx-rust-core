@@ -7,24 +7,32 @@ use super::{
     call_kdbx_context_mut_action, main_store, KdbxContext, KdbxLoaded, KdbxSaved, NewDatabase,
     SaveAllResponse, SaveStatus,
 };
-use crate::db_content::KeepassFile;
-
-use crate::db_service::call_main_content_action;
-
 // macros
-use crate::{kdbx_context_mut_action, main_content_action, to_keepassfile};
+use crate::to_keepassfile;
+// Used only by the dev-only XML dump (feature `xml-dump`).
+#[cfg(feature = "xml-dump")]
+use crate::kdbx_context_mut_action;
 
 use crate::error::{Error, Result};
 
 use crate::db::{
-    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file, KdbxFile,
+    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file,
 };
+// Used only by write_new_db_kdbx_file below (feature `csv-import`)
+#[cfg(feature = "csv-import")]
+use crate::db::KdbxFile;
 use crate::util::{self};
 
 // For now it is used in desktop
 // TODO: To use in mobile also, we need to fix calling 'save_kdbx_with_backup'
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+// Only the parked csv import creates a database through a path (feature `csv-import`); everything
+// else goes through create_and_write_to_writer. Step 20 p.2 keeps the desktop bound of the original
+// code: a stream-based variant is part of the import work when it is picked up.
+#[cfg(all(
+    feature = "csv-import",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 pub(crate) fn write_new_db_kdbx_file(kdbx_file: KdbxFile) -> Result<KdbxLoaded> {
     debug!("write_new_db_kdbx_file is called ");
 
@@ -482,13 +490,9 @@ pub fn generate_key_file(key_file_name: &str) -> Result<()> {
     db::create_key_file(key_file_name)
 }
 
-pub fn export_main_content_as_xml(db_key: &str, xml_file_name: &str) -> Result<()> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        db::export_db_main_content_as_xml(k, xml_file_name)
-    })
-}
-
+// Dev-only XML dump, behind the feature `xml-dump` (off by default) -- see db::export_as_xml.
 // This will call before_xml_writing and any attachemnt hash to ref conversion is done
+#[cfg(feature = "xml-dump")]
 pub fn export_as_xml(db_key: &str, xml_file_name: &str) -> Result<()> {
     kdbx_context_mut_action!(db_key, |ctx: &mut KdbxContext| {
         db::export_as_xml(&mut ctx.kdbx_file, Some(xml_file_name))

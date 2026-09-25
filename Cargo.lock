@@ -889,6 +889,7 @@ dependencies = [
  "log",
  "nom",
  "once_cell",
+ "onekeepass-core",
  "passwords",
  "psl",
  "quick-xml",

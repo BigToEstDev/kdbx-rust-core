@@ -11,7 +11,10 @@ use std::hash::Hasher;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use log::{debug, error, info};
+use log::{debug, error};
+// Used only by the dev-only XML dump below.
+#[cfg(feature = "xml-dump")]
+use log::info;
 use serde::{Deserialize, Serialize};
 
 use self::kdbx_file::InnerHeader;
@@ -25,6 +28,9 @@ use crate::{crypto, error};
 use crate::db_content::*;
 use crate::error::{Error, Result};
 use crate::util;
+// The database body is written through reader_writer; db/mod.rs touches xml_parse only for
+// the dev-only XML dump below.
+#[cfg(feature = "xml-dump")]
 use crate::xml_parse;
 use kdbx_file::MainHeader;
 
@@ -780,11 +786,14 @@ pub fn write_kdbx_file_with_backup_file(
     }
 }
 
-// See comment in KdbxFileReader::read_xml_content to use this function to dump the raw xml
-// obtained after decrypting the database. Useful for debugging
-// when read the database file created by other programs
+// Dev-only XML dump, behind the feature `xml-dump` (off by default). Step 20: the XML export was
+// removed from the public API -- it wrote the whole database (all passwords in plain text) to any
+// path and the core did not own that file afterwards. Kept as a debugging tool to inspect the
+// decrypted XML of a database written by another program: see KdbxFileReader::read_xml_content.
+// Import from xml was removed in Step 14 (p.5.5): v1 imports Chrome CSV / KeePass CSV, not xml.
 
 // Writes the xml bytes data to a file as xml
+#[cfg(feature = "xml-dump")]
 fn write_xml_to_file(xml_file_name: &str, xml_bytes: &[u8]) -> Result<()> {
     let mut file = File::create(xml_file_name)?;
     file.write_all(xml_bytes)?;
@@ -792,11 +801,9 @@ fn write_xml_to_file(xml_file_name: &str, xml_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-// Exposed to the UI as db_service::export_as_xml. Import from xml was removed in Step 14 (p.5.5):
-// v1 imports Chrome CSV / KeePass CSV, not xml.
-
 /// Exports the keepass database content as xml using the same format used in KeePass's xml content
 /// All protected field values are decrypted and are in plain text format. No attachments data will be exported
+#[cfg(feature = "xml-dump")]
 pub fn export_as_xml(kdbx_file: &mut KdbxFile, xml_file_name: Option<&str>) -> Result<()> {
     let fname = xml_file_name.unwrap_or("xml_dump.xml");
     if let Some(ref mut kp) = kdbx_file.keepass_main_content {
@@ -809,15 +816,6 @@ pub fn export_as_xml(kdbx_file: &mut KdbxFile, xml_file_name: Option<&str>) -> R
         let data = xml_parse::write_xml_with_indent(kp, None)?;
         write_xml_to_file(fname, &data)?;
     }
-    Ok(())
-}
-
-pub fn export_db_main_content_as_xml(
-    keepass_main_content: &KeepassFile,
-    xml_file_name: &str,
-) -> Result<()> {
-    let data = xml_parse::write_xml_with_indent(keepass_main_content, None)?;
-    write_xml_to_file(xml_file_name, &data)?;
     Ok(())
 }
 

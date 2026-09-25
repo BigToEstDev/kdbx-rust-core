@@ -71,6 +71,8 @@ impl EntryTypeV1 {
         v.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>()
     }
 
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub(crate) fn add_section(&mut self, section: &Section) {
         // Add the passed section with its field definitions only if is not done earlier
         if !self.sections.iter().any(|s| s.name == section.name) {
@@ -514,6 +516,8 @@ impl Section {
         }
     }
 
+    // Used only by the parked csv import (feature `csv-import`)
+    #[cfg(feature = "csv-import")]
     pub(crate) fn new_custom_field_section(field_names: Vec<&str>) -> Self {
         let field_defs = field_names
             .iter()

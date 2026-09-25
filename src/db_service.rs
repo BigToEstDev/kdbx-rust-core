@@ -57,8 +57,8 @@ pub use attachment::{
 pub use io::*;
 
 // pub use io::{
-//     create_and_write_to_writer, create_kdbx, export_as_xml,
-//     export_main_content_as_xml, generate_key_file, load_kdbx, read_and_verify_db_file, read_kdbx,
+//     create_and_write_to_writer, create_kdbx, generate_key_file, load_kdbx,
+//     read_and_verify_db_file, read_kdbx,
 //     reload_kdbx, save_all_modified_dbs_with_backups, save_as_kdbx,
 //     save_kdbx_to_writer, save_kdbx_with_backup, save_to_db_file,
 // };
@@ -107,10 +107,12 @@ pub use custom_icon::{
     set_group_custom_icon,
 };
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+// Behind the default-off feature `csv-import` -- see the comment on `mod import` in lib.rs.
+// Not part of the v1 API surface.
+#[cfg(feature = "csv-import")]
 pub use crate::import::csv_reader::{CsvImport, CsvImportMapping, CsvImportOptions, CvsHeaderInfo};
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(feature = "csv-import")]
 pub use crate::import::profile::{
     all_profiles, profile_mapping, DetectedProfile, ProfileInfo, SuggestedMapping,
 };
