@@ -123,7 +123,12 @@ impl KeyValueData {
 
     // Called to generate an otp token if there is a parsed otp data available for this KV
     // The data type will be overriden to be 'OneTimePassword'
-    fn _generate_otp_on_check(&mut self, parsed_otp_values: &Option<HashMap<String, OtpData>>) {
+    //
+    // Used for custom fields, where there is no field definition to declare the data type: an entry
+    // from the original KeePass keeps its totp in the custom fields TimeOtp-* (db_content/time_otp.rs)
+    // and a field may also hold an otpauth url created in another app. Both are recognised while
+    // reading the entry, so a parsed value here means this field is a one-time password field
+    fn generate_otp_on_check(&mut self, parsed_otp_values: &Option<HashMap<String, OtpData>>) {
         if let Some(m) = parsed_otp_values.as_ref() {
             if m.contains_key(&self.key) {
                 // We need to set data type as this field has a valid otp url
@@ -388,11 +393,11 @@ impl EntryFormData {
             // Need to figure out what to do for languages other than 'en'
             if let Some(mut all_custom_fields_kv_data) = section_fields.remove(&*CUSTOM_FILEDS) {
                 all_custom_fields_kv_data.extend(fields.values().map(|kv| {
-                    // let mut kvd: KeyValueData = kv.into();
-                    // There is a possibility a field may have a valid totp url created in other app
-                    // In that case, we need to generate token and set its data type
-                    // kvd.generate_otp_on_check(&entry.parsed_otp_values);
-                    kv.into()
+                    let mut kvd: KeyValueData = kv.into();
+                    // A custom field may carry a totp itself: the TimeOtp-* fields of the original
+                    // KeePass, or an otpauth url created in another app
+                    kvd.generate_otp_on_check(&entry.parsed_otp_values);
+                    kvd
                 }));
                 section_fields.insert(CUSTOM_FILEDS.clone(), all_custom_fields_kv_data);
             } else {
@@ -402,12 +407,10 @@ impl EntryFormData {
                     fields
                         .values()
                         .map(|kv| {
-                            // let mut kvd: KeyValueData = kv.into();
-                            // There is a possibility a field may have a valid totp url created in other app
-                            // In that case, we need to generate token and set its data type
-                            // kvd.generate_otp_on_check(&entry.parsed_otp_values);
-
-                            kv.into()
+                            let mut kvd: KeyValueData = kv.into();
+                            // Same as above: a custom field may itself hold a totp
+                            kvd.generate_otp_on_check(&entry.parsed_otp_values);
+                            kvd
                         })
                         .collect(),
                 );
