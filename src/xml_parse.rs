@@ -1397,6 +1397,8 @@ impl<W: Write> XmlWriter<W> {
         }
     }
 
+    // Indented xml is written only by the dev-only dump (feature `xml-dump`) and by tests.
+    #[cfg(any(test, feature = "xml-dump"))]
     pub fn new_with_indent(writer: W, cipher: Option<ProtectedContentStreamCipher>) -> Self {
         Self {
             writer: QuickXmlWriter::new_with_indent(writer, b" "[0], 2),
@@ -1947,6 +1949,9 @@ pub fn write_xml(
     Ok(v)
 }
 
+// Only the dev-only XML dump (db::export_as_xml, feature `xml-dump`) and tests write indented xml;
+// the database itself is written by write_xml above.
+#[cfg(any(test, feature = "xml-dump"))]
 pub fn write_xml_with_indent(
     kp: &KeepassFile,
     cipher: Option<ProtectedContentStreamCipher>,

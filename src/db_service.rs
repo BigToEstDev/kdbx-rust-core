@@ -57,8 +57,8 @@ pub use attachment::{
 pub use io::*;
 
 // pub use io::{
-//     create_and_write_to_writer, create_kdbx, export_as_xml,
-//     export_main_content_as_xml, generate_key_file, load_kdbx, read_and_verify_db_file, read_kdbx,
+//     create_and_write_to_writer, create_kdbx, generate_key_file, load_kdbx,
+//     read_and_verify_db_file, read_kdbx,
 //     reload_kdbx, save_all_modified_dbs_with_backups, save_as_kdbx,
 //     save_kdbx_to_writer, save_kdbx_with_backup, save_to_db_file,
 // };

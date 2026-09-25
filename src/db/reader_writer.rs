@@ -343,7 +343,8 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
     }
 
     fn read_xml_content(&mut self, xml_bytes: &[u8]) -> Result<()> {
-        // To see the decrypted XML during development: db_service::export_as_xml
+        // To see the decrypted XML during development: db_service::export_as_xml,
+        // available only with the dev feature `xml-dump`
 
         let cipher = ProtectedContentStreamCipher::try_from(
             self.kdbx_file.inner_header.stream_cipher_id,

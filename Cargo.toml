@@ -78,11 +78,20 @@ features = ["common-password"]
 
 [features]
 desktop-ssh-agent = []
+## Dev-only: re-adds db_service::export_as_xml, which dumps the whole decrypted database
+## (all passwords in plain text) to a file. Off by default -- not part of the public API.
+## Enabled for the test build through the self dev-dependency below.
+xml-dump = []
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
 
 [dev-dependencies]
+## Cyclic dev-dependency on purpose: it turns on `xml-dump` for the test build only, so the
+## data-preservation tests can dump the database as xml, while normal and Android builds
+## (and the FFI surface) have no such export.
+onekeepass-core = { path = ".", features = ["xml-dump"] }
+
 env_logger = "0.11.8"
 test-context = "=0.4.1"
 ## Used only by db_merge/merge_tests/common.rs

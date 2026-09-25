@@ -7,12 +7,11 @@ use super::{
     call_kdbx_context_mut_action, main_store, KdbxContext, KdbxLoaded, KdbxSaved, NewDatabase,
     SaveAllResponse, SaveStatus,
 };
-use crate::db_content::KeepassFile;
-
-use crate::db_service::call_main_content_action;
-
 // macros
-use crate::{kdbx_context_mut_action, main_content_action, to_keepassfile};
+use crate::to_keepassfile;
+// Used only by the dev-only XML dump (feature `xml-dump`).
+#[cfg(feature = "xml-dump")]
+use crate::kdbx_context_mut_action;
 
 use crate::error::{Error, Result};
 
@@ -482,13 +481,9 @@ pub fn generate_key_file(key_file_name: &str) -> Result<()> {
     db::create_key_file(key_file_name)
 }
 
-pub fn export_main_content_as_xml(db_key: &str, xml_file_name: &str) -> Result<()> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        db::export_db_main_content_as_xml(k, xml_file_name)
-    })
-}
-
+// Dev-only XML dump, behind the feature `xml-dump` (off by default) -- see db::export_as_xml.
 // This will call before_xml_writing and any attachemnt hash to ref conversion is done
+#[cfg(feature = "xml-dump")]
 pub fn export_as_xml(db_key: &str, xml_file_name: &str) -> Result<()> {
     kdbx_context_mut_action!(db_key, |ctx: &mut KdbxContext| {
         db::export_as_xml(&mut ctx.kdbx_file, Some(xml_file_name))
