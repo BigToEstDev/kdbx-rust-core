@@ -20,7 +20,11 @@ use crate::{
         TIME_OTP_ALGORITHM, TIME_OTP_LENGTH, TIME_OTP_PERIOD, TIME_OTP_SECRET,
         TIME_OTP_SECRET_BASE32, TIME_OTP_SECRET_BASE64, TIME_OTP_SECRET_HEX,
     },
-    db_content::otp::{OtpAlgorithm, OtpSettings},
+    db_content::{
+        entry::{EntryField, KeyValue},
+        entry_type::FieldDataType,
+        otp::{OtpAlgorithm, OtpData, OtpSettings},
+    },
     error::{Error, Result},
     util::strip_spaces,
 };
@@ -34,6 +38,10 @@ pub(crate) enum SecretEncoding {
     Base32,
     Base64,
 }
+
+// The KeePass defaults, used when a field is absent and left out again when writing
+const DEFAULT_PERIOD: u64 = 30;
+const DEFAULT_DIGITS: usize = 6;
 
 // Secret fields in the order they are looked at. Base32 first: it is what an authenticator shows,
 // what our own writer produces and what KeePassXC uses, so it is the likeliest to be the one the
@@ -76,8 +84,7 @@ impl SecretEncoding {
         Ok(decoded)
     }
 
-    // Used when writing a secret back into the field it came from - see Step 21 p.3
-    #[allow(dead_code)]
+    // Used when writing a secret back into the field it came from
     pub(crate) fn encode(&self, decoded_secret: &[u8]) -> Result<String> {
         match self {
             SecretEncoding::Plain => String::from_utf8(decoded_secret.to_vec()).map_err(|_| {
@@ -99,12 +106,112 @@ pub(crate) struct TimeOtp {
     // an `otpauth://` field is keyed by its own name
     pub(crate) secret_field: &'static str,
 
-    // How that field encodes the secret, so an update can be written back in the same form
-    #[allow(dead_code)]
-    pub(crate) encoding: SecretEncoding,
-
     // The secret is carried as Base32 here: that is what OtpData::from_key expects
     pub(crate) settings: OtpSettings,
+}
+
+// Writes a totp back into the TimeOtp fields of an entry, in the encoding the entry already used.
+//
+// Only the fields KeePass needs are kept: a period, a length or an algorithm equal to the KeePass
+// default is removed rather than written, which is how KeePass itself stores them. Any other secret
+// field is removed as well - an entry left holding a second, now stale secret would both contradict
+// itself (which code is the real one?) and keep an old plaintext secret in the file.
+pub(crate) fn write(
+    entry_field: &mut EntryField,
+    otp_data: &OtpData,
+    encoding: SecretEncoding,
+) -> Result<()> {
+    let secret_field = SECRET_FIELDS
+        .iter()
+        .find(|(_, e)| *e == encoding)
+        .map(|(name, _)| *name)
+        // Every encoding has a field, so this cannot happen
+        .ok_or_else(|| Error::UnexpectedError("Unknown TimeOtp secret encoding".into()))?;
+
+    let secret = encoding.encode(&otp_data.decoded_secret)?;
+
+    for (name, _) in SECRET_FIELDS
+        .iter()
+        .filter(|(name, _)| *name != secret_field)
+    {
+        entry_field.remove_key_value(name);
+    }
+    set_field(entry_field, secret_field, &secret, true);
+
+    set_or_remove(
+        entry_field,
+        TIME_OTP_PERIOD,
+        (otp_data.period != DEFAULT_PERIOD).then(|| otp_data.period.to_string()),
+    );
+    set_or_remove(
+        entry_field,
+        TIME_OTP_LENGTH,
+        (otp_data.digits != DEFAULT_DIGITS).then(|| otp_data.digits.to_string()),
+    );
+    set_or_remove(
+        entry_field,
+        TIME_OTP_ALGORITHM,
+        algorithm_value(entry_field, otp_data.algorithm),
+    );
+
+    Ok(())
+}
+
+// Removes every TimeOtp field of an entry, so deleting a 2fa leaves no tail behind
+pub(crate) fn remove_all(entry_field: &mut EntryField) {
+    for (name, _) in SECRET_FIELDS.iter() {
+        entry_field.remove_key_value(name);
+    }
+    for name in [TIME_OTP_PERIOD, TIME_OTP_LENGTH, TIME_OTP_ALGORITHM] {
+        entry_field.remove_key_value(name);
+    }
+}
+
+// Keeps the spelling the file already used when it means the same algorithm - a uri stays a uri -
+// and writes a bare name otherwise. SHA1 is the KeePass default and needs no field
+fn algorithm_value(entry_field: &EntryField, algorithm: OtpAlgorithm) -> Option<String> {
+    if algorithm == OtpAlgorithm::SHA1 {
+        return None;
+    }
+
+    if let Some(kv) = entry_field.find_key_value(TIME_OTP_ALGORITHM) {
+        if algorithm_of(&kv.value).ok() == Some(Some(algorithm)) {
+            return Some(kv.value.clone());
+        }
+    }
+
+    Some(
+        match algorithm {
+            OtpAlgorithm::SHA1 => "HMAC-SHA-1",
+            OtpAlgorithm::SHA256 => "HMAC-SHA-256",
+            OtpAlgorithm::SHA512 => "HMAC-SHA-512",
+        }
+        .to_string(),
+    )
+}
+
+fn set_or_remove(entry_field: &mut EntryField, field_name: &str, value: Option<String>) {
+    match value {
+        Some(v) => set_field(entry_field, field_name, &v, false),
+        None => {
+            entry_field.remove_key_value(field_name);
+        }
+    }
+}
+
+// Updates the field in place when the entry already has it, keeping its protection flag as the file
+// had it, and adds it otherwise
+fn set_field(entry_field: &mut EntryField, field_name: &str, value: &str, protect_when_new: bool) {
+    if entry_field.find_key_value(field_name).is_some() {
+        entry_field.update_value(field_name, value);
+    } else {
+        entry_field.insert_key_value(KeyValue {
+            key: field_name.to_string(),
+            value: value.to_string(),
+            protected: protect_when_new,
+            data_type: FieldDataType::default(),
+        });
+    }
 }
 
 // Reads the TimeOtp fields of an entry.
@@ -114,14 +221,27 @@ pub(crate) struct TimeOtp {
 // outside what the core supports, an unknown algorithm); the caller decides what to do with it,
 // and nothing about the entry's fields is changed either way.
 pub(crate) fn parse(field_values: &HashMap<String, String>) -> Option<Result<TimeOtp>> {
-    let (secret_field, encoding) = SECRET_FIELDS
-        .iter()
-        .find(|(name, _)| field_values.contains_key(*name))?;
+    let (secret_field, encoding) = secret_field_of(field_values)?;
 
     // The key was just matched above, so the value is there
-    let raw_secret = field_values.get(*secret_field)?;
+    let raw_secret = field_values.get(secret_field)?;
 
-    Some(build(secret_field, *encoding, raw_secret, field_values))
+    Some(build(secret_field, encoding, raw_secret, field_values))
+}
+
+// The secret field an entry carries and its encoding, whether or not the fields can be used: an
+// update has to be written in the entry's own form even when the old value was unreadable
+pub(crate) fn secret_encoding(field_values: &HashMap<String, String>) -> Option<SecretEncoding> {
+    secret_field_of(field_values).map(|(_, encoding)| encoding)
+}
+
+fn secret_field_of(
+    field_values: &HashMap<String, String>,
+) -> Option<(&'static str, SecretEncoding)> {
+    SECRET_FIELDS
+        .iter()
+        .find(|(name, _)| field_values.contains_key(*name))
+        .map(|(name, encoding)| (*name, *encoding))
 }
 
 fn build(
@@ -144,7 +264,6 @@ fn build(
 
     Ok(TimeOtp {
         secret_field,
-        encoding,
         settings,
     })
 }
@@ -173,6 +292,10 @@ fn algorithm_field(field_values: &HashMap<String, String>) -> Result<Option<OtpA
         return Ok(None);
     };
 
+    algorithm_of(value)
+}
+
+fn algorithm_of(value: &str) -> Result<Option<OtpAlgorithm>> {
     // A uri keeps the algorithm in its fragment (xmldsig#hmac-sha256); a bare name is the whole
     // value. Separators vary in spelling (HMAC-SHA-256, hmac_sha256), so they are dropped
     let tail = value.rsplit(['#', '/']).next().unwrap_or(value);
@@ -292,7 +415,24 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(parsed.secret_field, TIME_OTP_SECRET_BASE32);
-        assert_eq!(parsed.encoding, SecretEncoding::Base32);
+    }
+
+    #[test]
+    fn the_encoding_of_the_entrys_secret_field_is_reported_for_writing() {
+        use super::secret_encoding;
+        assert_eq!(
+            secret_encoding(&fields(&[(TIME_OTP_SECRET_HEX, SECRET_HEX)])),
+            Some(SecretEncoding::Hex)
+        );
+        // Reported even when the value itself is unusable: an update keeps the entry's own form
+        assert_eq!(
+            secret_encoding(&fields(&[(TIME_OTP_SECRET_BASE64, "###")])),
+            Some(SecretEncoding::Base64)
+        );
+        assert_eq!(
+            secret_encoding(&fields(&[("otp", "otpauth://totp/x")])),
+            None
+        );
     }
 
     #[test]

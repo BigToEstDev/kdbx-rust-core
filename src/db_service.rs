@@ -984,6 +984,39 @@ pub fn is_valid_otp_url(otp_url_str: &str) -> bool {
     OtpData::from_url(otp_url_str).is_ok()
 }
 
+// Sets or replaces the 2fa of an entry, in whichever format that entry already uses: the
+// TimeOtp-* fields of the original KeePass 2.47+ (keeping the encoding its secret was in) or an
+// `otpauth://` url in the `otp` field, which is also what an entry with no 2fa yet gets. The
+// format is decided here rather than by the caller so that a database written by KeePass keeps
+// working in KeePass, and so the rule is covered by the core's own tests - see Entry::set_otp.
+//
+// The settings are validated first: a secret that cannot be decoded, or a period or length the core
+// does not support, leaves the entry untouched. A version is added to the entry's history as with
+// any other edit.
+pub fn set_entry_otp(db_key: &str, entry_uuid: &Uuid, otp_settings: &OtpSettings) -> Result<()> {
+    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
+        let mut updated_entry = match k.root.entry_by_id(entry_uuid) {
+            Some(e) => e.clone(),
+            None => return Err(Error::NotFound("No entry found for the id".into())),
+        };
+        updated_entry.set_otp(otp_settings)?;
+        k.root.update_entry(updated_entry)
+    })
+}
+
+// Removes the 2fa of an entry without leaving a tail: every TimeOtp field goes, and the standard
+// `otp` field is emptied rather than dropped, as it belongs to the entry type
+pub fn delete_entry_otp(db_key: &str, entry_uuid: &Uuid) -> Result<()> {
+    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
+        let mut updated_entry = match k.root.entry_by_id(entry_uuid) {
+            Some(e) => e.clone(),
+            None => return Err(Error::NotFound("No entry found for the id".into())),
+        };
+        updated_entry.remove_otp();
+        k.root.update_entry(updated_entry)
+    })
+}
+
 // Collects all entry field names and its values (not in any particular order)
 pub fn entry_key_value_fields(db_key: &str, entry_uuid: &Uuid) -> Result<HashMap<String, String>> {
     main_content_action!(db_key, move |k: &KeepassFile| {

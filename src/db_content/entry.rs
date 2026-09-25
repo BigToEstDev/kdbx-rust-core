@@ -13,10 +13,11 @@ use crate::constants::OTP_URL_PREFIX;
 use crate::constants::{entry_keyvalue_key::*, EMPTY_STR};
 use crate::db_content::{entry_type::*, Item};
 use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElements};
+use crate::error::Result;
 use crate::util;
 
 use super::meta::MetaShare;
-use super::otp::{CurrentOtpTokenData, OtpData};
+use super::otp::{CurrentOtpTokenData, OtpData, OtpSettings};
 use super::time_otp;
 use super::Meta;
 
@@ -146,6 +147,16 @@ impl EntryField {
 
     pub fn find_key_value(&self, key: &str) -> Option<&KeyValue> {
         self.fields.values().find(|f| f.key == key)
+    }
+
+    // Drops a field from the entry. The removed value is zeroized on the way out: a totp secret
+    // is one of the things removed this way (see db_content/time_otp.rs)
+    pub(crate) fn remove_key_value(&mut self, key: &str) -> Option<KeyValue> {
+        use zeroize::Zeroize;
+        self.fields.remove(key).map(|mut kv| {
+            kv.value.zeroize();
+            kv
+        })
     }
 
     // finds a KeyValue from the 'fields' map and updates its 'value' field with the passed value
@@ -649,6 +660,52 @@ impl Entry {
             self.parsed_otp_values = Some(otp_vals);
         } else {
             self.parsed_otp_values = None;
+        }
+    }
+
+    // Sets the entry's 2fa, in the format the entry already uses: an entry that came from the
+    // original KeePass keeps its TimeOtp-* fields (and the secret encoding they were in), an entry
+    // holding an `otp` url keeps the url, and an entry with no 2fa yet gets an `otp` url - the form
+    // KeePassXC, KeePassDX and we ourselves read. Converting a foreign entry to the other format
+    // would break its 2fa in the program the user came from (Step 17 - do not rewrite foreign data).
+    //
+    // The settings are validated before anything is written, so a bad secret or an unsupported
+    // period leaves the entry untouched. Additional otp fields of an entry are not touched here:
+    // they are edited through the entry form like any other field.
+    pub(crate) fn set_otp(&mut self, otp_settings: &OtpSettings) -> Result<()> {
+        let otp_data = OtpData::from_otp_settings(otp_settings)?;
+
+        // A TimeOtp entry keeps its format whether or not the old value could be read
+        match time_otp::secret_encoding(&self.field_values()) {
+            Some(encoding) => time_otp::write(&mut self.entry_field, &otp_data, encoding)?,
+            None => self.set_otp_url(&otp_data.get_url()),
+        }
+
+        self.parse_all_otp_fields();
+        Ok(())
+    }
+
+    // Removes the entry's 2fa without leaving a tail: all TimeOtp fields go, and the standard `otp`
+    // field is emptied rather than dropped - it belongs to the entry type and the form expects it
+    pub(crate) fn remove_otp(&mut self) {
+        time_otp::remove_all(&mut self.entry_field);
+        if self.entry_field.find_key_value(OTP).is_some() {
+            self.entry_field.remove_key_value(OTP);
+            self.set_otp_url(EMPTY_STR);
+        }
+        self.parse_all_otp_fields();
+    }
+
+    fn set_otp_url(&mut self, url: &str) {
+        if self.entry_field.find_key_value(OTP).is_some() {
+            self.entry_field.update_value(OTP, url);
+        } else {
+            self.entry_field.insert_key_value(KeyValue {
+                key: OTP.to_string(),
+                value: url.to_string(),
+                protected: true,
+                data_type: FieldDataType::OneTimePassword,
+            });
         }
     }
 
@@ -1247,7 +1304,7 @@ pub struct History {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinaryKeyValue, Entry, EntryField, KeyValue};
+    use super::{BinaryKeyValue, Entry, EntryField, KeyValue, OtpSettings};
     use crate::db_content::entry_type::FieldDataType;
     use uuid::Uuid;
 
@@ -1527,6 +1584,158 @@ mod tests {
                 .find_key_value("TimeOtp-Secret-Base32")
                 .is_some());
         }
+    }
+    // Writing and removing a 2fa (Step 21 p.3) - Entry::set_otp / Entry::remove_otp
+
+    fn settings(secret: &str, period: Option<u64>, digits: Option<usize>) -> OtpSettings {
+        OtpSettings {
+            secret_or_url: secret.to_string(),
+            period,
+            digits,
+            hash_algorithm: None,
+        }
+    }
+
+    fn value_of(e: &Entry, field: &str) -> Option<String> {
+        e.entry_field
+            .find_key_value(field)
+            .map(|kv| kv.value.clone())
+    }
+
+    #[test]
+    fn a_new_2fa_is_written_as_an_otpauth_url() {
+        let mut e = entry_with_otp_fields(&[("UserName", "user@example.com")]);
+        e.set_otp(&settings(TIME_OTP_TEST_SECRET, None, None))
+            .unwrap();
+
+        let url = value_of(&e, "otp").expect("the otp field is created");
+        assert!(url.starts_with("otpauth://totp/"), "{}", url);
+        assert!(url.contains(TIME_OTP_TEST_SECRET), "{}", url);
+        assert!(e.current_otp_token_data("otp").is_some());
+        // The entry did not gain any KeePass fields it did not have
+        assert!(value_of(&e, "TimeOtp-Secret-Base32").is_none());
+    }
+
+    #[test]
+    fn a_keepass_entry_keeps_its_own_format_and_secret_encoding() {
+        // The RFC 6238 secret as hex, the way the original KeePass may have stored it
+        let mut e = entry_with_otp_fields(&[(
+            "TimeOtp-Secret-Hex",
+            "3132333435363738393031323334353637383930",
+        )]);
+
+        // A different secret, entered by the user in our app
+        e.set_otp(&settings("JBSWY3DPEHPK3PXP", None, None))
+            .unwrap();
+
+        assert!(
+            value_of(&e, "otp").is_none(),
+            "a KeePass entry must not be converted to an url - that would break it in KeePass"
+        );
+        let hex = value_of(&e, "TimeOtp-Secret-Hex").expect("the secret stays in its own field");
+        assert_eq!(
+            hex, "48656c6c6f21deadbeef",
+            "the secret is rewritten as hex"
+        );
+        assert!(e.current_otp_token_data("TimeOtp-Secret-Hex").is_some());
+    }
+
+    #[test]
+    fn keepass_fields_equal_to_the_default_are_left_out_and_others_are_written() {
+        let mut e = entry_with_otp_fields(&[
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+            ("TimeOtp-Period", "60"),
+            ("TimeOtp-Length", "8"),
+        ]);
+
+        // Back to the KeePass defaults: the fields go away rather than holding "30" and "6"
+        e.set_otp(&settings(TIME_OTP_TEST_SECRET, Some(30), Some(6)))
+            .unwrap();
+        assert!(value_of(&e, "TimeOtp-Period").is_none());
+        assert!(value_of(&e, "TimeOtp-Length").is_none());
+
+        // And back again
+        e.set_otp(&settings(TIME_OTP_TEST_SECRET, Some(45), Some(7)))
+            .unwrap();
+        assert_eq!(value_of(&e, "TimeOtp-Period").unwrap(), "45");
+        assert_eq!(value_of(&e, "TimeOtp-Length").unwrap(), "7");
+    }
+
+    #[test]
+    fn a_second_stale_secret_field_does_not_survive_an_update() {
+        let mut e = entry_with_otp_fields(&[
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+            (
+                "TimeOtp-Secret-Hex",
+                "3132333435363738393031323334353637383930",
+            ),
+        ]);
+
+        e.set_otp(&settings("JBSWY3DPEHPK3PXP", None, None))
+            .unwrap();
+
+        assert_eq!(
+            value_of(&e, "TimeOtp-Secret-Base32").unwrap(),
+            "JBSWY3DPEHPK3PXP"
+        );
+        assert!(
+            value_of(&e, "TimeOtp-Secret-Hex").is_none(),
+            "an entry must not be left holding two different secrets"
+        );
+    }
+
+    #[test]
+    fn an_unusable_secret_leaves_the_entry_untouched() {
+        let mut e = entry_with_otp_fields(&[("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET)]);
+
+        assert!(e.set_otp(&settings("not base32 !!", None, None)).is_err());
+        assert!(e
+            .set_otp(&settings(TIME_OTP_TEST_SECRET, Some(90), None))
+            .is_err());
+
+        assert_eq!(
+            value_of(&e, "TimeOtp-Secret-Base32").unwrap(),
+            TIME_OTP_TEST_SECRET
+        );
+        assert!(e.current_otp_token_data("TimeOtp-Secret-Base32").is_some());
+    }
+
+    #[test]
+    fn removing_a_2fa_leaves_no_keepass_field_behind() {
+        let mut e = entry_with_otp_fields(&[
+            ("TimeOtp-Secret-Base32", TIME_OTP_TEST_SECRET),
+            (
+                "TimeOtp-Secret-Hex",
+                "3132333435363738393031323334353637383930",
+            ),
+            ("TimeOtp-Period", "60"),
+            ("TimeOtp-Length", "8"),
+            ("TimeOtp-Algorithm", "HMAC-SHA-256"),
+        ]);
+
+        e.remove_otp();
+
+        for field in [
+            "TimeOtp-Secret-Base32",
+            "TimeOtp-Secret-Hex",
+            "TimeOtp-Period",
+            "TimeOtp-Length",
+            "TimeOtp-Algorithm",
+        ] {
+            assert!(value_of(&e, field).is_none(), "{} is left behind", field);
+        }
+        assert!(e.parsed_otp_values.is_none());
+    }
+
+    // The standard field belongs to the entry type, so the form still expects to find it
+    #[test]
+    fn removing_a_2fa_empties_the_standard_field_instead_of_dropping_it() {
+        let mut e = entry_with_otp_fields(&[("otp", &otp_url(TIME_OTP_TEST_SECRET))]);
+
+        e.remove_otp();
+
+        assert_eq!(value_of(&e, "otp").unwrap(), "");
+        assert!(e.parsed_otp_values.is_none());
     }
 }
 
