@@ -74,4 +74,22 @@ pub fn sha256_hash_from_slice(data: &[u8]) -> Result<Vec<u8>> {
     Ok(hash_from_slices::<Sha256>(&[data]))
 }
 
+// 32 bytes hash of everything a reader yields, taken in chunks rather than into one buffer: the
+// caller hashes a whole database file, and there is no reason to hold a second copy of it in memory
+// to do so.
+pub fn sha256_hash_from_reader<R: std::io::Read>(reader: &mut R) -> Result<Vec<u8>> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(hasher.finalize().to_vec())
+}
+
 // HMAC and SHA are checked against RFC 4231 / RFC 2202 / NIST vectors in crypto/mod.rs.

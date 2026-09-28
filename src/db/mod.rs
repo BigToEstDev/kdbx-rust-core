@@ -643,19 +643,23 @@ pub fn write_db<W: Write + Read + Seek>(buff: &mut W, kdbx_file: &mut KdbxFile) 
     Ok(())
 }
 
-// Calculates checksum for later verification before saving
+// Calculates checksum for later verification before saving.
+//
+// Over the whole file, not a sample of it. It used to hash the first 1000 bytes only, which in
+// practice usually did notice another program's save - the header those bytes land in carries a
+// fresh salt and iv every time - but only usually, and this checksum is the single thing standing
+// between a save and silently overwriting edits made elsewhere. Everything past the header is
+// exactly where the entries and the passwords are, so a sample is the wrong shape of answer here.
+//
+// The cost is one sha256 pass over a few megabytes, and it is paid once per save.
 pub fn calculate_db_file_checksum<R: Read + Seek>(reader: &mut R) -> Result<Vec<u8>> {
     let pos = reader.stream_position()?;
     reader.rewind()?;
-    // For now, we just consider the first 1000 samples as sample checksum
-    let mut buffer = [0; 1000];
-    // read up to 1000 bytes
 
-    let _n = reader.read(&mut buffer[..])?;
-    let cs = crypto::sha256_hash_from_slice(&buffer);
+    let cs = crypto::sha256_hash_from_reader(reader);
 
     reader.seek(SeekFrom::Start(pos))?;
-    Ok(cs?.to_vec())
+    cs
 }
 
 // Desktop version
@@ -826,7 +830,45 @@ pub fn create_key_file(key_file_name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::AttachmentSet;
+    use super::{calculate_db_file_checksum, AttachmentSet};
+    use std::io::{Cursor, Seek, SeekFrom};
+
+    // Чек-сумма считалась по первым 1000 байтам файла. Заголовок kdbx при каждом сохранении получает
+    // новые соль и iv, поэтому чужое сохранение обычно всё же замечалось — но записи и пароли лежат
+    // дальше, и правка в них проходила незамеченной. А это единственная защита от «сохранил и затёр
+    // чужие правки»
+    #[test]
+    fn a_change_past_the_header_changes_the_checksum() {
+        let mut file: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        let before = calculate_db_file_checksum(&mut Cursor::new(file.clone())).unwrap();
+
+        // Меняем байт далеко за первой тысячей — там, где в настоящем файле содержимое базы
+        file[3000] ^= 0xff;
+        let after = calculate_db_file_checksum(&mut Cursor::new(file)).unwrap();
+
+        assert_ne!(before, after, "правка в теле файла должна менять чек-сумму");
+    }
+
+    #[test]
+    fn the_same_file_gives_the_same_checksum() {
+        let file: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+
+        assert_eq!(
+            calculate_db_file_checksum(&mut Cursor::new(file.clone())).unwrap(),
+            calculate_db_file_checksum(&mut Cursor::new(file)).unwrap()
+        );
+    }
+
+    // Читатель может быть тем же, из которого потом читают базу: позиция должна остаться на месте
+    #[test]
+    fn the_position_of_the_reader_is_left_where_it_was() {
+        let mut reader = Cursor::new(vec![7u8; 2048]);
+        reader.seek(SeekFrom::Start(100)).unwrap();
+
+        calculate_db_file_checksum(&mut reader).unwrap();
+
+        assert_eq!(reader.stream_position().unwrap(), 100);
+    }
 
     // Step 19: испорченный inner header может объявить двоичный блок нулевой длины.
     // До правки это роняло ядро на "data.len() - 1" ещё при чтении файла
