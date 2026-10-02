@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     path::Path,
 };
 
@@ -12,17 +12,37 @@ use crate::{
     xml_parse::{FileKeyXmlReader, FileKeyXmlWriter},
 };
 
+use super::credential_limits::check_key_file_size;
+
 /// Used when user selects to use any file as a key for the db
+///
+/// Built from the content of the file, never holds it: what the core needs is only the hash. The
+/// content comes either from a path (desktop) or as bytes (mobile, where the file is behind SAF and has
+/// no path the core could open).
 #[derive(Clone)]
 pub struct FileKey {
+    // A path on desktop, a name to show on mobile - in both cases not what identifies the key,
+    // the hash does
     pub(crate) file_name: String,
     // This is the hash of the whole content of a file or hash key from a keyx file
     content_hash: Vec<u8>,
 }
 
 impl FileKey {
-    // Opens the file and calculates the hash based on the content of this file
-    pub(crate) fn open(key_file_name: &str) -> Result<FileKey> {
+    /// Builds the key from the content of a key file. `file_name` is only kept to be shown back - it is
+    /// not read and does not have to be a path.
+    pub fn from_bytes(file_name: &str, content: &[u8]) -> Result<FileKey> {
+        debug!("File Key from bytes is called for key file {}", file_name);
+        check_key_file_size(content.len() as u64)?;
+
+        Ok(Self {
+            file_name: file_name.into(),
+            content_hash: Self::calculate_hash(content)?,
+        })
+    }
+
+    /// Opens the file at the path and builds the key from its content
+    pub fn open(key_file_name: &str) -> Result<FileKey> {
         debug!(
             "File Key open is called with key file name {}",
             key_file_name
@@ -33,12 +53,15 @@ impl FileKey {
                 key_file_name
             )));
         }
+        // The size is checked before reading, so a file over the limit is never read into memory
         let file = File::open(key_file_name)?;
+        check_key_file_size(file.metadata()?.len())?;
 
-        Ok(Self {
-            file_name: key_file_name.into(),
-            content_hash: Self::calculate_hash(file)?,
-        })
+        let mut content = vec![];
+        file.take(super::KEY_FILE_MAX_SIZE + 1)
+            .read_to_end(&mut content)?;
+
+        Self::from_bytes(key_file_name, &content)
     }
 
     // Need to return Result so that the invalid file name error can be propagated to caller
@@ -55,6 +78,17 @@ impl FileKey {
         self.content_hash.clone()
     }
 
+    /// The name the key was built with: a path on desktop, the name to show on mobile
+    pub fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    /// Whether both keys open the same thing. By content, not by name: two files with one name can be
+    /// different keys, and one key can be picked again under another name
+    pub(crate) fn same_key_as(&self, other: &FileKey) -> bool {
+        self.content_hash == other.content_hash
+    }
+
     // Never overwrites: an existing file may be the key of another database, and replacing it
     // locks that database for good. Fails with io::ErrorKind::AlreadyExists; asking the user
     // to confirm an overwrite is up to the UI
@@ -67,6 +101,15 @@ impl FileKey {
         Self::write_xml(&mut file_buf)
     }
 
+    /// A new key file (32 random bytes, xml KeyFile 2.0) as bytes - for a client that writes files
+    /// itself. The guard of `create_xml_key_file` does not come along: writing over an existing file
+    /// is the caller's to refuse
+    pub fn generate_xml_key_file() -> Result<Vec<u8>> {
+        let mut content = vec![];
+        Self::write_xml(&mut content)?;
+        Ok(content)
+    }
+
     pub fn write_xml<W: Write>(buf: &mut W) -> Result<()> {
         let mut xml_writer = FileKeyXmlWriter::new_with_indent(buf);
         let key_file_data = KeyFileData::generate_key_data()?;
@@ -75,13 +118,8 @@ impl FileKey {
 
     // Called to read a keyx xml and extract the hash from <Data> ...</Data> element or
     // reads the whole bytes content of  the file and caluclates the hash
-    fn calculate_hash(file: File) -> Result<Vec<u8>> {
-        let mut reader = BufReader::new(file);
-        let mut buf = vec![];
-        debug!("Starting reading the file key content in calculate_hash");
-        reader.read_to_end(&mut buf)?;
-
-        let content_hash: Vec<u8> = match Self::try_parse_xml(&buf) {
+    fn calculate_hash(buf: &[u8]) -> Result<Vec<u8>> {
+        let content_hash: Vec<u8> = match Self::try_parse_xml(buf) {
             Ok(key_file_data) => {
                 // We find the hash key in the v2 xml file
                 debug!("Found xml key file and verifying the checksum");
@@ -92,7 +130,7 @@ impl FileKey {
                 debug!(
                     "Key file is not xml based one and calculating the hash of content of the file"
                 );
-                crypto::sha256_hash_from_slice(&buf)?
+                crypto::sha256_hash_from_slice(buf)?
             }
 
             Err(e) => return Err(e),
@@ -159,7 +197,112 @@ impl KeyFileData {
 #[cfg(test)]
 mod tests {
     use super::{FileKey, KeyFileData};
-    use crate::{crypto, xml_parse::FileKeyXmlWriter};
+    use crate::{
+        crypto, db::credential_limits::KEY_FILE_MAX_SIZE, error::Error, xml_parse::FileKeyXmlWriter,
+    };
+
+    fn temp_file(test: &str, content: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "pass_core_test_{}_{}.key",
+            test,
+            std::process::id()
+        ));
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    // --- Key file as bytes (Step 29) ---
+
+    #[test]
+    fn bytes_give_the_same_key_as_the_file_for_an_xml_key_file() {
+        let content = FileKey::generate_xml_key_file().unwrap();
+        let path = temp_file("bytes_xml", &content);
+
+        let from_file = FileKey::open(path.to_str().unwrap()).unwrap();
+        let from_bytes = FileKey::from_bytes("any name", &content).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(from_file.content_hash(), from_bytes.content_hash());
+    }
+
+    #[test]
+    fn bytes_give_the_same_key_as_the_file_for_any_other_file() {
+        let content = b"not a key file at all, just some bytes";
+        let path = temp_file("bytes_raw", content);
+
+        let from_file = FileKey::open(path.to_str().unwrap()).unwrap();
+        let from_bytes = FileKey::from_bytes("photo.jpg", content).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(from_file.content_hash(), from_bytes.content_hash());
+    }
+
+    #[test]
+    fn the_name_is_kept_only_to_be_shown() {
+        let key = FileKey::from_bytes("my.keyx", b"content").unwrap();
+        assert_eq!(key.file_name(), "my.keyx");
+    }
+
+    #[test]
+    fn a_generated_key_file_is_a_valid_xml_key_of_32_bytes() {
+        let content = FileKey::generate_xml_key_file().unwrap();
+        // Parsed as xml with a correct checksum, not hashed as a plain file
+        let key = FileKey::from_bytes("new.keyx", &content).unwrap();
+        assert_eq!(key.content_hash().len(), 32);
+        assert_eq!(
+            key.content_hash(),
+            FileKey::try_parse_xml(&content)
+                .unwrap()
+                .verify_checksum()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn two_generated_key_files_are_different_keys() {
+        let first = FileKey::from_bytes("a", &FileKey::generate_xml_key_file().unwrap()).unwrap();
+        let second = FileKey::from_bytes("a", &FileKey::generate_xml_key_file().unwrap()).unwrap();
+        assert!(!first.same_key_as(&second));
+    }
+
+    #[test]
+    fn the_same_content_under_another_name_is_the_same_key() {
+        let first = FileKey::from_bytes("old-name.keyx", b"content").unwrap();
+        let second = FileKey::from_bytes("new-name.keyx", b"content").unwrap();
+        assert!(first.same_key_as(&second));
+    }
+
+    #[test]
+    fn bytes_over_the_limit_are_refused() {
+        let content = vec![0u8; KEY_FILE_MAX_SIZE as usize + 1];
+        assert!(matches!(
+            FileKey::from_bytes("video.mp4", &content),
+            Err(Error::KeyFileTooLarge)
+        ));
+    }
+
+    #[test]
+    fn bytes_of_the_limit_are_accepted() {
+        let content = vec![0u8; KEY_FILE_MAX_SIZE as usize];
+        assert!(FileKey::from_bytes("photo.jpg", &content).is_ok());
+    }
+
+    #[test]
+    fn a_file_over_the_limit_is_refused() {
+        let path = temp_file("over_limit", b"");
+        // Sparse on most file systems: the size is what is checked, before any reading
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(KEY_FILE_MAX_SIZE + 1)
+            .unwrap();
+
+        let result = FileKey::open(path.to_str().unwrap());
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(matches!(result, Err(Error::KeyFileTooLarge)));
+    }
 
     // --- Non-ignored unit tests ---
 

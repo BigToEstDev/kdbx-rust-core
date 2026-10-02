@@ -10,7 +10,7 @@ use crate::{
         entry_keyvalue_key::{OTP, PASSWORD},
         general_category_names::FAVORITES,
     },
-    db::NewDatabase,
+    db::{FileKey, NewDatabase},
     db_content::KeepassFile,
     db_service::{self, call_kdbx_context_mut_action, call_main_content_mut_action, KdbxContext},
     error::Result,
@@ -85,7 +85,9 @@ pub struct CsvImportMapping {
 impl CsvImportMapping {
     // create_new_db_with_imported_csv
     pub fn create_new_db(&self, new_db: NewDatabase) -> Result<KdbxLoaded> {
-        let mut kdbx_file = new_db.create()?;
+        // Desktop-only for now (see write_new_db_kdbx_file), so the key file is a path
+        let file_key = FileKey::from(new_db.key_file_name.as_deref())?;
+        let mut kdbx_file = new_db.create(file_key)?;
         let keepass_file = kdbx_file.keepass_main_content_mut();
 
         debug!("Going to apply the imported data");

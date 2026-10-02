@@ -1,5 +1,4 @@
 use std::io::{Cursor, Read, Seek, Write};
-use std::path::Path;
 
 use log::debug;
 
@@ -16,7 +15,7 @@ use crate::kdbx_context_mut_action;
 use crate::error::{Error, Result};
 
 use crate::db::{
-    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file,
+    self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file, FileKey,
 };
 // Used only by write_new_db_kdbx_file below (feature `csv-import`)
 #[cfg(feature = "csv-import")]
@@ -99,15 +98,9 @@ pub(crate) fn create_kdbx_with_imported_csv(
 // Returns KdbxLoaded with dbkey to locate this KDBX database in cache
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows",))]
 pub fn create_kdbx(new_db: NewDatabase) -> Result<KdbxLoaded> {
-    if let Some(kf) = &new_db.key_file_name {
-        if !kf.trim().is_empty() & !Path::new(kf).exists() {
-            return Err(Error::NotFound(format!(
-                "The key file {} is not valid one",
-                kf
-            )));
-        }
-    }
-    let kdbx_file = new_db.create()?;
+    // A missing file is NotFound from FileKey::open
+    let file_key = FileKey::from(new_db.key_file_name.as_deref())?;
+    let kdbx_file = new_db.create(file_key)?;
     let kp = to_keepassfile!(kdbx_file);
     let file_name = util::file_name(&new_db.database_file_name);
     let kdbx_loaded = KdbxLoaded {
@@ -150,13 +143,14 @@ pub fn load_kdbx(
     password: Option<&str>,
     key_file_name: Option<&str>,
 ) -> Result<KdbxLoaded> {
+    let file_key = FileKey::from(key_file_name)?;
     let mut db_file_reader = db::open_db_file(db_file_name)?;
     let file_name = util::file_name(db_file_name);
     read_kdbx(
         &mut db_file_reader,
         db_file_name,
         password,
-        key_file_name,
+        file_key,
         file_name.as_deref(),
     )
 }
@@ -185,22 +179,23 @@ pub fn reload_kdbx(db_key: &str) -> Result<KdbxLoaded> {
 }
 
 // Used for both desktop and mobile
-// db_file_name is full uri and used as db_key in all subsequent calls
+// db_file_name is full uri and used as db_key in all subsequent calls.
+// The key file is built by the caller - from a path (load_kdbx) or from bytes (mobile), see FileKey
 pub fn read_kdbx<R: Read + Seek>(
     reader: &mut R,
     db_file_name: &str,
     password: Option<&str>,
-    key_file_name: Option<&str>,
+    file_key: Option<FileKey>,
     file_name: Option<&str>,
 ) -> Result<KdbxLoaded> {
-    let kdbx_file = db::read_db_from_reader(reader, db_file_name, password, key_file_name)?;
+    let kdbx_file = db::read_db_from_reader(reader, db_file_name, password, file_key)?;
 
     let kp = to_keepassfile!(kdbx_file);
     //let file_name = util::file_name(&db_file_name);
     let kdbx_loaded = KdbxLoaded {
         db_key: db_file_name.into(),
         database_name: kp.meta.database_name.clone(),
-        key_file_name: key_file_name.map(|s| s.to_string()),
+        key_file_name: kdbx_file.get_key_file_name(),
         file_name: file_name.map(|s| s.to_string()),
     };
 
@@ -377,20 +372,24 @@ pub fn save_to_db_file(db_key: &str, full_file_name: &str) -> Result<()> {
 }
 
 // Mobile
-// Creates a new db and writes into the supplied writer as kdbx db
+// Creates a new db and writes into the supplied writer as kdbx db.
+// The key file comes as file_key, built from its bytes - a path in new_db.key_file_name is refused
+// rather than ignored: it would mean the caller expects a key file that the database would not have
 pub fn create_and_write_to_writer<W: Read + Write + Seek>(
     writer: &mut W,
     new_db: NewDatabase,
+    file_key: Option<FileKey>,
 ) -> Result<KdbxLoaded> {
-    if let Some(kf) = &new_db.key_file_name {
-        if !kf.trim().is_empty() & !Path::new(kf).exists() {
-            return Err(Error::NotFound(format!(
-                "The key file {} is not valid one",
-                kf
-            )));
-        }
+    if new_db
+        .key_file_name
+        .as_deref()
+        .is_some_and(|n| !n.trim().is_empty())
+    {
+        return Err(Error::DataError(
+            "A key file path is not accepted here, the key file is passed as bytes",
+        ));
     }
-    let kdbx_file = new_db.create()?;
+    let kdbx_file = new_db.create(file_key)?;
     let kp = to_keepassfile!(kdbx_file);
     let kdbx_loaded = KdbxLoaded {
         db_key: new_db.database_file_name.clone(),
@@ -399,7 +398,7 @@ pub fn create_and_write_to_writer<W: Read + Write + Seek>(
         // In case of iOS, not done as full uri is temp one
         // For desktop, see create_kdbx
         file_name: new_db.file_name,
-        key_file_name: new_db.key_file_name,
+        key_file_name: kdbx_file.get_key_file_name(),
     };
 
     // IMPORTANT:
@@ -488,6 +487,13 @@ pub fn read_and_verify_db_file(db_key: &str) -> Result<()> {
 // Called to generate random 32 bytes key and stored in an xml file (Version 2.0)
 pub fn generate_key_file(key_file_name: &str) -> Result<()> {
     db::create_key_file(key_file_name)
+}
+
+// Mobile
+// The same key file as generate_key_file, handed back as bytes for the app to write through SAF.
+// Nothing guards an existing file here - refusing to overwrite one is the app's job now
+pub fn generate_key_file_content() -> Result<Vec<u8>> {
+    FileKey::generate_xml_key_file()
 }
 
 // Dev-only XML dump, behind the feature `xml-dump` (off by default) -- see db::export_as_xml.

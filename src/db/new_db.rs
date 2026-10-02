@@ -2,6 +2,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    check_new_password,
     kdbx_file::{InnerHeader, MainHeader},
     ContentCipherId, FileKey, KdbxFile, KdfAlgorithm, SecuredDatabaseKeys,
 };
@@ -24,6 +25,8 @@ pub struct NewDatabase {
     pub(crate) kdf: KdfAlgorithm,
     pub(crate) cipher_id: ContentCipherId,
     pub(crate) password: Option<String>,
+    // A path to the key file - desktop only, read by create_kdbx. On mobile the key file arrives as
+    // bytes beside the NewDatabase (create_and_write_to_writer), and a path here is refused
     pub(crate) key_file_name: Option<String>,
 }
 
@@ -43,12 +46,10 @@ impl Default for NewDatabase {
 }
 
 impl NewDatabase {
-    // Creates a blank database with some intial values. The database is not yet saved
-    pub fn create(&self) -> Result<KdbxFile> {
-        let file_key = match &self.key_file_name {
-            Some(n) if !n.trim().is_empty() => Some(FileKey::open(n)?),
-            Some(_) | None => None,
-        };
+    // Creates a blank database with some intial values. The database is not yet saved.
+    // The key file is the caller's to build - from a path or from bytes, see FileKey
+    pub fn create(&self, file_key: Option<FileKey>) -> Result<KdbxFile> {
+        check_new_password(self.password.as_deref())?;
 
         let (cid, eiv) = self.cipher_id.uuid_with_iv()?;
 
@@ -86,9 +87,9 @@ impl NewDatabase {
         kc.root.insert_to_all_groups(root_g);
 
         debug!(
-            "New database create: password nil? {}, file name {:?}",
+            "New database create: password nil? {}, key file {:?}",
             self.password.is_none(),
-            self.key_file_name
+            file_key.as_ref().map(|f| f.file_name())
         );
 
         let mut secured_database_keys =

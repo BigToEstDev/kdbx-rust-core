@@ -66,10 +66,9 @@ impl KdbxFile {
 
     // #[inline]
 
-    pub fn compare_key(&self, password: Option<&str>, key_file_name: Option<&str>) -> Result<bool> {
-        let file_key = FileKey::from(key_file_name)?;
+    pub fn compare_key(&self, password: Option<&str>, file_key: &Option<FileKey>) -> Result<bool> {
         self.secured_database_keys
-            .compare_keys(&self.database_file_name, password, &file_key)
+            .compare_keys(&self.database_file_name, password, file_key)
     }
 
     //----------------------------
@@ -89,33 +88,27 @@ impl KdbxFile {
     }
 
     // Called to set a new key file use.
-    // Opens the named file, reads and uses its content while computing key
-    pub fn set_file_key(&mut self, key_file_name: Option<&str>) -> Result<()> {
+    // Uses the content of the key file while computing key
+    pub fn set_file_key(&mut self, file_key: Option<FileKey>) -> Result<()> {
         debug!(
-            "set_file_key is called with key_file_name: {:?}",
-            key_file_name
+            "set_file_key is called with key file: {:?}",
+            file_key.as_ref().map(|f| f.file_name())
         );
 
-        // We need not do anything if the current db does not use key file and the no file name is selected
-        // for 'key_file_name'
-        if self.file_key.is_none() && key_file_name.is_none() {
+        // We need not do anything if the current db does not use key file and no key file is selected
+        if self.file_key.is_none() && file_key.is_none() {
             return Ok(());
         }
-        // If the incoming key_file_name is the same name as the currently used file key name
-        // We can skip updating.
-        // TODO:
-        // Need to add some flag in DbSettings so that we can avoid calling 'set_file_key' with the same
-        // key file in 'db_service::set_db_settings'
-        if let (Some(fk), Some(s)) = (&self.file_key, key_file_name) {
-            if fk.file_name == s {
+        // The same key picked again - by content, not by name: a name says nothing about the key, two
+        // files can share one. Only the name to show is taken over, the keys stay as they are
+        if let (Some(current), Some(new)) = (&self.file_key, &file_key) {
+            if current.same_key_as(new) {
+                self.file_key = file_key;
                 return Ok(());
             }
         }
 
-        self.file_key = match key_file_name {
-            Some(s) => Some(FileKey::open(s)?), // key file should exists or opening error will happen
-            None => None,
-        };
+        self.file_key = file_key;
 
         //self.db_key.secured_db_keys.set_file_key(&self.database_file_name, self.file_key.as_ref())?;
 
@@ -134,15 +127,15 @@ impl KdbxFile {
         &mut self,
         db_key: &str,
         password: Option<&str>,
-        key_file_name: Option<&str>,
+        file_key: Option<FileKey>,
     ) -> Result<()> {
         debug!(
-            "set_credentials is called with password nil?: {}, key_file_name: {:?}",
+            "set_credentials is called with password nil?: {}, key file: {:?}",
             password.is_none(),
-            key_file_name
+            file_key.as_ref().map(|f| f.file_name())
         );
 
-        self.file_key = FileKey::from(key_file_name)?;
+        self.file_key = file_key;
         let mut keys = SecuredDatabaseKeys::from_keys(password, &self.file_key)?;
         keys.secure_keys(db_key)?;
         self.secured_database_keys = keys;

@@ -1,3 +1,4 @@
+mod credential_limits;
 mod file_key;
 mod kdbx_file;
 mod key_secure;
@@ -35,7 +36,10 @@ use crate::xml_parse;
 use kdbx_file::MainHeader;
 
 // Reexports
-pub(crate) use self::file_key::{FileKey, KeyFileData};
+pub(crate) use self::credential_limits::check_new_password;
+pub use self::credential_limits::{KEY_FILE_MAX_SIZE, PASSWORD_MAX_CHARS};
+pub use self::file_key::FileKey;
+pub(crate) use self::file_key::KeyFileData;
 pub use crypto::ContentCipherId;
 pub use kdbx_file::KdbxFile;
 pub use key_secure::{KeyStoreOperation, KeyStoreService, KeyStoreServiceType};
@@ -582,9 +586,8 @@ pub fn read_db_from_reader<R: Read + Seek>(
     reader: &mut R,
     db_file_name: &str,
     password: Option<&str>,
-    key_file_name: Option<&str>,
+    file_key: Option<FileKey>,
 ) -> Result<KdbxFile> {
-    let file_key = FileKey::from(key_file_name)?;
     let secured_database_keys = SecuredDatabaseKeys::from_keys(password, &file_key)?;
     //let kb = file_key.map(|k| k.content); //converts Option<FileKey> to Option<Vec<u8>>
     let kdbx = KdbxFile {
