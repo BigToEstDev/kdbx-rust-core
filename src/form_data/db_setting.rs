@@ -4,7 +4,7 @@ use crate::db::{ContentCipherId, KdfAlgorithm};
 
 use super::MetaFormData;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DbSettings {
     pub(crate) kdf: KdfAlgorithm,
     pub(crate) cipher_id: ContentCipherId,
@@ -22,6 +22,25 @@ pub struct DbSettings {
     pub(crate) key_file_name_part: Option<String>,
     pub(crate) database_file_name: String,
     pub(crate) meta: MetaFormData,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for DbSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DbSettings")
+            .field("kdf", &self.kdf)
+            .field("cipher_id", &self.cipher_id)
+            .field("password", &crate::redacted::redacted_opt(&self.password))
+            .field("key_file_name", &self.key_file_name)
+            .field("password_used", &self.password_used)
+            .field("key_file_used", &self.key_file_used)
+            .field("password_changed", &self.password_changed)
+            .field("key_file_changed", &self.key_file_changed)
+            .field("key_file_name_part", &self.key_file_name_part)
+            .field("database_file_name", &self.database_file_name)
+            .field("meta", &self.meta)
+            .finish()
+    }
 }
 
 // Used in integration test

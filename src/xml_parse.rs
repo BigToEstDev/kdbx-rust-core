@@ -44,6 +44,19 @@ pub struct XmlReader<'a> {
     unknown_elements: UnknownElements,
 }
 
+// What an event skipped by read_tags is, for the log - the kind only, never the content
+fn skipped_event_kind(event: &Event) -> &'static str {
+    match event {
+        Event::Comment(_) => "comment",
+        Event::CData(_) => "CDATA",
+        Event::PI(_) => "processing instruction",
+        Event::Decl(_) => "declaration",
+        Event::DocType(_) => "doctype",
+        Event::Text(_) => "text",
+        _ => "event",
+    }
+}
+
 // Macro called for reading specific set of inner tags
 
 macro_rules! read_tags {
@@ -129,9 +142,11 @@ macro_rules! read_tags {
                 }
                 Ok(ref x) => {
                     // Comments, CDATA, processing instructions: not part of our model, skipped.
-                    // On Android a println! goes nowhere, on desktop it litters stdout
+                    // On Android a println! goes nowhere, on desktop it litters stdout.
+                    // Only the kind of the event goes to the log, never its content: a CDATA block
+                    // can carry data of the database, and warn reaches the release log (Step 31)
                     let ep = std::str::from_utf8($end_tag);
-                    log::warn!("Skipped XML event {:?} inside {:?}", x, ep);
+                    log::warn!("Skipped XML {} inside {:?}", skipped_event_kind(x), ep);
                 }
                 Err(e) => {
                     return Err(Error::from(e));
@@ -2258,6 +2273,17 @@ mod tests {
     use std::path::PathBuf;
 
     // --- Non-ignored unit tests ---
+
+    // Step 31: a skipped event is named in the log, its content is not - a CDATA block can carry data
+    // of the database, and warn reaches the release log
+    #[test]
+    fn a_skipped_event_is_named_without_its_content() {
+        let cdata = Event::CData(quick_xml::events::BytesCData::new("s3cret-value"));
+        assert_eq!(skipped_event_kind(&cdata), "CDATA");
+
+        let comment = Event::Comment(BytesText::new("s3cret-value"));
+        assert_eq!(skipped_event_kind(&comment), "comment");
+    }
 
     // Step 17 / 18: elements the core does not know are kept wherever they stood
     const UNKNOWN_XML: &str = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>

@@ -650,7 +650,7 @@ impl MainHeader {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub(crate) struct InnerHeader {
     // Id dereived from the LE bytes stored in inner_stream_id
     pub(crate) stream_cipher_id: u32,
@@ -662,6 +662,17 @@ pub(crate) struct InnerHeader {
     // and remaining bytes are the actual attachment
     // Such attachments data are stored in AttachmentSet for easy lookup as well as for uploading new ones
     pub(crate) entry_attachments: AttachmentSet,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for InnerHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InnerHeader")
+            .field("stream_cipher_id", &self.stream_cipher_id)
+            .field("inner_stream_key", &crate::redacted::Redacted)
+            .field("entry_attachments", &self.entry_attachments)
+            .finish()
+    }
 }
 
 impl InnerHeader {

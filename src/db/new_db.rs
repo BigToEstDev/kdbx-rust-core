@@ -14,7 +14,7 @@ use crate::{
 };
 use crate::{constants::GENERATOR_NAME, crypto::get_random_bytes_2};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct NewDatabase {
     pub(crate) database_name: String,
     pub(crate) database_description: Option<String>,
@@ -28,6 +28,22 @@ pub struct NewDatabase {
     // A path to the key file - desktop only, read by create_kdbx. On mobile the key file arrives as
     // bytes beside the NewDatabase (create_and_write_to_writer), and a path here is refused
     pub(crate) key_file_name: Option<String>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for NewDatabase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewDatabase")
+            .field("database_name", &self.database_name)
+            .field("database_description", &self.database_description)
+            .field("database_file_name", &self.database_file_name)
+            .field("file_name", &self.file_name)
+            .field("kdf", &self.kdf)
+            .field("cipher_id", &self.cipher_id)
+            .field("password", &crate::redacted::redacted_opt(&self.password))
+            .field("key_file_name", &self.key_file_name)
+            .finish()
+    }
 }
 
 impl Default for NewDatabase {

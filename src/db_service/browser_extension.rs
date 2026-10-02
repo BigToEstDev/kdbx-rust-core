@@ -39,10 +39,20 @@ pub struct BrowserExtensionCustomIcon {
     mime_type: String,
 }
 
-#[derive(Default, Serialize, Debug)]
+#[derive(Default, Serialize)]
 pub struct BasicEntryCredentialInfo {
     username: Option<String>,
     password: Option<String>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for BasicEntryCredentialInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BasicEntryCredentialInfo")
+            .field("username", &crate::redacted::redacted_opt(&self.username))
+            .field("password", &crate::redacted::redacted_opt(&self.password))
+            .finish()
+    }
 }
 
 pub fn find_matching_in_enabled_db_entries(
@@ -109,6 +119,18 @@ fn find_matching_entries_in_db(db_key: &str, input_url: &str) -> Result<MatchedD
 
 #[cfg(test)]
 mod tests {
+    // The derived Debug printed the credentials - see crate::redacted
+    #[test]
+    fn credentials_for_the_extension_are_not_shown() {
+        let info = super::BasicEntryCredentialInfo {
+            username: Some("octocat".into()),
+            password: Some("s3cret-value".into()),
+        };
+        let debug = format!("{:?}", info);
+        crate::redacted::tests::assert_hides(&debug, "s3cret-value");
+        crate::redacted::tests::assert_hides(&debug, "octocat");
+    }
+
     #[test]
     fn login_card_and_bank_types_are_autofill_eligible() {
         use crate::constants::entry_type_uuid;

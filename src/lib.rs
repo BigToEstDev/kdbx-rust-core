@@ -24,6 +24,7 @@ mod db_merge;
 mod form_data;
 
 mod password_generator;
+mod redacted;
 mod searcher;
 mod xml_parse;
 

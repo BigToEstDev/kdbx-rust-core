@@ -103,11 +103,22 @@ impl CustomData {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Item {
     pub(crate) key: String,
     pub(crate) value: String,
     pub(crate) last_modification_time: Option<NaiveDateTime>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for Item {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Item")
+            .field("key", &self.key)
+            .field("value", &crate::redacted::Redacted)
+            .field("last_modification_time", &self.last_modification_time)
+            .finish()
+    }
 }
 
 impl Item {

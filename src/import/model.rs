@@ -22,7 +22,7 @@ pub(crate) enum ImportedKind {
     BankAccount,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ImportedField {
     // Entry field name. Either a standard kdbx field (Title, UserName ...) or the
     // source column name when the field is a custom one
@@ -36,6 +36,18 @@ pub(crate) struct ImportedField {
     // Bitwarden packs an item's own custom fields into a single column - so the section
     // is built per entry rather than once for the whole import
     pub(crate) custom: bool,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for ImportedField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportedField")
+            .field("name", &self.name)
+            .field("value", &crate::redacted::Redacted)
+            .field("protected", &self.protected)
+            .field("custom", &self.custom)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,4 +69,21 @@ pub(crate) struct ImportedItem {
     // Standard kdbx icon index the source gave the item. None leaves the entry with the
     // icon its entry type provides
     pub(crate) icon_id: Option<i32>,
+}
+
+#[cfg(test)]
+mod tests {
+    // The derived Debug printed the imported values, passwords among them - see crate::redacted
+    #[test]
+    fn an_imported_field_hides_its_value() {
+        let field = super::ImportedField {
+            name: "Password".into(),
+            value: "s3cret-value".into(),
+            protected: true,
+            custom: false,
+        };
+        let debug = format!("{:?}", field);
+        crate::redacted::tests::assert_hides(&debug, "s3cret-value");
+        assert!(debug.contains("Password"), "{}", debug);
+    }
 }

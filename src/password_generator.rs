@@ -82,7 +82,7 @@ impl Default for PasswordGenerationOptions {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 /// The struct of an analysis.
 pub struct AnalyzedPassword {
     pub password: String,
@@ -99,6 +99,19 @@ pub struct AnalyzedPassword {
     pub progressive_count: usize,
     pub is_common: bool,
     pub score: PasswordScore,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for AnalyzedPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalyzedPassword")
+            .field("password", &crate::redacted::Redacted)
+            .field("analyzed_password", &crate::redacted::Redacted)
+            .field("length", &self.length)
+            .field("is_common", &self.is_common)
+            .field("score", &self.score)
+            .finish_non_exhaustive()
+    }
 }
 
 // #[derive(Deserialize, Serialize,Debug,Clone)]
@@ -223,6 +236,15 @@ fn analyze_password(password: &str) -> AnalyzedPassword {
 mod tests {
 
     use crate::password_generator::*;
+
+    // The derived Debug printed the password and its analysed form - see crate::redacted
+    #[test]
+    fn an_analysed_password_does_not_show_the_password() {
+        let analyzed = analyze_password("s3cret-value");
+        let debug = format!("{:?}", analyzed);
+        crate::redacted::tests::assert_hides(&debug, "s3cret-value");
+        assert!(debug.contains("length: 12"), "{}", debug);
+    }
 
     // --- Non-ignored unit tests ---
 

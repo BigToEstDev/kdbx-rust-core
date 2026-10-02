@@ -14,19 +14,42 @@ use data_encoding::BASE32_NOPAD;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CurrentOtpTokenData {
     pub(crate) token: String,
     pub(crate) ttl: u64,
     pub(crate) period: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for CurrentOtpTokenData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CurrentOtpTokenData")
+            .field("token", &crate::redacted::Redacted)
+            .field("ttl", &self.ttl)
+            .field("period", &self.period)
+            .finish()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct OtpSettings {
     pub secret_or_url: String,
     pub period: Option<u64>,
     pub digits: Option<usize>,
     pub hash_algorithm: Option<OtpAlgorithm>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for OtpSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OtpSettings")
+            .field("secret_or_url", &crate::redacted::Redacted)
+            .field("period", &self.period)
+            .field("digits", &self.digits)
+            .field("hash_algorithm", &self.hash_algorithm)
+            .finish()
+    }
 }
 
 impl OtpSettings {
@@ -85,7 +108,7 @@ macro_rules! verify_digits {
     };
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub(crate) struct OtpData {
     // non-encoded value
     // Any base32 encoded incoming value needs to be decoded
@@ -103,6 +126,21 @@ pub(crate) struct OtpData {
     pub(crate) algorithm: OtpAlgorithm,
     pub(crate) issuer: Option<String>,
     pub(crate) account_name: Option<String>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for OtpData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OtpData")
+            .field("decoded_secret", &crate::redacted::Redacted)
+            .field("period", &self.period)
+            .field("digits", &self.digits)
+            .field("skew", &self.skew)
+            .field("algorithm", &self.algorithm)
+            .field("issuer", &self.issuer)
+            .field("account_name", &self.account_name)
+            .finish()
+    }
 }
 
 fn system_time() -> Result<u64> {
