@@ -9,7 +9,7 @@ use crate::{
 #[allow(dead_code)]
 pub(crate) fn create_test_dbs_4() -> (KdbxFile, KdbxFile) {
     let ndb = NewDatabase::default();
-    let mut source = ndb.create().unwrap();
+    let mut source = ndb.create(None).unwrap();
 
     let source_db = source.keepass_main_content.as_mut().unwrap();
 
@@ -40,7 +40,7 @@ pub(crate) fn create_test_dbs_4() -> (KdbxFile, KdbxFile) {
 
 pub(crate) fn create_test_dbs_5() -> (KdbxFile, KdbxFile) {
     let ndb = NewDatabase::default();
-    let mut source = ndb.create().unwrap();
+    let mut source = ndb.create(None).unwrap();
 
     let source_db = source.keepass_main_content.as_mut().unwrap();
 
@@ -65,7 +65,7 @@ pub(crate) fn create_test_dbs_5() -> (KdbxFile, KdbxFile) {
     source_db.root.insert_entry(entry2).unwrap();
 
     let ndb = NewDatabase::default();
-    let mut target = ndb.create().unwrap();
+    let mut target = ndb.create(None).unwrap();
 
     let target_db = target.keepass_main_content.as_mut().unwrap();
 

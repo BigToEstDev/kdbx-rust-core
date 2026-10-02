@@ -72,8 +72,8 @@ pub use crate::password_generator::{AnalyzedPassword, PasswordGenerationOptions,
 pub use crate::service_util;
 
 pub use crate::db::{
-    calculate_db_file_checksum, KeyStoreOperation, KeyStoreService, KeyStoreServiceType,
-    NewDatabase, SecureKeyInfo,
+    calculate_db_file_checksum, FileKey, KeyStoreOperation, KeyStoreService, KeyStoreServiceType,
+    NewDatabase, SecureKeyInfo, KEY_FILE_MAX_SIZE, PASSWORD_MAX_CHARS,
 };
 
 pub use crate::db_content::{
@@ -531,17 +531,18 @@ pub fn unlock_kdbx_on_biometric_authentication(db_key: &str) -> Result<KdbxLoade
     })
 }
 
-// Compares the entered credentials with the stored one for a quick unlock of the db
+// Compares the entered credentials with the stored one for a quick unlock of the db.
+// The key file is built by the caller - from a path or from bytes, see FileKey
 pub fn unlock_kdbx(
     db_key: &str,
     password: Option<&str>,
-    key_file_name: Option<&str>,
+    file_key: Option<FileKey>,
 ) -> Result<KdbxLoaded> {
     // Verify credentials against the stored composite key. This works while the
     // content is encrypted: compare_key uses the composite key, not the
     // decrypted content.
     let matched = call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
-        ctx.kdbx_file.compare_key(password, key_file_name)
+        ctx.kdbx_file.compare_key(password, &file_key)
     })?;
     if !matched {
         // Same error as if db file verification failure happening in load_kdbx.
@@ -602,6 +603,11 @@ pub fn get_db_settings(db_key: &str) -> Result<DbSettings> {
 }
 
 pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
+    // Before anything is changed: a refused password must leave the settings as they were
+    if db_settings.password_changed {
+        db::check_new_password(db_settings.password.as_deref())?;
+    }
+
     kdbx_context_mut_action!(db_key, |ctx: &mut KdbxContext| {
         let db_settings = db_settings.clone();
         let kp = ctx
@@ -682,7 +688,9 @@ pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
                     "Key file name can not be empty when key file used flag is set",
                 ));
             }
-            db_settings.key_file_name.as_deref()
+            // Still a path: the settings form takes the key file by name. Moving it to bytes waits for
+            // the settings screen - plan/todo/android/db-credentials-change.md in pass-docs
+            FileKey::from(db_settings.key_file_name.as_deref())?
         } else {
             None
         };

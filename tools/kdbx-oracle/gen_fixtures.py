@@ -975,6 +975,34 @@ def build_time_otp_fixture():
     return db_path
 
 
+# --- Фикстура с длинным паролем (Step 29) -------------------------------------
+#
+# Ядро не даёт ЗАДАТЬ пароль длиннее 256 символов (db/credential_limits.rs), но KeePass
+# длину не ограничивает, и такая чужая база обязана открываться. Создать её нашим же ядром
+# нельзя — как раз из-за лимита, поэтому собирает чужая реализация. Не-ASCII в хвосте:
+# лимит считает символы, а не байты. Значение продублировано в tests/key_file_bytes.rs.
+LONG_PASSWORD_FIXTURE = "long_password.kdbx"
+LONG_PASSWORD = "x" * 300 + "-пароль-😀"
+
+
+def build_long_password_fixture():
+    db_path = OUT_DIR / LONG_PASSWORD_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=LONG_PASSWORD)
+    header = kp.kdbx.header.value.dynamic_header
+    params = header.kdf_parameters.data.dict
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+    kp.add_entry(kp.root_group, "t1", "user1", "pw1")
+    kp.save()
+
+    PyKeePass(str(db_path), password=LONG_PASSWORD)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -1122,6 +1150,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (TOTP формата KeePass 2.47+)"
         % (TIME_OTP_FIXTURE, "aes256", "argon2id", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_long_password_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (пароль длиннее лимита ядра)"
+        % (LONG_PASSWORD_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 

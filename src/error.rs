@@ -81,6 +81,12 @@ pub enum Error {
     #[error("Valid password or key file name or both are required")]
     InSufficientCredentials,
 
+    // See db::credential_limits for both limits
+    #[error("KeyFileTooLarge: The key file is larger than the largest one accepted")]
+    KeyFileTooLarge,
+    #[error("PasswordTooLong: The password is longer than the longest one accepted")]
+    PasswordTooLong,
+
     /// Unknown key derivation function UUID.
     // #[error("Invalid KDF ID.Only `Argon2` and `AES` are supported")]
     // UnsupportedKdf(Vec<u8>),

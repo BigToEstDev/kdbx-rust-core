@@ -111,21 +111,52 @@ fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &
     db_service::update_entry_from_form_data(db_key, form).unwrap();
 }
 
-fn build_db(out_dir: &str, file_name: &str, cipher_id: &str, kdf: &str, with_key_file: bool) {
+#[derive(Clone, Copy, PartialEq)]
+enum KeyFile {
+    None,
+    /// Ядро пишет key-файл само, по пути, и база создаётся по пути — desktop
+    Path,
+    /// Ядро отдаёт байты key-файла, пишет их вызывающий, база создаётся в буфер — так делает
+    /// приложение на Android (Step 29)
+    Bytes,
+}
+
+fn build_db(out_dir: &str, file_name: &str, cipher_id: &str, kdf: &str, key_file_kind: KeyFile) {
     let db_key = format!("{}/{}", out_dir, file_name);
     let _ = std::fs::remove_file(&db_key);
 
-    let key_file = if with_key_file {
+    let key_file = if key_file_kind == KeyFile::None {
+        None
+    } else {
         let path = format!("{}.keyx", db_key.trim_end_matches(".kdbx"));
         let _ = std::fs::remove_file(&path);
-        // Key-file пишет наше ядро — заодно проверяем, читает ли его сторонняя реализация
-        db_service::generate_key_file(&path).unwrap();
+        // Key-file генерирует наше ядро — заодно проверяем, читает ли его сторонняя реализация
+        if key_file_kind == KeyFile::Path {
+            db_service::generate_key_file(&path).unwrap();
+        } else {
+            std::fs::write(&path, db_service::generate_key_file_content().unwrap()).unwrap();
+        }
         Some(path)
-    } else {
-        None
     };
 
-    db_service::create_kdbx(new_db(&db_key, cipher_id, kdf, key_file.as_deref())).unwrap();
+    if key_file_kind == KeyFile::Bytes {
+        let path = key_file.as_deref().unwrap();
+        let file_key =
+            db_service::FileKey::from_bytes("written_by_app.keyx", &std::fs::read(path).unwrap())
+                .unwrap();
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        db_service::create_and_write_to_writer(
+            &mut buffer,
+            new_db(&db_key, cipher_id, kdf, None),
+            Some(file_key),
+        )
+        .unwrap();
+        // Как приложение после создания: байты базы ложатся в файл. db_key здесь — путь, поэтому
+        // дальше база правится и сохраняется тем же кодом, что и остальные
+        std::fs::write(&db_key, buffer.into_inner()).unwrap();
+    } else {
+        db_service::create_kdbx(new_db(&db_key, cipher_id, kdf, key_file.as_deref())).unwrap();
+    }
 
     let tree = db_service::groups_summary_data(&db_key).unwrap();
     let root_uuid = tree.root_uuid;
@@ -182,20 +213,27 @@ fn main() {
         "written_aes256_argon2d.kdbx",
         "Aes256",
         "Argon2d",
-        false,
+        KeyFile::None,
     );
     build_db(
         &out_dir,
         "written_chacha20_argon2id.kdbx",
         "ChaCha20",
         "Argon2id",
-        false,
+        KeyFile::None,
     );
     build_db(
         &out_dir,
         "written_aes256_argon2d_keyfile.kdbx",
         "Aes256",
         "Argon2d",
-        true,
+        KeyFile::Path,
+    );
+    build_db(
+        &out_dir,
+        "written_aes256_argon2id_keyfile_bytes.kdbx",
+        "Aes256",
+        "Argon2id",
+        KeyFile::Bytes,
     );
 }
