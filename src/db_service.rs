@@ -547,7 +547,7 @@ pub fn unlock_kdbx(
     if !matched {
         // Same error as if db file verification failure happening in load_kdbx.
         // On mismatch we return early, leaving the locked state untouched.
-        return Err(Error::HeaderHmacHashCheckFailed);
+        return Err(Error::InvalidCredentials);
     }
 
     // Credentials matched — restore the decrypted content and clear the locked flag,
@@ -1299,7 +1299,7 @@ pub fn merge_kdbx_with_reader<R: std::io::Read + std::io::Seek>(
 ) -> Result<MergeResult> {
     call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
         let other_kdbx = db::reload(reader, &ctx.kdbx_file).map_err(|e| match e {
-            Error::HeaderHmacHashCheckFailed => Error::MergeFailedCredentialsChanged,
+            Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
             other => other,
         })?;
 
@@ -1331,10 +1331,10 @@ pub fn merge_kdbx_with_disk_version(db_key: &str) -> Result<MergeResult> {
         // debug!(ctx.kdbx_file.all_entries);
         // db::reload() clones ctx.kdbx_file (including encrypted composite key) and decrypts.
         // If the on-disk file was re-encrypted with different credentials, reload returns
-        // HeaderHmacHashCheckFailed — remap it to a specific error so the frontend can
+        // InvalidCredentials — remap it to a specific error so the frontend can
         // show a targeted message instead of a generic "invalid credentials" prompt.
         let disk_kdbx = db::reload(&mut reader, &ctx.kdbx_file).map_err(|e| match e {
-            Error::HeaderHmacHashCheckFailed => Error::MergeFailedCredentialsChanged,
+            Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
             other => other,
         })?;
 

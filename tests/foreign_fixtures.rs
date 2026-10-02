@@ -188,17 +188,24 @@ fn read_foreign_aes256_argon2d_prod_kdf_params() {
     close_fixture(&db_key);
 }
 
+// Неверный пароль на базе, собранной чужой реализацией, — именно InvalidCredentials: по этому `kind`
+// UI отличает опечатку в пароле от файла, который не откроется никогда (Step 30).
 #[test]
 fn foreign_fixture_wrong_password_is_rejected() {
     common::init();
 
     let db_key = temp_copy("aes256_argon2d.kdbx");
     let loaded = db_service::load_kdbx(&db_key, Some("wrong-password"), None);
-    assert!(loaded.is_err(), "неверный пароль должен отклоняться");
+    assert!(
+        matches!(loaded, Err(db_service::Error::InvalidCredentials)),
+        "неверный пароль — InvalidCredentials, а пришло: {:?}",
+        loaded.err()
+    );
     let _ = std::fs::remove_file(&db_key);
 }
 
-// Key-file обязателен: с одним паролем эта база открываться не должна.
+// Key-file обязателен: с одним паролем эта база открываться не должна. Для формата это тот же неверный
+// составной ключ — тот же InvalidCredentials, пароль от key-файла не отличить.
 #[test]
 fn foreign_fixture_key_file_is_required() {
     common::init();
@@ -206,8 +213,9 @@ fn foreign_fixture_key_file_is_required() {
     let db_key = temp_copy("aes256_argon2d_keyfile.kdbx");
     let loaded = db_service::load_kdbx(&db_key, Some(PASSWORD), None);
     assert!(
-        loaded.is_err(),
-        "база с key-file не должна открываться по одному паролю"
+        matches!(loaded, Err(db_service::Error::InvalidCredentials)),
+        "база с key-file не должна открываться по одному паролю, а пришло: {:?}",
+        loaded.err()
     );
     let _ = std::fs::remove_file(&db_key);
 }

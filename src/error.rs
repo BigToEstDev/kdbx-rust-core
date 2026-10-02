@@ -58,16 +58,17 @@ pub enum Error {
     #[error("Secure random number generation failed: {0}")]
     RandomGenerationFailed(String),
 
-    #[error("Header corrupted")] //#[error("Header Hash Check Failed")]
-    HeaderHashCheckFailed,
+    // The names of the three below are a contract: the FFI hands the variant name to the app as `kind`
+    // and the ui branches on it (Step 30). Named after what they mean to the user, not after the check
+    // that failed.
+    /// The stored hash of the header does not match it: the file is damaged before the key is even tried.
+    #[error("Header corrupted")]
+    HeaderCorrupted,
 
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    #[error("InvalidCredentials: Invalid credentials were provided, please try again")]
-    HeaderHmacHashCheckFailed,
-
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    /// Wrong password, key file or both - the composite key does not match. One kind for both: the format
+    /// cannot tell which of the two was wrong.
     #[error("Invalid credentials were provided, please try again")]
-    HeaderHmacHashCheckFailed,
+    InvalidCredentials,
 
     // #[cfg(any(target_os = "ios",target_os = "android"))]
     // Using cfg will only work when this error variant is used behind ios and android target
@@ -75,8 +76,9 @@ pub enum Error {
     #[error("BiometricCredentialsAuthenticationFailed")]
     BiometricCredentialsAuthenticationFailed,
 
-    #[error("BlockHashCheckFailed")]
-    BlockHashCheckFailed,
+    /// A block of the content does not match its HMAC, with the right key: the content is damaged.
+    #[error("Content corrupted")]
+    ContentCorrupted,
 
     #[error("Valid password or key file name or both are required")]
     InSufficientCredentials,
