@@ -28,7 +28,7 @@ pub use crate::db_content::CurrentOtpTokenData;
 //     Resolved(Option<String>),
 // }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct KeyValueData {
     key: String,
     value: Option<String>,
@@ -53,6 +53,21 @@ pub struct KeyValueData {
     // Future idea to use instead of adding separate fields as done using 'password_score' and 'current_opt_token' ?
     // #[serde(skip_deserializing)]
     // pub additional_data: Option<KeyValueAdditionalData>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for KeyValueData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyValueData")
+            .field("key", &self.key)
+            .field("value", &crate::redacted::redacted_opt(&self.value))
+            .field("protected", &self.protected)
+            .field("required", &self.required)
+            .field("data_type", &self.data_type)
+            .field("standard_field", &self.standard_field)
+            .field("current_opt_token", &self.current_opt_token)
+            .finish_non_exhaustive()
+    }
 }
 
 impl From<&KeyValue> for KeyValueData {

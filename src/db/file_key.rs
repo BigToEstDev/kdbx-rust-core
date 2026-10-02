@@ -146,11 +146,22 @@ impl FileKey {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct KeyFileData {
     pub version: Option<String>,
     pub hash: Option<String>,
     pub data: Option<String>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for KeyFileData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyFileData")
+            .field("version", &self.version)
+            .field("hash", &crate::redacted::redacted_opt(&self.hash))
+            .field("data", &crate::redacted::redacted_opt(&self.data))
+            .finish()
+    }
 }
 
 impl KeyFileData {

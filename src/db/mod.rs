@@ -118,7 +118,7 @@ impl KdfAlgorithm {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub(crate) struct AttachmentSet {
     // All attachments bytes data accessible by its hash.
     attachments: HashMap<AttachmentHashValue, Vec<u8>>,
@@ -130,6 +130,17 @@ pub(crate) struct AttachmentSet {
     // Write time look up and it is used to set the index refs in entries that have attachments based on the
     // hash value found in 'BinaryKeyValue'
     hash_index_ref: HashMap<AttachmentHashValue, i32>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for AttachmentSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttachmentSet")
+            .field("attachments", &self.attachments.len())
+            .field("index_ref_hash", &self.index_ref_hash)
+            .field("hash_index_ref", &self.hash_index_ref)
+            .finish()
+    }
 }
 
 impl AttachmentSet {
@@ -515,10 +526,20 @@ impl SecuredDatabaseKeys {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SecureKeyInfo {
     pub key: Vec<u8>,
     pub nonce: Vec<u8>,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for SecureKeyInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecureKeyInfo")
+            .field("key", &crate::redacted::Redacted)
+            .field("nonce", &crate::redacted::Redacted)
+            .finish()
+    }
 }
 
 impl SecureKeyInfo {
@@ -834,6 +855,26 @@ pub fn create_key_file(key_file_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{calculate_db_file_checksum, AttachmentSet};
+
+    // The derived Debug printed the inner stream key and the bytes of every attachment - see
+    // crate::redacted
+    #[test]
+    fn the_inner_header_hides_its_key_and_the_attachments() {
+        let mut header = super::InnerHeader {
+            inner_stream_key: vec![201, 202, 203],
+            ..Default::default()
+        };
+        header.entry_attachments.insert(vec![211, 212, 213]);
+
+        let debug = format!("{:?}", header);
+        crate::redacted::tests::assert_hides(&debug, "201, 202, 203");
+        assert!(
+            !debug.contains("211, 212, 213"),
+            "attachment bytes: {}",
+            debug
+        );
+        assert!(debug.contains("attachments: 1"), "{}", debug);
+    }
     use std::io::{Cursor, Seek, SeekFrom};
 
     // Чек-сумма считалась по первым 1000 байтам файла. Заголовок kdbx при каждом сохранении получает

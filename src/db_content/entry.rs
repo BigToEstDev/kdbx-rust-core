@@ -1214,12 +1214,24 @@ impl Entry {
 // We may need to add additional entry field specific
 // information here - field data type, length restriction etc and need to be
 // transfered from and to Entry CustomData
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct KeyValue {
     pub(crate) key: String,
     pub(crate) value: String,
     pub(crate) protected: bool,
     pub(crate) data_type: FieldDataType,
+}
+
+// Written by hand: the derived one would print the secret - see crate::redacted
+impl std::fmt::Debug for KeyValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyValue")
+            .field("key", &self.key)
+            .field("value", &crate::redacted::Redacted)
+            .field("protected", &self.protected)
+            .field("data_type", &self.data_type)
+            .finish()
+    }
 }
 
 impl KeyValue {

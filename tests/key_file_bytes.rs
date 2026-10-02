@@ -245,7 +245,7 @@ fn a_password_over_the_limit_cannot_be_set_in_settings_and_nothing_changes() {
     let settings = serde_json::from_value(v).unwrap();
 
     assert!(matches!(
-        db_service::set_db_settings(&db_key, settings),
+        db_service::set_db_settings(&db_key, settings, None),
         Err(Error::PasswordTooLong)
     ));
 
