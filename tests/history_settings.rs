@@ -59,7 +59,7 @@ fn set_history_limits(db_key: &str, max_items: i64, max_size: i64) {
     v["meta"]["history_max_items"] = serde_json::json!(max_items);
     v["meta"]["history_max_size"] = serde_json::json!(max_size);
     let settings: DbSettings = serde_json::from_value(v).unwrap();
-    db_service::set_db_settings(db_key, settings).unwrap();
+    db_service::set_db_settings(db_key, settings, None).unwrap();
 }
 
 fn save_and_reopen(db_key: &str) {

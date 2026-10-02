@@ -54,6 +54,12 @@ impl DbSettings {
         self.meta.database_name = name.into();
         self
     }
+
+    /// The name of the key file the database is closed with, to show - not a path to open. Output only:
+    /// `set_db_settings` takes a new key file as content beside the settings and never reads this.
+    pub fn key_file_name(&self) -> Option<&str> {
+        self.key_file_name.as_deref()
+    }
 }
 
 // Used in integration test

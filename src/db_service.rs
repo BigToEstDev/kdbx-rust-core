@@ -602,49 +602,78 @@ pub fn get_db_settings(db_key: &str) -> Result<DbSettings> {
     })
 }
 
-pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
-    // Before anything is changed: a refused password must leave the settings as they were
+// The settings come back as get_db_settings gave them, edited. The key file, when it changes, comes
+// beside them as content (file_key), built by the caller - from bytes on mobile, from a path on desktop,
+// see FileKey. `key_file_name` inside the settings is never read: it is what get_db_settings shows, and
+// a name to show cannot be told from a path, so taking it as input would mean opening whatever it says.
+//
+// Everything is checked before anything changes: a refusal leaves the database as it was, name and all.
+pub fn set_db_settings(
+    db_key: &str,
+    db_settings: DbSettings,
+    file_key: Option<FileKey>,
+) -> Result<()> {
     if db_settings.password_changed {
         db::check_new_password(db_settings.password.as_deref())?;
     }
 
     kdbx_context_mut_action!(db_key, |ctx: &mut KdbxContext| {
         let db_settings = db_settings.clone();
-        let kp = ctx
-            .kdbx_file
-            .keepass_main_content
-            .as_mut()
-            .ok_or("No main content")?;
-        kp.meta.update((&db_settings.meta).into())?;
+        let file_key = file_key.clone();
 
         // IMPORTANT
-        // password_used,key_file_used,password_changed and key_file_changed are set from client side
-        // in a consistent way statifying the following combinations
-        // e.g
+        // password_used, key_file_used, password_changed and key_file_changed are set from client side
+        // in a consistent way satisfying the following combinations
         // If a password is changed, then password_used = true, password_changed = true and password = Some value
         // If the password use is removed,
-        //     then password_used = false , password_changed = true, password = None  ;
-        //          key_file_used = true , key_file_changed = true or false ,  key_file_name = Some value
-        //
+        //     then password_used = false, password_changed = true, password = None;
+        //          and a key file has to stay - the current one or a new one
         // If a key file is changed,
-        //      then key_file_used = true ,key_file_changed = true, key_file_name = Some value
-        //      password_used = true or false, password_changed = false
+        //      then key_file_used = true, key_file_changed = true, file_key = Some
         // If the key file use is removed,
-        //      then key_file_used = false, key_file_changed = true,key_file_name = None; password_used = true , password_changed = true or false
+        //      then key_file_used = false, key_file_changed = true, file_key = None; and a password has to stay
 
-        debug!("password_used: {}, password_changed: {}, password is nil?:  {},key_file_used: {}, key_file_changed: {}, key_file_name:  {:?}",
-        db_settings.password_used,db_settings.password_changed,db_settings.password.is_none(),
-        db_settings.key_file_used, db_settings.key_file_changed, db_settings.key_file_name
+        debug!(
+            "password_used: {}, password_changed: {}, password is nil?: {}, key_file_used: {}, key_file_changed: {}, key file: {:?}",
+            db_settings.password_used,
+            db_settings.password_changed,
+            db_settings.password.is_none(),
+            db_settings.key_file_used,
+            db_settings.key_file_changed,
+            file_key.as_ref().map(|f| f.file_name())
         );
 
-        // Both password and key file can not be none at the same time
-        // Note the existing db_settings.password = None when password_changed = false as
-        // the password field in DbSetttings is None (db_settings.password = None) in 'get_db_settings' call
-        // Because of this db_settings.password will have Some value only when password_used = true and password_changed = true
+        // A key file is content only when it changes to a new one; anywhere else it would mean the
+        // caller expects a key file the settings will not apply
+        match (
+            db_settings.key_file_used,
+            db_settings.key_file_changed,
+            &file_key,
+        ) {
+            (true, true, None) => {
+                return Err(Error::DataError(
+                    "The new key file is required when the key file is changed",
+                ));
+            }
+            (true, true, Some(_)) => {}
+            (_, _, Some(_)) => {
+                return Err(Error::DataError(
+                    "A key file is passed, but the settings do not change it to a new one",
+                ));
+            }
+            (_, _, None) => {}
+        }
 
-        // If we do not use password, then key file should be used;
-        // db_settings.password_used is false when password use is removed in Settings UI
-        if !db_settings.password_used && db_settings.key_file_name.is_none() {
+        // Without a change the key file stays what the database has now; the flag has to agree with that
+        let (_, key_file_in_use) = ctx.kdbx_file.credentials_used_state();
+        if !db_settings.key_file_changed && db_settings.key_file_used != key_file_in_use {
+            return Err(Error::DataError(
+                "The key file is said to be unchanged, but its use differs from the database",
+            ));
+        }
+
+        // Both password and key file can not be none at the same time
+        if !db_settings.password_used && !db_settings.key_file_used {
             return Err(error::Error::InSufficientCredentials);
         }
 
@@ -662,38 +691,20 @@ pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
             ));
         }
 
-        // When key_file_used is true,
-        // then key file name should have some value - either the existing one or new one
-        if db_settings.key_file_used && db_settings.key_file_name.is_none() {
-            return Err(Error::DataError("Key file name can not be empty"));
-        }
-
         // password is considered only when it is changed
         let password = if db_settings.password_used && db_settings.password_changed {
-            // May be this check redundant ?
-            if db_settings.password.is_none() {
-                return Err(Error::DataError(
-                    "Password can not be empty when password file used flag is set",
-                ));
-            }
             db_settings.password.as_deref()
         } else {
             None
         };
 
-        let file_key = if db_settings.key_file_used {
-            // May be this check redundant ?
-            if db_settings.key_file_name.is_none() {
-                return Err(Error::DataError(
-                    "Key file name can not be empty when key file used flag is set",
-                ));
-            }
-            // Still a path: the settings form takes the key file by name. Moving it to bytes waits for
-            // the settings screen - plan/todo/android/db-credentials-change.md in pass-docs
-            FileKey::from(db_settings.key_file_name.as_deref())?
-        } else {
-            None
-        };
+        // Every check has passed - only now anything changes
+        let kp = ctx
+            .kdbx_file
+            .keepass_main_content
+            .as_mut()
+            .ok_or("No main content")?;
+        kp.meta.update((&db_settings.meta).into())?;
 
         if db_settings.password_changed && db_settings.key_file_changed {
             // Both password and key file use changed
@@ -702,7 +713,7 @@ pub fn set_db_settings(db_key: &str, db_settings: DbSettings) -> Result<()> {
             // Only password changed
             ctx.kdbx_file.set_password(password)?;
         } else if db_settings.key_file_changed {
-            // Only password key file used changed
+            // Only the key file changed: a new one, or none
             ctx.kdbx_file.set_file_key(file_key)?;
         }
 

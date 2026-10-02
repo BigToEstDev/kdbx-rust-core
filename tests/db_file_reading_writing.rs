@@ -96,7 +96,7 @@ fn verify_read_write_db_file() {
     // Change something and save
     let mut settings = db_service::get_db_settings(&db_key).unwrap();
     settings.set_database_name("Changed");
-    db_service::set_db_settings(&db_key, settings).unwrap();
+    db_service::set_db_settings(&db_key, settings, None).unwrap();
 
     let saved = db_service::save_kdbx_with_backup(&db_key, None, true);
     assert!(saved.is_ok(), "save_kdbx_with_backup failed: {:?}", saved);

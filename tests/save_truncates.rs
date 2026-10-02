@@ -69,7 +69,7 @@ fn create_big_then_shrink(db_key: &str) -> u64 {
     let mut v = serde_json::to_value(db_service::get_db_settings(db_key).unwrap()).unwrap();
     v["meta"]["database_name"] = serde_json::json!(SHORT_NAME);
     let settings: DbSettings = serde_json::from_value(v).unwrap();
-    db_service::set_db_settings(db_key, settings).unwrap();
+    db_service::set_db_settings(db_key, settings, None).unwrap();
 
     big_len
 }
