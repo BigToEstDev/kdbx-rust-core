@@ -38,14 +38,18 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
     }
 
     // Reads the content of kdbx db, parses headers, decrypts payload, parses xml content into in memory struct
+    //
+    // A file cut short - a sync that did not finish, the most common way a file goes bad - is reported as
+    // corrupted, not as whatever the reading happened to trip over first (Step 30): the app branches on the
+    // error kind, and the same damage has to be one kind wherever the file ends
     pub(crate) fn read(&mut self) -> Result<()> {
         debug!("Starting the database read_file_signature call");
-        self.read_file_signature()?;
-        self.read_header()?;
-        self.verify_stored_hash()?;
+        self.read_file_signature().map_err(header_damage)?;
+        self.read_header().map_err(header_damage)?;
+        self.verify_stored_hash().map_err(header_damage)?;
         self.kdbx_file.compute_all_keys(false)?; //Uses password and key file content
-        self.verify_header_hmac()?;
-        let mut buf = self.read_hmac_data_blocks()?;
+        self.verify_header_hmac().map_err(header_damage)?;
+        let mut buf = self.read_hmac_data_blocks().map_err(content_damage)?;
         buf = self.decrypt_data(&buf)?;
         buf = self.split_inner_header_xml_content(&buf)?;
         // buf now has the xml bytes data
@@ -179,7 +183,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
         )?;
         let cal_hash = crypto::sha256_hash_from_slice_vecs(&[&header_data])?;
         if cal_hash.to_vec() != stored_hash {
-            return Err(Error::HeaderHashCheckFailed);
+            return Err(Error::HeaderCorrupted);
         }
         Ok(())
     }
@@ -202,7 +206,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
         if r {
             Ok(())
         } else {
-            Err(Error::HeaderHmacHashCheckFailed)
+            Err(Error::InvalidCredentials)
         }
     }
 
@@ -253,7 +257,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
                 &stored_blk_hmac_hash,
             )?;
             if !r {
-                return Err(Error::BlockHashCheckFailed);
+                return Err(Error::ContentCorrupted);
             }
             // Accumulate the verified blocks of data
             acc.append(&mut data_buffer);
@@ -378,6 +382,34 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
 }
 
 /////
+
+fn is_end_of_stream(error: &Error) -> bool {
+    matches!(error, Error::Io(io) if io.kind() == std::io::ErrorKind::UnexpectedEof)
+}
+
+// A failure while reading the outer header, as the app should see it. The stream ending, or a field too
+// short for the number it holds (util::to_u32 and friends answer UnexpectedError), means the header is
+// damaged - most often a file cut short. Every other refusal - not a KeePass file, an old format, an
+// unsupported cipher or kdf - passes through as it is: those are answers about the file, not damage
+fn header_damage(error: Error) -> Error {
+    match error {
+        Error::UnexpectedError(ref reason) => {
+            debug!("Header field could not be read: {}", reason);
+            Error::HeaderCorrupted
+        }
+        e if is_end_of_stream(&e) => Error::HeaderCorrupted,
+        e => e,
+    }
+}
+
+// The same for the blocks after the header: the stream ending there is a file cut short
+fn content_damage(error: Error) -> Error {
+    if is_end_of_stream(&error) {
+        Error::ContentCorrupted
+    } else {
+        error
+    }
+}
 
 fn read_stream_data<R: Read + Seek>(reader: &mut R, start: u64, end: u64) -> Result<Vec<u8>> {
     let current_reader_position = reader.stream_position()?;

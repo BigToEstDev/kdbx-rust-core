@@ -114,11 +114,11 @@ fn a_database_with_a_key_file_does_not_open_without_it_or_with_another_one() {
 
     assert!(matches!(
         read(&db_key, &bytes, Some(PASSWORD), None),
-        Err(Error::HeaderHmacHashCheckFailed)
+        Err(Error::InvalidCredentials)
     ));
     assert!(matches!(
         read(&db_key, &bytes, Some(PASSWORD), key("other.keyx", &other)),
-        Err(Error::HeaderHmacHashCheckFailed)
+        Err(Error::InvalidCredentials)
     ));
 }
 
@@ -147,11 +147,11 @@ fn unlock_takes_the_key_file_as_bytes() {
 
     assert!(matches!(
         db_service::unlock_kdbx(&db_key, Some(PASSWORD), key("other.keyx", &other)),
-        Err(Error::HeaderHmacHashCheckFailed)
+        Err(Error::InvalidCredentials)
     ));
     assert!(matches!(
         db_service::unlock_kdbx(&db_key, Some(PASSWORD), None),
-        Err(Error::HeaderHmacHashCheckFailed)
+        Err(Error::InvalidCredentials)
     ));
     assert!(db_service::is_db_locked(&db_key).unwrap());
 

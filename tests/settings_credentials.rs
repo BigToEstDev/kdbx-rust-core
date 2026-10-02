@@ -142,7 +142,7 @@ fn a_new_key_file_replaces_the_old_one() {
             None,
         )
     };
-    assert!(matches!(read(&old), Err(Error::HeaderHmacHashCheckFailed)));
+    assert!(matches!(read(&old), Err(Error::InvalidCredentials)));
     read(&new).unwrap();
     db_service::close_kdbx(&db_key).unwrap();
 }
