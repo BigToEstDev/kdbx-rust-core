@@ -17,81 +17,7 @@ use crate::error::{Error, Result};
 use crate::db::{
     self, write_kdbx_content_to_file, write_kdbx_file, write_kdbx_file_with_backup_file, FileKey,
 };
-// Used only by write_new_db_kdbx_file below (feature `csv-import`)
-#[cfg(feature = "csv-import")]
-use crate::db::KdbxFile;
 use crate::util::{self};
-
-// For now it is used in desktop
-// TODO: To use in mobile also, we need to fix calling 'save_kdbx_with_backup'
-
-// Only the parked csv import creates a database through a path (feature `csv-import`); everything
-// else goes through create_and_write_to_writer. Step 20 p.2 keeps the desktop bound of the original
-// code: a stream-based variant is part of the import work when it is picked up.
-#[cfg(all(
-    feature = "csv-import",
-    any(target_os = "macos", target_os = "windows", target_os = "linux")
-))]
-pub(crate) fn write_new_db_kdbx_file(kdbx_file: KdbxFile) -> Result<KdbxLoaded> {
-    debug!("write_new_db_kdbx_file is called ");
-
-    let kdbx_loaded = (&kdbx_file).into();
-
-    let db_key = kdbx_file.get_database_file_name().to_string();
-
-    // IMPORTANT: Make sure that we store the newly created db in memory
-    KdbxContext::insert(kdbx_file);
-
-    // Save the newly created db to the file system for persistence
-    // This is desktop specific
-    save_kdbx_with_backup(&db_key, None, true)?;
-
-    debug!("save_kdbx_with_backup is done in write_new_db_kdbx_file");
-
-    Ok(kdbx_loaded)
-}
-
-/*
-pub(crate) fn create_kdbx_with_imported_csv(
-    new_db: NewDatabase,
-    mapping: CsvImportMapping,
-) -> Result<KdbxFile> {
-    if let Some(kf) = &new_db.key_file_name {
-        if !kf.trim().is_empty() & !Path::new(kf).exists() {
-            return Err(Error::NotFound(format!(
-                "The key file {} is not valid one",
-                kf
-            )));
-        }
-    }
-    let mut kdbx_file = new_db.create()?;
-    let keepass_file = to_keepassfile_mut!(kdbx_file);
-
-    mapping.create_kdbx_with_imported_csv(keepass_file)?;
-
-    let database_name = keepass_file.meta.database_name.clone();
-
-    let (file_name, key_file_name);
-
-    cfg_if::cfg_if! {
-        if #[cfg(any(target_os = "macos",target_os = "windows",target_os = "linux"))] {
-            (file_name,key_file_name) = (util::file_name(&new_db.database_file_name),kdbx_file.get_key_file_name());
-        } else {
-            // In case of Mobile
-            (file_name,key_file_name) = (new_db.file_name, new_db.key_file_name) ;
-        }
-    }
-
-    let kdbx_loaded = KdbxLoaded {
-        db_key: new_db.database_file_name.clone(),
-        database_name,
-        file_name,
-        key_file_name,
-    };
-
-    Ok(kdbx_file)
-}
-*/
 
 // TODO: Refactor create_kdbx (used mainly for desktop app) and create_and_write_to_writer to use common functionalties
 // Called to create a new KDBX database and perists the file
@@ -428,34 +354,6 @@ pub fn create_and_write_to_writer<W: Read + Write + Seek>(
 
     //Ok(new_db.database_file_name.clone())
     Ok(kdbx_loaded)
-}
-
-// iOS
-// Called to copy the database data from memory found by the db_key to a file
-// We are using file name instead of writer as this is an internal file and accessible by file name
-#[cfg(target_os = "ios")]
-pub fn copy_and_write_autofill_ready_db(db_key: &str, full_file_name: &str) -> Result<()> {
-    use super::call_kdbx_context_action;
-    use crate::db::KdfAlgorithm;
-
-    let mut kdbx_file =
-        call_kdbx_context_action(db_key, |ctx: &KdbxContext| Ok(ctx.kdbx_file.clone()))?;
-
-    // If we plan to use PIN instead of the existing credentials for this copied db, we need to something like newdb call
-
-    // Argon2d parameters are set so that memory requirement of iOS autofill extension can be met
-    // The iOS autofill extension can not take more than 120 MB for decryption etc
-    let kdf = KdfAlgorithm::as_argon2(1, 100, 1);
-    kdbx_file.set_kdf_algorithm(kdf)?;
-
-    // Need to remove entry histories, attachments etc to make db size small
-    if let Some(ref mut kc) = kdbx_file.keepass_main_content {
-        kc.root.remove_all_binary_kvs_and_history_entries();
-    }
-
-    write_kdbx_content_to_file(&mut kdbx_file, full_file_name)?;
-
-    Ok(())
 }
 
 // Mobile

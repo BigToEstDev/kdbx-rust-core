@@ -11,13 +11,19 @@
 //! round-trip нашего кода с самим собой.
 //!
 //! Тест обязан быть зелёным и ДО удалений, и ПОСЛЕ них.
+//!
+//! Step 43 убрал из ядра и сами типы записей OneKeePass: ядро их больше не разбирает,
+//! а `CustomData` записи с ключами `OKP_K*` хранит как есть, как любые чужие данные.
+//! Поэтому вместо распознанного типа проверяется, что `OKP_K3` переживает чтение,
+//! сохранение и правку записи через форму байт в байт.
 
 mod common;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use kdbx_rust_core::db_service::{self, EntryCategory};
+use common::xml::{parse_xml, Node};
+use kdbx_rust_core::db_service::{self, EntryCategory, EntryFormData};
 
 const PASSWORD: &str = "test-pass-1234";
 const FIXTURE: &str = "okp_entry_types.kdbx";
@@ -34,12 +40,9 @@ const PASSKEY_FIELDS: &[(&str, &str)] = &[
     ),
 ];
 
-// Типы записей OneKeePass: имя типа берётся из CustomData записи (OKP_K3).
-const TYPED_ENTRIES: &[(&str, &str)] = &[
-    ("Work DB", "Auto Database Open"),
-    ("My SFTP", "SFTP Connection"),
-    ("My WebDAV", "WebDAV Connection"),
-];
+// Записи с типом OneKeePass в CustomData (OKP_K3). Ядро тип не разбирает, но хранит.
+const TYPED_ENTRIES: &[&str] = &["Work DB", "My SFTP", "My WebDAV"];
+const OKP_ENTRY_TYPE_KEY: &str = "OKP_K3";
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -139,20 +142,6 @@ fn verify_all(db_key: &str, stage: &str) {
         );
     }
 
-    // --- типы записей OneKeePass (CustomData OKP_K3) ---
-    for (title, type_name) in TYPED_ENTRIES {
-        let uuid = entry_uuid(db_key, title);
-        let form = db_service::get_entry_form_data_by_id(db_key, &uuid).unwrap();
-        let form_json = serde_json::to_value(&form).unwrap();
-        assert_eq!(
-            form_json["entry_type_name"].as_str(),
-            Some(*type_name),
-            "[{}] тип записи {} не распознан",
-            stage,
-            title
-        );
-    }
-
     // --- поля записей подключений и AutoOpen ---
     let sftp_uuid = entry_uuid(db_key, "My SFTP");
     let sftp_fields = db_service::entry_key_value_fields(db_key, &sftp_uuid).unwrap();
@@ -186,6 +175,40 @@ fn verify_all(db_key: &str, stage: &str) {
     }
 }
 
+fn export_xml(db_key: &str) -> Node {
+    let xml_path = temp_path("dump.xml");
+    db_service::export_as_xml(db_key, &xml_path).expect("выгрузка XML не удалась");
+    let xml = std::fs::read_to_string(&xml_path).unwrap();
+    let _ = std::fs::remove_file(&xml_path);
+    parse_xml(&xml)
+}
+
+/// `OKP_K3` каждой типизированной записи, как он лежит в файле: заголовок → значение.
+fn okp_entry_types(db_key: &str) -> Vec<(String, String)> {
+    let xml = export_xml(db_key);
+    TYPED_ENTRIES
+        .iter()
+        .map(|title| {
+            let uuid = entry_uuid(db_key, title);
+            let b64 = base64_uuid(&uuid);
+            let entry = xml
+                .find_by_uuid("Entry", &b64)
+                .unwrap_or_else(|| panic!("запись {} не найдена в XML", title));
+            let value = entry
+                .child("CustomData")
+                .and_then(|cd| cd.child_with("Item", "Key", OKP_ENTRY_TYPE_KEY))
+                .and_then(|item| item.text_of("Value"))
+                .unwrap_or_else(|| panic!("у записи {} нет {}", title, OKP_ENTRY_TYPE_KEY));
+            (title.to_string(), value.to_string())
+        })
+        .collect()
+}
+
+fn base64_uuid(uuid: &uuid::Uuid) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(uuid.as_bytes())
+}
+
 /// Чтение чужой базы: всё на месте сразу после открытия.
 #[test]
 fn foreign_okp_types_are_read() {
@@ -199,6 +222,7 @@ fn foreign_okp_types_are_read() {
 fn foreign_okp_types_survive_save() {
     let db_key = open_copy(FIXTURE);
     verify_all(&db_key, "после чтения");
+    let types_read = okp_entry_types(&db_key);
 
     let saved = temp_path("saved.kdbx");
     db_service::save_to_db_file(&db_key, &saved).expect("сохранение в новый файл не удалось");
@@ -206,5 +230,38 @@ fn foreign_okp_types_survive_save() {
 
     open_existing(&saved);
     verify_all(&saved, "после сохранения");
+    assert_eq!(
+        okp_entry_types(&saved),
+        types_read,
+        "OKP_K3 изменился при сохранении"
+    );
+    close(&saved);
+}
+
+/// Правка записи через форму не трогает её CustomData: ядро больше не переписывает
+/// OKP_K* при правке (Step 43), и чужие поля записи остаются на месте.
+#[test]
+fn an_entry_edit_keeps_okp_custom_data_and_foreign_fields() {
+    let db_key = open_copy(FIXTURE);
+    let types_read = okp_entry_types(&db_key);
+
+    let uuid = entry_uuid(&db_key, "My SFTP");
+    let form = db_service::get_entry_form_data_by_id(&db_key, &uuid).unwrap();
+    let mut v = serde_json::to_value(&form).unwrap();
+    v["notes"] = serde_json::json!("edited by us");
+    let form: EntryFormData = serde_json::from_value(v).unwrap();
+    db_service::update_entry_from_form_data(&db_key, form).unwrap();
+
+    let saved = temp_path("edited.kdbx");
+    db_service::save_to_db_file(&db_key, &saved).expect("сохранение в новый файл не удалось");
+    close(&db_key);
+
+    open_existing(&saved);
+    verify_all(&saved, "после правки");
+    assert_eq!(
+        okp_entry_types(&saved),
+        types_read,
+        "OKP_K3 изменился при правке"
+    );
     close(&saved);
 }

@@ -283,8 +283,8 @@ impl KdbxFile {
         let mut framed = decrypt_content_blob(db_key, blob)?;
         let (mut xml_bytes, attachments) = unframe_locked_content(&framed)?;
 
-        // Restore attachment bytes BEFORE parse/after_xml_reading so the ssh-agent
-        // closure can read attachment content during relinking.
+        // Restore attachment bytes BEFORE parse/after_xml_reading, so they are in place when the
+        // entries are linked to them.
         self.inner_header
             .entry_attachments
             .restore_attachment_bytes(attachments);
@@ -292,22 +292,11 @@ impl KdbxFile {
         let mut kp = crate::xml_parse::parse(&xml_bytes, None)?;
 
         // Mirror reader_writer.rs read_xml_content post-parse linking.
-        cfg_if::cfg_if! {
-            if #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))] {
-                kp.after_xml_reading(
-                    self.inner_header
-                        .entry_attachments
-                        .attachments_index_ref_to_hash(),
-                    &|data_hash| self.get_bytes_content(data_hash),
-                );
-            } else {
-                kp.after_xml_reading(
-                    self.inner_header
-                        .entry_attachments
-                        .attachments_index_ref_to_hash(),
-                );
-            }
-        }
+        kp.after_xml_reading(
+            self.inner_header
+                .entry_attachments
+                .attachments_index_ref_to_hash(),
+        );
 
         self.keepass_main_content = Some(kp);
 

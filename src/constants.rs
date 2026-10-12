@@ -49,149 +49,27 @@ pub mod custom_data_key {
 
     pub const OKP_GROUP_AS_CATEGORY: &str = "OKP_K2";
 
-    // Key for the name of the Entry type and value for this is the serialized uuid
-    pub const OKP_ENTRY_TYPE: &str = "OKP_K3";
-
-    // The value found corresponding to this custom data key is the serialized Entry type Data
-    pub const OKP_ENTRY_TYPE_DATA: &str = "OKP_K4";
-
-    // The value found corresponding to this custom data key is
-    // the serialized HashMap of Entry type Data
-    pub const OKP_ENTRY_TYPE_MAP_DATA: &str = "OKP_K5";
-
-    // The value associated to this key is the list of serialized Entry type Data
-    // that may be used in an entry's history entries
-    pub const OKP_ENTRY_TYPE_LIST_DATA: &str = "OKP_K6";
-
-    // The index in place of Entry type Data in the history entry
-    pub const OKP_ENTRY_TYPE_DATA_INDEX: &str = "OKP_K7";
+    // OKP_K3 - OKP_K7 held the entry types of OneKeePass (an entry's type, the types of its history,
+    // the custom types of a database). The core no longer reads or writes them: they are kept as read,
+    // like any foreign CustomData. How they worked - pass-docs plan/todo/core/okp-entry-types-history.md
 }
 
 pub mod general_category_names {
-    pub const ALL_ENTRIES: &str = "AllEntries";
     pub const FAVORITES: &str = "Favorites";
-    pub const DELETED: &str = "Deleted";
-}
-
-#[allow(dead_code)]
-pub mod standard_in_section_names {
-    pub const LOGIN_DETAILS: &str = "Login Details";
-    pub const ADDITIONAL_ONE_TIME_PASSWORDS: &str = "Additional One-Time Passwords";
-    pub const CARD_DETAILS: &str = "Card Details";
-    pub const PASSKEY_DETAILS: &str = "Passkey Details";
-
-    // Section names shared by two or more of the standard entry types added for
-    // the extended entry templates. Section names used by a single type are kept
-    // as string literals at the type definition site.
-    pub const CONNECTION: &str = "Connection";
-    pub const DATES: &str = "Dates";
-    pub const CONTACT: &str = "Contact";
-}
-
-#[allow(dead_code)]
-pub mod entry_type_name {
-    pub const LOGIN: &str = "Login";
-    pub const WIRELESS_ROUTER: &str = "Wireless Router";
-    pub const CREDIT_DEBIT_CARD: &str = "Credit/Debit Card";
-    pub const BANK_ACCOUNT: &str = "Bank Account";
-
-    pub const AUTO_DB_OPEN: &str = "Auto Database Open";
-
-    // Connection entry types from OneKeePass. Kept so that entries of these
-    // types, created by other clients, are displayed and stored without loss.
-    pub const REMOTE_CONNECTION_SFTP: &str = "SFTP Connection";
-    pub const REMOTE_CONNECTION_WEBDAV: &str = "WebDAV Connection";
-
-    pub const PASSPORT: &str = "Passport";
-    pub const IDENTITY: &str = "Identity";
-    pub const DRIVER_LICENSE: &str = "Driver License";
-
-    pub const SSH_KEY: &str = "SSH Key";
-
-    //Medical Record,
-}
-
-// We can generate hex bytes like this using
-// let uid = Uuid::new_v4();
-// println!("{}",util::as_hex_array_formatted(uid.as_bytes()));
-// println!("{}",uid.to_string());
-
-// See the test fn 'generate_uuid()' in the mod tests at the bottom
-
-#[allow(dead_code)]
-pub mod entry_type_uuid {
-    // ffef5f51-7efc-4373-9eb5-382d5b501768
-    pub const LOGIN: &[u8] = &[
-        0xFF, 0xEF, 0x5F, 0x51, 0x7E, 0xFC, 0x43, 0x73, 0x9E, 0xB5, 0x38, 0x2D, 0x5B, 0x50, 0x17,
-        0x68,
-    ];
-
-    // 9e644c27-d00b-4aca-8355-5078c5a4fb44
-    pub const WIRELESS_ROUTER: &[u8] = &[
-        0x9E, 0x64, 0x4C, 0x27, 0xD0, 0x0B, 0x4A, 0xCA, 0x83, 0x55, 0x50, 0x78, 0xC5, 0xA4, 0xFB,
-        0x44,
-    ];
-
-    // c83aa78a-3a8c-45fc-b0e1-08002d166544
-    pub const CREDIT_DEBIT_CARD: &[u8] = &[
-        0xC8, 0x3A, 0xA7, 0x8A, 0x3A, 0x8C, 0x45, 0xFC, 0xB0, 0xE1, 0x08, 0x00, 0x2D, 0x16, 0x65,
-        0x44,
-    ];
-    // 713850b6-9457-45ca-a861-0402db2ca98f
-    pub const BANK_ACCOUNT: &[u8] = &[
-        0x71, 0x38, 0x50, 0xB6, 0x94, 0x57, 0x45, 0xCA, 0xA8, 0x61, 0x04, 0x02, 0xDB, 0x2C, 0xA9,
-        0x8F,
-    ];
-
-    // 0ba6d80b-8b8d-4ccd-b0dc-840337951cb0
-    pub const PASSPORT: &[u8] = &[
-        0x0B, 0xA6, 0xD8, 0x0B, 0x8B, 0x8D, 0x4C, 0xCD, 0xB0, 0xDC, 0x84, 0x03, 0x37, 0x95, 0x1C,
-        0xB0,
-    ];
-
-    // e5aff423-1044-40fe-9565-c0e8dde626c2
-    pub const IDENTITY: &[u8] = &[
-        0xE5, 0xAF, 0xF4, 0x23, 0x10, 0x44, 0x40, 0xFE, 0x95, 0x65, 0xC0, 0xE8, 0xDD, 0xE6, 0x26,
-        0xC2,
-    ];
-
-    // 90ac9d76-7ea7-4176-b5d0-fabf8a9a0058
-    pub const DRIVER_LICENSE: &[u8] = &[
-        0x90, 0xAC, 0x9D, 0x76, 0x7E, 0xA7, 0x41, 0x76, 0xB5, 0xD0, 0xFA, 0xBF, 0x8A, 0x9A, 0x00,
-        0x58,
-    ];
-
-    // 389368a9-73a9-4256-8247-321a2e60b2c7
-    pub const AUTO_DB_OPEN: &[u8] = &[
-        0x38, 0x93, 0x68, 0xA9, 0x73, 0xA9, 0x42, 0x56, 0x82, 0x47, 0x32, 0x1A, 0x2E, 0x60, 0xB2,
-        0xC7,
-    ];
-
-    // c5a57a41-4cca-4a46-bac1-78a8803f4da0
-    pub const REMOTE_CONNECTION_SFTP: &[u8] = &[
-        0xC5, 0xA5, 0x7A, 0x41, 0x4C, 0xCA, 0x4A, 0x46, 0xBA, 0xC1, 0x78, 0xA8, 0x80, 0x3F, 0x4D,
-        0xA0,
-    ];
-
-    // 0a14d76d-8c38-4c62-9ad7-390dc020a2af
-    pub const REMOTE_CONNECTION_WEBDAV: &[u8] = &[
-        0x0A, 0x14, 0xD7, 0x6D, 0x8C, 0x38, 0x4C, 0x62, 0x9A, 0xD7, 0x39, 0x0D, 0xC0, 0x20, 0xA2,
-        0xAF,
-    ];
-
-    // 6421a61a-db18-413a-bdfb-715a5418216a
-    pub const SSH_KEY: &[u8] = &[
-        0x64, 0x21, 0xA6, 0x1A, 0xDB, 0x18, 0x41, 0x3A, 0xBD, 0xFB, 0x71, 0x5A, 0x54, 0x18, 0x21,
-        0x6A,
-    ];
 }
 
 #[allow(dead_code)]
 pub mod entry_keyvalue_key {
+    // The kdbx standard fields of an entry
     pub const TITLE: &str = "Title";
     pub const NOTES: &str = "Notes";
     pub const USER_NAME: &str = "UserName";
     pub const PASSWORD: &str = "Password";
+    pub const URL: &str = "URL";
+
+    // The field of our standard preset that kdbx does not have - a custom string for other programs
+    pub const SERVICE: &str = "Service";
+
     // TOTP as KeePassXC / KeePassDX and we write it: one field holding an otpauth:// url
     pub const OTP: &str = "otp";
 
@@ -205,60 +83,6 @@ pub mod entry_keyvalue_key {
     pub const TIME_OTP_PERIOD: &str = "TimeOtp-Period";
     pub const TIME_OTP_LENGTH: &str = "TimeOtp-Length";
     pub const TIME_OTP_ALGORITHM: &str = "TimeOtp-Algorithm";
-    pub const URL: &str = "URL";
-    pub const ADDITIONAL_URLS: &str = "Additional URLs";
-
-    pub const SSID: &str = "Base Station Name or SSID";
-
-    pub const NUMBER: &str = "Number";
-
-    pub const IF_DEVICE: &str = "IfDevice";
-
-    // Fields of the REMOTE_CONNECTION_SFTP / REMOTE_CONNECTION_WEBDAV entry
-    // types. The core no longer connects to remote storage; the fields are
-    // kept so such entries from other clients are displayed and stored intact.
-    pub const HOST: &str = "Host";
-    pub const PORT: &str = "Port";
-    pub const START_DIR: &str = "Start Dir";
-    pub const ALLOW_UNTRUSTED_CERT: &str = "Allow Untrusted Cert";
-
-    // pub const ENABLED: &str = "Enabled";
-    // pub const PRIORITY: &str = "Priority";
-    // pub const SKIP_IF_NOT_EXISTS: &str = "SkipIfNotExists";
-    // pub const SKIP_IF_KEY_FILE_NOT_EXISTS: &str = "SkipIfKeyFileNotExists";
-
-    // Field names shared by two or more of the extended standard entry types
-    // (Identity, Passport, Driver License, SSH Login, etc.). Fields used by a
-    // single type are kept as string literals at the type definition site,
-    // matching the existing Credit/Debit Card and Bank Account definitions.
-    pub const FIRST_NAME: &str = "First Name";
-    pub const MIDDLE_NAME: &str = "Middle Name";
-    pub const LAST_NAME: &str = "Last Name";
-    pub const DATE_OF_BIRTH: &str = "Date of Birth";
-    pub const NATIONALITY: &str = "Nationality";
-    pub const EXPIRATION_DATE: &str = "Expiration Date";
-    pub const ISSUE_DATE: &str = "Issue Date";
-    pub const EMAIL: &str = "Email";
-    pub const POSTAL_CODE: &str = "Postal Code";
-    pub const STATE_PROVINCE_REGION: &str = "State / Province / Region";
-    pub const ADMIN_URL: &str = "Admin URL";
-    pub const ENVIRONMENT: &str = "Environment";
-    pub const PRIVATE_KEY: &str = "Private Key";
-    pub const PROVIDER: &str = "Provider";
-
-    // SSH Key entry type fields. Referenced by both the type definition and the
-    // ssh-agent key-source enumeration, so kept as shared constants.
-    pub const PUBLIC_KEY: &str = "Public Key";
-    pub const ADD_TO_SSH_AGENT: &str = "Add to SSH Agent";
-    pub const REQUIRE_CONFIRMATION: &str = "Require Confirmation";
-    pub const AGENT_LIFETIME: &str = "Agent Lifetime";
-
-    // Passkey fields (KeePassXC-compatible)
-    pub const KPEX_PASSKEY_USERNAME: &str = "KPEX_PASSKEY_USERNAME";
-    pub const KPEX_PASSKEY_RELYING_PARTY: &str = "KPEX_PASSKEY_RELYING_PARTY";
-    pub const KPEX_PASSKEY_USER_HANDLE: &str = "KPEX_PASSKEY_USER_HANDLE";
-    pub const KPEX_PASSKEY_CREDENTIAL_ID: &str = "KPEX_PASSKEY_CREDENTIAL_ID";
-    pub const KPEX_PASSKEY_PRIVATE_KEY_PEM: &str = "KPEX_PASSKEY_PRIVATE_KEY_PEM";
 }
 
 // Note:

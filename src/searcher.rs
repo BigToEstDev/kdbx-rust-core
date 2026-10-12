@@ -49,7 +49,7 @@ pub fn search_term_with_options(term: &str, case_insensitive: bool, entry: &Entr
 
 #[cfg(test)]
 mod tests {
-    use crate::db_content::{Entry, FieldDataType, KeyValue};
+    use crate::db_content::{Entry, KeyValue};
     use crate::searcher::*;
 
     #[test]
@@ -61,31 +61,26 @@ mod tests {
             key: "Title".into(),
             value: "BOA".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "User Name".into(),
             value: "mainuser".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "Password".into(),
             value: "changeIt".into(),
             protected: true,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "Test Custom Key".into(),
             value: "Test Custom Value - Custom".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "Test Custom Key 2".into(),
             value: "Test Custom Value Protected".into(),
             protected: true,
-            data_type: FieldDataType::default(),
         });
 
         // Matches part of BOA
@@ -120,25 +115,21 @@ mod tests {
             key: "Title".into(),
             value: "MyBank".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "UserName".into(),
             value: "alice".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "Password".into(),
             value: "Secr3t!".into(),
             protected: true,
-            data_type: FieldDataType::default(),
         });
         e.entry_field.insert_key_value(KeyValue {
             key: "URL".into(),
             value: "https://mybank.com".into(),
             protected: false,
-            data_type: FieldDataType::default(),
         });
         e
     }

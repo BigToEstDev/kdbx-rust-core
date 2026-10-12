@@ -1,6 +1,5 @@
 mod common;
 
-use kdbx_rust_core::db_content;
 use kdbx_rust_core::db_service::{self, *};
 use uuid::Uuid;
 
@@ -35,16 +34,13 @@ fn insert_login_entry(
     username: &str,
     password: &str,
 ) -> Uuid {
-    let login_type_uuid = db_content::standard_type_uuid_by_name("Login");
-    let form =
-        db_service::new_entry_form_data_by_id(db_key, login_type_uuid, Some(parent_group_uuid))
-            .unwrap();
+    let form = db_service::new_entry_form_data(Some(parent_group_uuid));
 
     let mut v = serde_json::to_value(&form).unwrap();
     let entry_uuid_str = v["uuid"].as_str().unwrap().to_string();
 
     v["title"] = serde_json::json!(title);
-    let section = v["section_fields"]["Login Details"].as_array_mut().unwrap();
+    let section = v["preset_fields"].as_array_mut().unwrap();
     for field in section.iter_mut() {
         match field["key"].as_str() {
             Some("UserName") => field["value"] = serde_json::json!(username),
@@ -263,7 +259,7 @@ fn verify_entry_1() {
     let v = serde_json::to_value(entry_form.unwrap()).unwrap();
     assert_eq!(v["title"], serde_json::json!("My Test Entry"));
 
-    let section = v["section_fields"]["Login Details"].as_array().unwrap();
+    let section = v["preset_fields"].as_array().unwrap();
     let field_value = |key: &str| {
         section
             .iter()
@@ -273,6 +269,58 @@ fn verify_entry_1() {
     };
     assert_eq!(field_value("UserName").as_deref(), Some("testuser"));
     assert_eq!(field_value("Password").as_deref(), Some("s3cret"));
+
+    let _ = db_service::close_kdbx(&db_key);
+    let _ = std::fs::remove_file(&db_key);
+}
+
+// Custom fields keep the order the user gave them through saving and reopening (Step 43: the core
+// keeps the fields of an entry in the order of the file); an empty Service is not written
+#[test]
+fn custom_fields_keep_their_order_through_the_file() {
+    common::init();
+
+    let db_key = temp_path("okp_custom_fields_order.kdbx");
+    let _ = std::fs::remove_file(&db_key);
+    let password = "test-pass-1234";
+    create_kdbx(make_new_db(&db_key, password)).unwrap();
+
+    let root = db_service::groups_summary_data(&db_key).unwrap().root_uuid;
+    let entry_uuid = insert_login_entry(&db_key, &root, "Ordered", "user", "pw");
+
+    let form = get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap();
+    let mut v = serde_json::to_value(&form).unwrap();
+    let template = v["preset_fields"][0].clone();
+    let custom: Vec<serde_json::Value> = ["Zeta", "Alpha", "Mid"]
+        .iter()
+        .map(|key| {
+            let mut f = template.clone();
+            f["key"] = serde_json::json!(key);
+            f["value"] = serde_json::json!(format!("{} value", key));
+            f
+        })
+        .collect();
+    v["custom_fields"] = serde_json::json!(custom);
+    update_entry_from_form_data(&db_key, serde_json::from_value(v).unwrap()).unwrap();
+
+    db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
+    let _ = db_service::close_kdbx(&db_key);
+    load_kdbx(&db_key, Some(password), None).unwrap();
+
+    let v = serde_json::to_value(get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap()).unwrap();
+    let keys: Vec<&str> = v["custom_fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, vec!["Zeta", "Alpha", "Mid"]);
+
+    let fields = db_service::entry_key_value_fields(&db_key, &entry_uuid).unwrap();
+    assert!(
+        !fields.contains_key("Service"),
+        "пустой Service не пишется в файл"
+    );
 
     let _ = db_service::close_kdbx(&db_key);
     let _ = std::fs::remove_file(&db_key);

@@ -13,7 +13,6 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use kdbx_rust_core::db_content;
 use kdbx_rust_core::db_service::{self, NewDatabase};
 use uuid::Uuid;
 
@@ -48,18 +47,13 @@ fn add_entry(
     username: &str,
     password: &str,
 ) -> Uuid {
-    let login_type_uuid = db_content::standard_type_uuid_by_name("Login");
-    let form =
-        db_service::new_entry_form_data_by_id(db_key, login_type_uuid, Some(parent_group_uuid))
-            .unwrap();
+    let form = db_service::new_entry_form_data(Some(parent_group_uuid));
 
     let mut value = serde_json::to_value(&form).unwrap();
     let entry_uuid = value["uuid"].as_str().unwrap().to_string();
     value["title"] = serde_json::json!(title);
 
-    let section = value["section_fields"]["Login Details"]
-        .as_array_mut()
-        .unwrap();
+    let section = value["preset_fields"].as_array_mut().unwrap();
     for field in section.iter_mut() {
         match field["key"].as_str() {
             Some("UserName") => field["value"] = serde_json::json!(username),
@@ -83,10 +77,9 @@ fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &
     let mut value = serde_json::to_value(&form).unwrap();
     value["notes"] = serde_json::json!("roundtrip entry with attachment and totp");
 
-    let section = value["section_fields"]["Login Details"]
-        .as_array_mut()
-        .unwrap();
-    let mut otp_field = section
+    let mut otp_field = value["preset_fields"]
+        .as_array()
+        .unwrap()
         .iter()
         .find(|f| f["key"].as_str() == Some("Password"))
         .cloned()
@@ -94,9 +87,11 @@ fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &
     otp_field["key"] = serde_json::json!("otp");
     otp_field["value"] = serde_json::json!(TOTP_URL);
     otp_field["protected"] = serde_json::json!(true);
-    otp_field["standard_field"] = serde_json::json!(false);
-    otp_field["required"] = serde_json::json!(false);
-    section.push(otp_field);
+    // otp - не поле пресета, а своё поле записи
+    value["custom_fields"]
+        .as_array_mut()
+        .unwrap()
+        .push(otp_field);
 
     // index_ref пересчитывается при записи по data_hash, поэтому здесь 0
     value["binary_key_values"] = serde_json::json!([{

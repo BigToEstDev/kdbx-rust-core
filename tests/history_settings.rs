@@ -7,7 +7,6 @@
 
 mod common;
 
-use kdbx_rust_core::db_content;
 use kdbx_rust_core::db_service::{self, DbSettings, NewDatabase};
 use uuid::Uuid;
 
@@ -137,8 +136,7 @@ fn unlimited_history_limits_survive_save_and_reopen() {
 // Login entry in the root group; returns its uuid
 fn add_entry(db_key: &str, title: &str) -> Uuid {
     let root_uuid = db_service::groups_summary_data(db_key).unwrap().root_uuid;
-    let login = db_content::standard_type_uuid_by_name("Login");
-    let form = db_service::new_entry_form_data_by_id(db_key, login, Some(&root_uuid)).unwrap();
+    let form = db_service::new_entry_form_data(Some(&root_uuid));
     let mut v = serde_json::to_value(&form).unwrap();
     let uuid = Uuid::parse_str(v["uuid"].as_str().unwrap()).unwrap();
     v["title"] = serde_json::json!(title);

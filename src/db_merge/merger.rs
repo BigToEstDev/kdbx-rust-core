@@ -278,9 +278,9 @@ impl<'a> Merger<'a> {
             // - Custom icons: source's icons are appended into target with
             //   content-hash dedup. The produced icon_remap is applied at
             //   every clone site below (same wiring as the same-DB path).
-            // - Custom data (incl. custom-entry-type definitions stored
-            //   under OKP_ENTRY_TYPE_MAP_DATA): additive merge so source's
-            //   entry types and other meta keys are usable in target.
+            // - Custom data (incl. the OneKeePass entry types under OKP_K5,
+            //   kept as read): additive merge so source's meta keys come
+            //   over to target.
             //
             // This must run before merge_groups so the icon_remap is in
             // place when source entries/groups get cloned into target.

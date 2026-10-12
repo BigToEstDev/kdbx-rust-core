@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDateTime};
+use chrono::NaiveDateTime;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -6,40 +6,28 @@ use std::convert::From;
 use uuid::Uuid;
 
 use crate::constants::entry_keyvalue_key::*;
-use crate::constants::entry_type_name::{CREDIT_DEBIT_CARD, SSH_KEY};
-use crate::constants::standard_in_section_names::ADDITIONAL_ONE_TIME_PASSWORDS;
 use crate::password_generator::PasswordScore;
 
-use crate::util::{self, empty_str};
+use crate::util::empty_str;
 
 use crate::error::{Error, Result};
 
 use crate::db_content::{
-    join_tags, split_tags, AutoType, BinaryKeyValue, Entry, EntryField, EntryType, FieldDataType,
-    FieldDef, KeepassFile, KeyValue, OtpData, Root, Section,
+    join_tags, split_tags, AutoType, BinaryKeyValue, Entry, EntryField, FieldDataType, KeepassFile,
+    KeyValue, OtpData, Root, STANDARD_PRESET_FIELDS,
 };
 
 pub use crate::db_content::CurrentOtpTokenData;
 
 // #[derive(Debug, Clone, Serialize)]
-// #[serde(tag = "type_name", content = "content")]
-// pub enum KeyValueAdditionalData {
-//     // Entry PlaceHolder Parsed value
-//     Resolved(Option<String>),
-// }
-
+// One field of an entry as the form shows it
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct KeyValueData {
     key: String,
     value: Option<String>,
     protected: bool,
-    required: bool,
-    helper_text: Option<String>,
+    // Text unless the value is a one-time password the core can generate tokens from
     data_type: FieldDataType,
-    standard_field: bool,
-
-    // TODO: Use select_field name instead of forming options list everytime.
-    pub select_field_options: Option<Vec<String>>,
 
     // Only relevant for PASSWORD field and in other cases it is None
     // We get the PasswordScore based on the String value of password
@@ -50,9 +38,6 @@ pub struct KeyValueData {
     // Following are set on otp token generation
     // Should this also use 'skip_deserializing' ?
     pub current_opt_token: Option<CurrentOtpTokenData>,
-    // Future idea to use instead of adding separate fields as done using 'password_score' and 'current_opt_token' ?
-    // #[serde(skip_deserializing)]
-    // pub additional_data: Option<KeyValueAdditionalData>,
 }
 
 // Written by hand: the derived one would print the secret - see crate::redacted
@@ -62,9 +47,7 @@ impl std::fmt::Debug for KeyValueData {
             .field("key", &self.key)
             .field("value", &crate::redacted::redacted_opt(&self.value))
             .field("protected", &self.protected)
-            .field("required", &self.required)
             .field("data_type", &self.data_type)
-            .field("standard_field", &self.standard_field)
             .field("current_opt_token", &self.current_opt_token)
             .finish_non_exhaustive()
     }
@@ -81,11 +64,7 @@ impl From<&KeyValue> for KeyValueData {
             key: kv.key.clone(),
             value: Some(kv.value.clone()),
             protected: kv.protected,
-            required: false,
-            helper_text: None,
             data_type: FieldDataType::default(),
-            standard_field: false,
-            select_field_options: None,
             password_score,
             current_opt_token: None,
         }
@@ -96,7 +75,6 @@ impl From<&KeyValueData> for KeyValue {
     fn from(kvd: &KeyValueData) -> Self {
         let mut kv = KeyValue::new();
         kv.key = kvd.key.clone();
-        //For now, if the data type is Text
         kv.value = kvd
             .value
             .as_ref()
@@ -106,83 +84,49 @@ impl From<&KeyValueData> for KeyValue {
     }
 }
 
-impl From<&KeyValueData> for FieldDef {
-    fn from(kvd: &KeyValueData) -> Self {
+impl KeyValueData {
+    // An empty field of the standard preset, for an entry that does not have it in the file
+    fn empty_preset_field(key: &str, protected: bool) -> Self {
         Self {
-            name: kvd.key.clone(),
-            required: kvd.required,
-            require_protection: kvd.protected,
-            //helper_text: kvd.helper_text.clone(),
-            data_type: kvd.data_type,
+            key: key.into(),
+            value: Some(String::default()),
+            protected,
+            ..Default::default()
         }
     }
-}
 
-impl KeyValueData {
-    fn generate_otp(&mut self, parsed_otp_values: &Option<HashMap<String, OtpData>>) {
-        if self.data_type == FieldDataType::OneTimePassword {
-            if let Some(parsed_otp_data) =
-                parsed_otp_values.as_ref().and_then(|pm| pm.get(&self.key))
-            {
-                match parsed_otp_data.current_otp_token_data() {
-                    Ok(token_data) => {
-                        self.current_opt_token = Some(token_data);
-                    }
-                    Err(e) => {
-                        info!("Generating current otp failed {}", e);
-                    }
-                }
-            }
-        }
+    // A value nobody filled in - such a field of the preset is not always written (see into_entry)
+    fn is_empty(&self) -> bool {
+        self.value.as_deref().is_none_or(str::is_empty)
     }
 
     // Called to generate an otp token if there is a parsed otp data available for this KV
     // The data type will be overriden to be 'OneTimePassword'
     //
-    // Used for custom fields, where there is no field definition to declare the data type: an entry
-    // from the original KeePass keeps its totp in the custom fields TimeOtp-* (db_content/time_otp.rs)
-    // and a field may also hold an otpauth url created in another app. Both are recognised while
-    // reading the entry, so a parsed value here means this field is a one-time password field
+    // An entry from the original KeePass keeps its totp in the custom fields TimeOtp-*
+    // (db_content/time_otp.rs) and a field may also hold an otpauth url, ours or created in another
+    // app. Both are recognised while reading the entry, so a parsed value here means this field is a
+    // one-time password field
     fn generate_otp_on_check(&mut self, parsed_otp_values: &Option<HashMap<String, OtpData>>) {
-        if let Some(m) = parsed_otp_values.as_ref() {
-            if m.contains_key(&self.key) {
-                // We need to set data type as this field has a valid otp url
-                self.data_type = FieldDataType::OneTimePassword;
-                self.generate_otp(parsed_otp_values);
+        if let Some(parsed_otp_data) = parsed_otp_values.as_ref().and_then(|m| m.get(&self.key)) {
+            self.data_type = FieldDataType::OneTimePassword;
+            match parsed_otp_data.current_otp_token_data() {
+                Ok(token_data) => {
+                    self.current_opt_token = Some(token_data);
+                }
+                Err(e) => {
+                    info!("Generating current otp failed {}", e);
+                }
             }
         }
     }
 }
 
-use lazy_static::lazy_static;
-
 use super::{categories, parsing};
 
-lazy_static! {
-
-    pub static ref CUSTOM_FILEDS:String = "Custom Fields".into();
-
-    pub static ref CC_SELECT_FIELD_CHOICES: HashMap<&'static str, Vec<String>> =  {
-        let local: DateTime<Local> = Local::now();
-
-        let years:Vec<String> = (local.year()..(local.year()+10)).map(|n|n.to_string()).collect();
-        //let v2: Vec<&'static str> = years.iter().map(|s| &**s).collect();
-        let mut m = HashMap::new();
-        m.insert("Brand",
-            ["Visa", "Matercard",
-                "American Express","Discover", "Diners Club",
-                "Union Pay", "Other"].iter().map(|s|s.to_string()).collect());
-
-        m.insert("Expiration Month",
-            ["01-January", "02-February","03-March",
-                "04-April","05-May","06-June", "07-July",
-                "08-August","09-September","10-October",
-                "11-November","12-December"].iter().map(|s|s.to_string()).collect());
-        m.insert("Expiration Year", years);
-        m
-    };
-}
-
+// The form of an entry: the fields of the standard preset in the preset's order, then the fields of
+// the entry itself in the order of the file. The ui lays it out as icon, title, preset fields,
+// notes, custom fields - title and notes are separate, as every kdbx entry has them
 #[derive(Debug, Clone, Serialize, Deserialize)]
 //#[serde(rename_all = "kebab-case")]
 // Using the rename will only this struct. It will not rename the child struct fields 'kebab-case' unless
@@ -207,17 +151,12 @@ pub struct EntryFormData {
     tags: Vec<String>,
     binary_key_values: Vec<BinaryKeyValue>,
     history_count: i32,
-    entry_type_name: String,
-    entry_type_uuid: Uuid,
-    entry_type_icon_name: Option<String>,
     title: String,
+    // Always every field of the standard preset, in its order - empty when the entry lacks one
+    preset_fields: Vec<KeyValueData>,
     notes: String,
-
-    standard_section_names: Vec<String>,
-    section_names: Vec<String>,
-
-    // For lookup by section name (section name is the key)
-    section_fields: HashMap<String, Vec<KeyValueData>>,
+    // The other fields of the entry, in the order of the file
+    custom_fields: Vec<KeyValueData>,
 
     auto_type: AutoType,
 
@@ -228,216 +167,35 @@ pub struct EntryFormData {
 }
 
 impl EntryFormData {
-    // Returns the value of the Additional URLs field (a whitespace-separated list
-    // of url tokens) wherever it appears among the entry's sections, if set.
-    pub(crate) fn additional_urls(&self) -> Option<&str> {
-        use crate::constants::entry_keyvalue_key::ADDITIONAL_URLS;
-        self.section_fields
-            .values()
-            .flatten()
-            .find(|k| k.key == ADDITIONAL_URLS)
-            .and_then(|k| k.value.as_deref())
-    }
-
-    // Appends a url token to the Additional URLs field (space-separated), preserving
-    // any existing tokens. Returns false (no change) when the entry has no Additional
-    // URLs field. Caller is responsible for any duplicate check.
-    pub(crate) fn append_additional_url(&mut self, url: &str) -> bool {
-        use crate::constants::entry_keyvalue_key::ADDITIONAL_URLS;
-        for kvds in self.section_fields.values_mut() {
-            if let Some(kvd) = kvds.iter_mut().find(|k| k.key == ADDITIONAL_URLS) {
-                let new_value = match kvd.value.as_deref() {
-                    Some(v) if !v.trim().is_empty() => format!("{} {}", v.trim(), url),
-                    _ => url.to_string(),
-                };
-                log::debug!("Added the app url {} to additional urls field", new_value);
-                kvd.value = Some(new_value);
-                return true;
-            }
-        }
-        false
-    }
-
-    // True when this form belongs to the SSH Key entry type. Lets a caller (the
-    // desktop SSH agent hooks) skip work for unrelated entry edits.
-    pub fn is_ssh_key_entry(&self) -> bool {
-        self.entry_type_uuid == crate::build_uuid!(crate::constants::entry_type_uuid::SSH_KEY)
-    }
-
     // Creates the EntryFormData from the given entry and is ready to be used by UI layer
     fn from_entry(entry: &Entry) -> Self {
-        let entry_type_name = entry.entry_field.entry_type.name.clone();
-        let entry_type_uuid = entry.entry_field.entry_type.uuid;
-        let entry_type_icon_name = entry.entry_field.entry_type.icon_name.clone();
-
-        // Let us get the all section names
-        let mut section_names: Vec<String> = entry
-            .entry_field
-            .entry_type
-            .sections
-            .iter()
-            .map(|s| s.name.clone())
-            .collect();
-
-        let standard_field_names = entry.entry_field.entry_type.standard_field_names_by_id();
-        // All available fields that are read from xml content
-        // Kept in a map for easy access using its name
+        // All available fields that are read from xml content, in the order of the file
         let mut fields = entry.entry_field.fields.clone();
-
-        // Keep track of all field names that are added to various sections
-        let mut field_names_done: Vec<String> = vec![];
 
         // These two are treated separatley in UI layer. So we extract them from the list
         let title: String = fields
-            .remove(TITLE)
+            .shift_remove(TITLE)
             .map_or("No Title".into(), |x| x.value.clone());
         let notes: String = fields
-            .remove(NOTES)
+            .shift_remove(NOTES)
             .map_or(empty_str(), |x| x.value.clone());
 
-        // All KVs per section name
-        let mut section_fields: HashMap<String, Vec<KeyValueData>> = HashMap::default();
-
-        // Combines each KeyValue with its field definition
-        for n in section_names.iter() {
-            let section_opt = entry
-                .entry_field
-                .entry_type
-                .sections
-                .iter()
-                .find(|s| &s.name == n);
-            // Get the section
-            if let Some(section) = section_opt {
-                let mut kvs: Vec<KeyValueData> = vec![];
-                // Copy the data type info to KVs
-                for fd in section.field_defs.iter() {
-                    // println!("Field Def is {:?}", fd);
-
-                    // Remove the KV from 'fields' for the field def matching name
-                    if let Some(kv) = fields.remove(&fd.name) {
-                        // Clone values from KeyValue to KeyValueData
-                        let mut kvd: KeyValueData = (&kv).into();
-
-                        // Following may be requird when we change a field's protection flag
-                        // in FieldDef from its earlier definition.
-                        // May Need more tests to confirm no other issue.
-                        // if kvd.protected != fd.require_protection {
-                        //     // Overriding the old protected flag read from db with new value from
-                        //     // field definition
-                        //     kvd.protected = fd.require_protection;
-                        // }
-
-                        // Additionally, the following field values are found in FieldDef and
-                        // kvd is populated from them
-                        kvd.data_type = fd.data_type;
-                        kvd.required = fd.required;
-                        kvd.helper_text = fd.helper_text();
-                        kvd.standard_field = standard_field_names.contains(&kv.key.as_str());
-
-                        // We generate token only if the data type of this field is 'OneTimePassword' type
-                        if fd.data_type == FieldDataType::OneTimePassword {
-                            kvd.generate_otp(&entry.parsed_otp_values);
-                        }
-
-                        // kvd.generate_otp_on_check(&entry.parsed_otp_values);
-
-                        // This is specific to CREDIT_DEBIT_CARD entry form
-                        if entry_type_name == CREDIT_DEBIT_CARD {
-                            // TODO: Send only the field name instead of option list and UI should have pulled
-                            // the list map one time and use the key to get options
-                            if let Some(v) = CC_SELECT_FIELD_CHOICES.get(kvd.key.as_str()) {
-                                kvd.select_field_options =
-                                    Some(v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
-                            }
-                        }
-                        // Now this field is used to create KVD
-                        field_names_done.push(kv.key.clone());
-
-                        kvs.push(kvd);
-                    } else {
-                        // The FieldDef of this entry type is not in KV. This can happen when new fields
-                        // are added in standard types or when we need to use default entry type in case of deserilalizing issue
-
-                        // Need to ensure that the field name of this 'fd.name' is NOT yet
-                        // added earlier to any other section.
-
-                        // This will happen in a situation when a new field is introduced later in the standard section with same name as
-                        // in any previously user added custom section
-
-                        // For example, let us assume we have a previously user defined section "Section1" with field name "UserName" for
-                        // this standard entry type
-                        // Now assume that this entry type does not have "Login Details".
-                        // If a section with name "Login Details"is added to this standard type that includes the
-                        // field name "UserName", then we do not want to have duplicate "UserName" fields in both "Login Details" and "Section1"
-                        // The following check ensures that this does not happen
-
-                        if field_names_done.contains(&fd.name) {
-                            continue;
-                        }
-
-                        // debug!("Not found in KV - Field Def {:?}", fd);
-                        let kvd = KeyValueData {
-                            data_type: fd.data_type,
-                            required: fd.required,
-                            helper_text: fd.helper_text(),
-                            standard_field: standard_field_names.contains(&fd.name.as_str()),
-                            key: fd.name.clone(),
-                            ..Default::default()
-                        };
-
-                        // Completed the combining of this field with its definition to create KVD
-                        field_names_done.push(kvd.key.clone());
-
-                        kvs.push(kvd);
-                    }
-                }
-                // Add all KVs for a section
-                section_fields.insert(section.name.clone(), kvs);
-            }
-        }
-
-        // Any left out KVs are meant for Custom Fields
-        if !fields.is_empty() {
-            // There is a possibility that user might have created a section with name CUSTOM_FILEDS
-            // and in that case we need to add these extra fields to that section itself
-            // Here we are assuming only the language 'en' at this time.
-            // Also it is that assumed UI side the name 'Custom Fields' is checked to be unique
-            // in a case insensitive manner - for example disallowing adding 'Custom Fields' and 'custom fields'
-            // If user adds a new section with "custom fields" or "CUSTOM FIELDS" first time, UI side we need
-            // to convert to "Custom Fields"
-            // Need to figure out what to do for languages other than 'en'
-            if let Some(mut all_custom_fields_kv_data) = section_fields.remove(&*CUSTOM_FILEDS) {
-                all_custom_fields_kv_data.extend(fields.values().map(|kv| {
-                    let mut kvd: KeyValueData = kv.into();
-                    // A custom field may carry a totp itself: the TimeOtp-* fields of the original
-                    // KeePass, or an otpauth url created in another app
-                    kvd.generate_otp_on_check(&entry.parsed_otp_values);
-                    kvd
-                }));
-                section_fields.insert(CUSTOM_FILEDS.clone(), all_custom_fields_kv_data);
-            } else {
-                section_names.push(CUSTOM_FILEDS.clone());
-                section_fields.insert(
-                    CUSTOM_FILEDS.clone(),
-                    fields
-                        .values()
-                        .map(|kv| {
-                            let mut kvd: KeyValueData = kv.into();
-                            // Same as above: a custom field may itself hold a totp
-                            kvd.generate_otp_on_check(&entry.parsed_otp_values);
-                            kvd
-                        })
-                        .collect(),
-                );
-            }
-        }
-
-        let standard_section_names = entry
-            .entry_field
-            .entry_type
-            .standard_section_names_by_id()
+        let preset_fields = STANDARD_PRESET_FIELDS
             .iter()
-            .map(|v| (*v).into())
+            .map(|pf| match fields.shift_remove(pf.key) {
+                Some(kv) => (&kv).into(),
+                None => KeyValueData::empty_preset_field(pf.key, pf.protected),
+            })
+            .collect();
+
+        let custom_fields = fields
+            .values()
+            .map(|kv| {
+                let mut kvd: KeyValueData = kv.into();
+                // A custom field may hold a totp: an otp url, or the TimeOtp-* fields of KeePass
+                kvd.generate_otp_on_check(&entry.parsed_otp_values);
+                kvd
+            })
             .collect();
 
         Self {
@@ -455,76 +213,45 @@ impl EntryFormData {
             auto_type: entry.auto_type.clone(),
 
             history_count: entry.history.entries.len() as i32,
-            entry_type_name,
-            entry_type_uuid,
-            entry_type_icon_name,
             title,
+            preset_fields,
             notes,
+            custom_fields,
             tags: split_tags(&entry.tags), //entry.tags.clone()
             binary_key_values: entry.binary_key_values.clone(),
-            standard_section_names,
-            section_names,
-            section_fields,
             parsed_fields: HashMap::default(),
         }
     }
 
     fn into_entry(entry_form_data: &EntryFormData) -> Entry {
-        let title_kv = KeyValue {
-            key: TITLE.into(),
-            value: entry_form_data.title.clone(),
-            protected: false,
-            data_type: FieldDataType::default(),
-        };
-        let notes_kv = KeyValue {
-            key: NOTES.into(),
-            value: entry_form_data.notes.clone(),
-            protected: false,
-            data_type: FieldDataType::default(),
-        };
-
         let mut entry_field = EntryField::default();
-        entry_field.fields.insert(TITLE.into(), title_kv);
-        entry_field.fields.insert(NOTES.into(), notes_kv);
+        entry_field.insert_key_value(KeyValue::from(
+            TITLE.into(),
+            entry_form_data.title.clone(),
+            false,
+        ));
 
-        // section_names is list of all section names
-        // Order of section and the fields order within a section are maintained for minimal
-        // Entrytype data storage
-        // See Entry's 'copy_to_custom_data' call flow where we store only the changed type information
-
-        for section_name in entry_form_data.section_names.iter() {
-            // For each section name found, we find all KVs and form EntryField
-            if let Some(kvds) = entry_form_data.section_fields.get(section_name) {
-                let mut fds: Vec<FieldDef> = vec![];
-                for kvd in kvds {
-                    // Here we are assuming we have unique field names for an entry
-                    // If we allow duplicate field names, we may need to check whether the kvd is already considerd or not using
-                    // entry_field.fields.contains_key(&kvd.key) and consider only the first or last value
-
-                    // Each KV Data found for a section a KV is created and inserted to entry_filed.fields
-                    entry_field.fields.insert(kvd.key.clone(), kvd.into());
-
-                    // Also we preapare the data type info separately to store in EntryType sections
-                    // All these values mostly will be the same what is sent to UI. Mainly in case of
-                    // new fields, these are set in UI layer and we need to persist those
-                    fds.push(kvd.into())
-                }
-
-                // Drop a section if it does not have any fields
-                // Mostly this is possible if user removes all custom fields of a custom section
-                // In case of standard sections, one or more field should be there except for the ADDITIONAL_ONE_TIME_PASSWORDS section
-                if section_name == ADDITIONAL_ONE_TIME_PASSWORDS || !fds.is_empty() {
-                    entry_field.entry_type.sections.push(Section {
-                        name: section_name.clone(),
-                        field_defs: fds,
-                    });
-                }
+        for kvd in entry_form_data.preset_fields.iter() {
+            // Service is a field of our preset, not of kdbx: written only when filled in, so that
+            // saving does not give every entry - foreign ones too - an empty custom field. The kdbx
+            // standard fields are always written, as KeePass does
+            if kvd.key == SERVICE && kvd.is_empty() {
+                continue;
             }
+            entry_field.insert_key_value(kvd.into());
         }
 
-        entry_field.entry_type.name = entry_form_data.entry_type_name.clone();
-        entry_field.entry_type.uuid = entry_form_data.entry_type_uuid;
-        entry_field.entry_type.icon_name = entry_form_data.entry_type_icon_name.clone();
+        entry_field.insert_key_value(KeyValue::from(
+            NOTES.into(),
+            entry_form_data.notes.clone(),
+            false,
+        ));
+
+        // Here we are assuming we have unique field names for an entry. A custom field named as a
+        // preset one replaces it - the names are checked by the app before saving
+        for kvd in entry_form_data.custom_fields.iter() {
+            entry_field.insert_key_value(kvd.into());
+        }
 
         let mut entry = Entry::new();
         entry.uuid = entry_form_data.uuid;
@@ -584,18 +311,9 @@ impl EntryFormData {
         Ok(kvs)
     }
 
-    pub fn new_form_entry_by_type_id(
-        entry_type_uuid: &Uuid,
-        custom_entry_type: Option<EntryType>,
-        parent_group_uuid: Option<&Uuid>,
-    ) -> Self {
-        //parent_group_uuid.as_ref().as_deref()
-        let e = &Entry::new_blank_entry_by_type_id(
-            entry_type_uuid,
-            custom_entry_type,
-            parent_group_uuid,
-        );
-        e.into()
+    // The form of a new blank entry of the standard preset
+    pub fn new_form_entry(parent_group_uuid: Option<&Uuid>) -> Self {
+        (&Entry::new_blank_entry(parent_group_uuid)).into()
     }
 }
 
@@ -666,11 +384,8 @@ pub struct EntrySummary {
     pub uuid: String,
     pub parent_group_uuid: Uuid,
     pub title: Option<String>,
-    pub secondary_title: Option<String>, // usually the user name
-    pub entry_type_name: String,
-    // Stable entry-type identifier. Unlike entry_type_name it never changes, so
-    // the UI should key entry-type decisions off this rather than the name.
-    pub entry_type_uuid: String,
+    // The user name of an entry; the modification time of a history entry
+    pub secondary_title: Option<String>,
     pub icon_id: i32,
     pub custom_icon_uuid: Option<String>,
     pub history_index: Option<i32>,
@@ -703,8 +418,6 @@ impl EntrySummary {
                 //     &he.times.last_modification_time,
                 //     Some("%Y-%m-%d %I:%M:%S %p"),
                 // )),
-                entry_type_name: he.entry_field.entry_type.name.clone(),
-                entry_type_uuid: he.entry_field.entry_type.uuid.to_string(),
                 icon_id: he.icon_id,
                 custom_icon_uuid: he.custom_icon_uuid.map(|u| u.to_string()),
                 history_index: Some(i as i32),
@@ -716,93 +429,15 @@ impl EntrySummary {
     }
 
     // Gets the secondary title to show in addition to main title while displaying
-    // an entry item in a list - a UI specific thing
+    // an entry item in a list - a UI specific thing: the user name, place holders resolved
     pub(crate) fn secondary_title(
         entry: &Entry,
         parsed_fields: &HashMap<String, String>,
     ) -> Option<String> {
-        // Resolves a field's value, preferring the parsed (decrypted) value
-        // when parsed_fields is available.
-        let resolve = |name: &str| -> Option<String> {
-            let val = entry.find_kv_field_value(name);
-            if parsed_fields.is_empty() {
-                val
-            } else {
-                parsed_fields
-                    .get(&name.to_uppercase())
-                    .map_or(val, |s| Some(s.to_string()))
-            }
-        };
-        let non_empty = |o: &Option<String>| o.as_ref().is_some_and(|s| !s.trim().is_empty());
-
-        if entry.entry_field.entry_type.name == CREDIT_DEBIT_CARD {
-            entry.entry_field.find_key_value(NUMBER).map(|f| {
-                let s = f.value.trim();
-                if !s.is_empty() {
-                    if s.len() > 4 {
-                        s.split_at(s.len() - 4).1.into()
-                    } else {
-                        s.into()
-                    }
-                } else {
-                    util::empty_str()
-                }
-            })
-        } else if entry.entry_field.entry_type.name == SSH_KEY {
-            // UserName was added to the SSH Key type after release 0.23.0.
-            // Entries created before that have no username value and keep
-            // showing the Public Key value as before.
-            let user_name = resolve(USER_NAME);
-            if non_empty(&user_name) {
-                user_name
-            } else {
-                resolve(PUBLIC_KEY)
-            }
-        } else if let Some(ref t) = entry.entry_field.entry_type.secondary_title {
-            let primary = resolve(t);
-            if non_empty(&primary) {
-                primary
-            } else {
-                // Fall back to First Name when the configured secondary-title
-                // field is blank. This is used by the identity-document templates
-                // (Identity, Passport, Driver License) whose secondary title is
-                // Last Name. It is a no-op for other types, which have no
-                // First Name field.
-                let fallback = resolve(FIRST_NAME);
-                if non_empty(&fallback) {
-                    fallback
-                } else {
-                    primary
-                }
-            }
-        } else {
-            let secondary_title: Option<String> = entry
-                .entry_field
-                .entry_type
-                .sections
-                .iter()
-                .filter(|s| !s.field_defs.is_empty())
-                .nth(0) // First Section thas has some fields
-                .map(|s| {
-                    s.field_defs
-                        .iter()
-                        .filter(|f| !f.require_protection) //Skip the Password field
-                        .nth(0) // Get the first fieldDef
-                        .map_or("", |f| &f.name)
-                }) // First field's name
-                .and_then(|n| entry.entry_field.find_key_value(n)) // To get Option<Option<&KeyValue>> to Option<&KeyValue>
-                .and_then(|kv| {
-                    if parsed_fields.is_empty() {
-                        Some(kv.value.clone())
-                    } else {
-                        parsed_fields
-                            .get(&kv.key.to_uppercase())
-                            .map_or_else(|| Some(kv.value.clone()), |s| Some(s.to_string()))
-                    }
-                });
-
-            secondary_title
-        }
+        let user_name = entry.find_kv_field_value(USER_NAME);
+        parsed_fields
+            .get(&USER_NAME.to_uppercase())
+            .map_or(user_name, |s| Some(s.to_string()))
     }
 
     pub(crate) fn entry_summary_data<'a>(
@@ -825,8 +460,6 @@ impl EntrySummary {
                 parent_group_uuid: e.parent_group_uuid(),
                 title,
                 secondary_title,
-                entry_type_name: e.entry_field.entry_type.name.clone(),
-                entry_type_uuid: e.entry_field.entry_type.uuid.to_string(),
                 icon_id: e.icon_id,
                 custom_icon_uuid: e.custom_icon_uuid.map(|u| u.to_string()),
                 history_index: None,
@@ -858,74 +491,26 @@ impl EntrySummary {
     // }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct EntryTypeNames {
-    pub custom: Vec<String>,
-    pub standard: Vec<String>,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-pub struct EntryTypeHeader {
-    pub uuid: Uuid,
-    pub name: String,
-    pub icon_name: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct EntryTypeHeaders {
-    pub custom: Vec<EntryTypeHeader>,
-    pub standard: Vec<EntryTypeHeader>,
-}
-
-// EntryTypeFormData has some fields of EntryFormData and name of these fields
-// should match as UI layer uses EntryFormData for both entry and entry type forms
-#[derive(Serialize, Deserialize)]
-pub struct EntryTypeFormData {
-    pub entry_type_name: String,
-    pub entry_type_icon_name: Option<String>,
-    pub section_names: Vec<String>,
-    pub section_fields: HashMap<String, Vec<KeyValueData>>,
-}
-
-// Used to create a new custom entry type. The incoming EntryTypeFormData has information
-// to create a custom entry type except the entry type uuid
-impl From<&EntryTypeFormData> for EntryType {
-    fn from(entry_type_form_data: &EntryTypeFormData) -> Self {
-        let section_fields: Vec<Section> =
-            entry_type_form_data
-                .section_names
-                .iter()
-                .fold(vec![], |mut v, n| {
-                    let section = Section {
-                        name: n.clone(),
-                        field_defs: match entry_type_form_data.section_fields.get(n) {
-                            Some(vf) => vf.iter().map(|kvd| kvd.into()).collect(),
-                            None => vec![],
-                        },
-                    };
-                    v.push(section);
-                    v
-                });
-        EntryType {
-            // IMPORTANT:
-            // Need to generate a new uuid for this new custom entry type
-            // In case, we change the custom type creation flow and the incoming entry_type_form_data has uuid already set
-            // then we need to use that instead of creating a new one
-            uuid: Uuid::new_v4(),
-            name: entry_type_form_data.entry_type_name.clone(),
-            sections: section_fields,
-            icon_name: entry_type_form_data.entry_type_icon_name.clone(),
-            ..Default::default()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::constants::entry_keyvalue_key::*;
-    use crate::constants::entry_type_uuid;
     use crate::db_content::*;
     use crate::form_data::*;
+
+    fn kv(key: &str, value: &str, protected: bool) -> KeyValue {
+        KeyValue::from(key.into(), value.into(), protected)
+    }
+
+    fn keys(fields: &[KeyValueData]) -> Vec<&str> {
+        fields.iter().map(|f| f.key.as_str()).collect()
+    }
+
+    fn value_of<'a>(fields: &'a [KeyValueData], key: &str) -> Option<&'a str> {
+        fields
+            .iter()
+            .find(|f| f.key == key)
+            .and_then(|f| f.value.as_deref())
+    }
 
     #[test]
     fn verify_place_holder_parsing() {
@@ -940,20 +525,11 @@ mod tests {
 
         root.insert_group(parent_group.clone()).unwrap();
 
-        let uuid = uuid::Builder::from_slice(entry_type_uuid::LOGIN)
-            .unwrap()
-            .into_uuid();
-        let mut entry = Entry::new_blank_entry_by_type_id(&uuid, None, Some(&parent_group.uuid));
+        let mut entry = Entry::new_blank_entry(Some(&parent_group.uuid));
 
-        entry.entry_field.fields.insert(
-            "Title".into(),
-            KeyValue {
-                key: "Title".into(),
-                value: "Test {USERNAME} Title".into(),
-                protected: false,
-                data_type: FieldDataType::default(),
-            },
-        );
+        entry
+            .entry_field
+            .update_value(TITLE, "Test {USERNAME} Title");
 
         entry
             .entry_field
@@ -967,171 +543,144 @@ mod tests {
 
         let form_data = EntryFormData::place_holder_resolved_form_data(&root, &entry);
 
-        println!("Form data is {:?}", form_data.parsed_fields);
-
         let resolved = form_data.parsed_fields.get("USERNAME").unwrap();
         assert_eq!("My first https://www.oracle.com name", resolved);
     }
 
     #[test]
-    fn verify_creating_display_entry() {
-        let uuid = uuid::Builder::from_slice(entry_type_uuid::LOGIN)
-            .unwrap()
-            .into_uuid();
-        let mut entry = Entry::new_blank_entry_by_type_id(&uuid, None, None);
+    fn a_new_entry_has_every_preset_field_in_order_and_no_custom_ones() {
+        let form = EntryFormData::new_form_entry(None);
 
-        entry.entry_field.fields.insert(
-            "Title".into(),
-            KeyValue {
-                key: "Title".into(),
-                value: "Test Title".into(),
-                protected: false,
-                data_type: FieldDataType::default(),
-            },
+        assert_eq!(
+            keys(&form.preset_fields),
+            vec![USER_NAME, PASSWORD, SERVICE, URL]
         );
-
-        let custom_fields = vec![
-            KeyValue {
-                key: "Custom First Name".into(),
-                value: String::default(),
-                protected: false,
-                data_type: FieldDataType::default(),
-            },
-            KeyValue {
-                key: "Custom Last Name".into(),
-                value: String::default(),
-                protected: false,
-                data_type: FieldDataType::default(),
-            },
-            KeyValue {
-                key: "My quetsion:*".into(),
-                value: String::default(),
-                protected: true,
-                data_type: FieldDataType::default(),
-            },
-        ];
-
-        entry.tags = "Tag1;Tag2;Tag6;Bank Account".into();
-        for fld in custom_fields {
-            entry.entry_field.fields.insert(fld.key.clone(), fld);
-        }
-
-        let de: EntryFormData = (&entry).into(); // same as EntryFormData::from(&entry);
-
-        //println!("Entry {:?}", entry);
-        //println!("{:?}", de);
-        let json_str = serde_json::to_string_pretty(&de).unwrap();
-        println!("{}", json_str);
-
-        assert!(de.section_fields.get("Custom Fields").unwrap().len() == 3);
-        assert!(de
-            .section_fields
-            .get("Custom Fields")
-            .unwrap()
+        assert!(form.custom_fields.is_empty());
+        let password = form
+            .preset_fields
             .iter()
-            .find(|kv| kv.key == "Custom First Name")
-            .is_some());
+            .find(|f| f.key == PASSWORD)
+            .unwrap();
+        assert!(password.protected, "пароль защищён");
+    }
+
+    #[test]
+    fn a_new_entry_has_the_kdbx_standard_fields_and_not_service() {
+        let entry = Entry::new_blank_entry(None);
+        let keys: Vec<&str> = entry
+            .entry_field
+            .get_key_values()
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .collect();
+
+        assert_eq!(keys, vec![TITLE, USER_NAME, PASSWORD, URL, NOTES]);
+    }
+
+    // A foreign entry: the standard fields in KeePass order, no Service, fields of its own
+    fn foreign_entry() -> Entry {
+        let mut entry = Entry::new_blank_entry(None);
+        entry.entry_field = EntryField::default();
+        for f in [
+            kv(NOTES, "notes", false),
+            kv("PIN", "1234", true),
+            kv(PASSWORD, "secret", true),
+            kv(TITLE, "Bank", false),
+            kv("Card", "4111", false),
+            kv(URL, "https://bank.example", false),
+            kv(USER_NAME, "anton", false),
+            kv("Answer", "blue", false),
+        ] {
+            entry.entry_field.insert_key_value(f);
+        }
+        entry
+    }
+
+    #[test]
+    fn preset_fields_come_in_preset_order_and_custom_ones_in_file_order() {
+        let form: EntryFormData = (&foreign_entry()).into();
+
+        assert_eq!(form.title, "Bank");
+        assert_eq!(form.notes, "notes");
+        assert_eq!(
+            keys(&form.preset_fields),
+            vec![USER_NAME, PASSWORD, SERVICE, URL]
+        );
+        assert_eq!(value_of(&form.preset_fields, SERVICE), Some(""));
+        assert_eq!(keys(&form.custom_fields), vec!["PIN", "Card", "Answer"]);
+        assert!(form.custom_fields[0].protected, "защита поля - из файла");
+    }
+
+    #[test]
+    fn an_empty_service_is_not_written_and_a_filled_one_is() {
+        let form: EntryFormData = (&foreign_entry()).into();
+        let entry: Entry = (&form).into();
+        assert!(entry.entry_field.find_key_value(SERVICE).is_none());
+
+        let mut form = form;
+        form.preset_fields
+            .iter_mut()
+            .find(|f| f.key == SERVICE)
+            .unwrap()
+            .value = Some("Mail".into());
+        let entry: Entry = (&form).into();
+        assert_eq!(entry.find_kv_field_value(SERVICE).as_deref(), Some("Mail"));
+    }
+
+    #[test]
+    fn the_form_round_trip_keeps_every_field_and_the_order_of_custom_ones() {
+        let entry = foreign_entry();
+        let form: EntryFormData = (&entry).into();
+        let back: Entry = (&form).into();
+
+        let custom: Vec<&str> = back
+            .entry_field
+            .get_key_values()
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .filter(|k| !matches!(*k, TITLE | USER_NAME | PASSWORD | URL | NOTES))
+            .collect();
+        assert_eq!(custom, vec!["PIN", "Card", "Answer"]);
+        for kv in entry.entry_field.get_key_values() {
+            let after = back.entry_field.find_key_value(&kv.key).unwrap();
+            assert_eq!(after.value, kv.value, "{}", kv.key);
+            assert_eq!(after.protected, kv.protected, "{}", kv.key);
+        }
+    }
+
+    #[test]
+    fn the_secondary_title_is_the_user_name() {
+        let entry = foreign_entry();
+        assert_eq!(
+            EntrySummary::secondary_title(&entry, &Default::default()).as_deref(),
+            Some("anton")
+        );
+    }
+
+    #[test]
+    fn the_form_json_has_two_lists_and_no_sections() {
+        let form = EntryFormData::new_form_entry(None);
+        let json = serde_json::to_value(&form).unwrap();
+
+        assert!(json["preset_fields"].is_array());
+        assert!(json["custom_fields"].is_array());
+        for gone in [
+            "section_fields",
+            "section_names",
+            "standard_section_names",
+            "entry_type_name",
+            "entry_type_uuid",
+        ] {
+            assert!(json.get(gone).is_none(), "{} ушло из формы", gone);
+        }
+        let field = &json["preset_fields"][0];
+        for gone in [
+            "required",
+            "helper_text",
+            "select_field_options",
+            "standard_field",
+        ] {
+            assert!(field.get(gone).is_none(), "{} ушло из поля", gone);
+        }
     }
 }
-
-/*
-fn form_data_from_entry(root: &Root, entry: &Entry) -> Self {
-        let mut form_data = EntryFormData::from_entry(entry);
-
-        let mut entry_fields_with_place_holders: HashMap<String, String> = HashMap::default();
-        let mut parsing_required = false;
-        if parsing::place_holder_marker_found(&form_data.title) {
-            entry_fields_with_place_holders.insert("TITLE".into(), form_data.title.clone());
-        }
-
-        if parsing::place_holder_marker_found(&form_data.notes) {
-            entry_fields_with_place_holders.insert("NOTES".into(), form_data.title.clone());
-        }
-
-        parsing_required = form_data
-            .section_fields
-            .values()
-            .into_iter()
-            .flatten()
-            .any(|kvd| {
-                if let Some(ref val) = kvd.value {
-                    parsing::place_holder_marker_found(val)
-                } else {
-                    false
-                }
-            });
-
-        if parsing_required {
-            entry_fields_with_place_holders = form_data
-                .section_fields
-                .values()
-                .into_iter()
-                .flatten()
-                .fold(entry_fields_with_place_holders, |mut acc, kvd| {
-                    if let Some(ref val) = kvd.value {
-                        if !val.trim().is_empty() {
-                            acc.insert(kvd.key.to_uppercase(), val.to_string());
-                        }
-                    }
-                    acc
-                });
-        }
-        // entry_fields_with_place_holders = form_data
-        //     .section_fields
-        //     .values()
-        //     .into_iter()
-        //     .flatten()
-        //     .fold(entry_fields_with_place_holders, |mut acc, kvd| {
-        //         if let Some(ref val) = kvd.value {
-        //             if parsing::place_holder_marker_found(val) {
-        //                 acc.insert(kvd.key.to_uppercase(), val.to_string());
-        //             }
-        //         }
-        //         acc
-        //     });
-
-        println!(
-            "entry_fields_with_place_holders is {:?}",
-            &entry_fields_with_place_holders
-        );
-
-        if !entry_fields_with_place_holders.is_empty() {
-            let mut ef =
-                parsing::EntryPlaceHolderParser::from(&mut entry_fields_with_place_holders);
-            let r = ef.parse_main();
-            println!(" Called r is {:?} and ef is {:?}", &r, &ef);
-
-            let modified = ef.modified_fields();
-
-            entry_fields_with_place_holders.retain(
-                |k, _v| {
-                    if modified.contains(k) {
-                        true
-                    } else {
-                        false
-                    }
-                },
-            );
-        }
-
-        println!(
-            "2 entry_fields_with_place_holders is {:?}",
-            &entry_fields_with_place_holders
-        );
-
-        form_data.parsed_fields = entry_fields_with_place_holders;
-        form_data
-    }
-
-*/
-
-// pub fn new_form_entry_by_type(
-//     entry_type_name: &str,
-//     custom_entry_type: Option<EntryType>,
-//     parent_group_uuid: Option<&Uuid>,
-// ) -> Self {
-//     //parent_group_uuid.as_ref().as_deref()
-//     let e =
-//         &Entry::new_blank_entry_by_type(entry_type_name, custom_entry_type, parent_group_uuid);
-//     e.into()
-// }

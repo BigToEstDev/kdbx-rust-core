@@ -203,16 +203,6 @@ impl Root {
         removed
     }
 
-    // Used by db_service::io::copy_and_write_autofill_ready_db, which is compiled only under
-    // #[cfg(target_os = "ios")] - hence dead_code on every other target
-    #[allow(dead_code)]
-    pub fn remove_all_binary_kvs_and_history_entries(&mut self) {
-        for entry in self.all_entries.values_mut() {
-            entry.delete_history_entries();
-            entry.binary_key_values = vec![];
-        }
-    }
-
     pub fn entry_by_id_mut(&mut self, entry_uuid: &Uuid) -> Option<&mut Entry> {
         self.all_entries.get_mut(entry_uuid)
     }
@@ -246,8 +236,8 @@ impl Root {
         self.all_groups.get_mut(group_uuid)
     }
 
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
+    // Used only by the db_merge tests
+    #[cfg(test)]
     pub fn group_by_name(&self, name: &str) -> Option<&Group> {
         // Returns the first matching group
         self.all_groups.values().find(|g| g.name == name)
@@ -325,25 +315,6 @@ impl Root {
             //.filter(|e| split_tags(&e.tags).contains(&"Favorites".into()))
             .collect();
         v
-    }
-
-    /// Gets all entries whose entry type matches a given custom entry type uuid
-    pub(crate) fn custom_entry_type_entries_by_id<'a>(
-        &'a self,
-        entry_type_uuid: &Uuid,
-    ) -> Vec<&'a Entry> {
-        // IMPORTANT:
-        // It is assumed that all entries have their Entrytype struct is initialized
-        // properly with the type, section and field info - see after_xml_reading method of Keepass
-        let entries: Vec<&Entry> = self
-            .all_entries
-            .values()
-            .filter(|x| {
-                x.entry_field.entry_type.uuid == *entry_type_uuid
-                    && x.meta_share.get_entry_type_by_id(entry_type_uuid).is_some()
-            })
-            .collect();
-        entries
     }
 
     // TODO: Combine set_recycle_bin_group_on_merge and recycle_bin_group
@@ -940,7 +911,6 @@ impl Root {
 
         // Remove the source entry's histories if required
         if !entry_clone_option.keep_histories {
-            // This should remove histories and history realted entry type custom data
             cloned_entry.delete_history_entries();
         }
         // Change the times for this cloned entry
@@ -1198,73 +1168,6 @@ impl Root {
         all_tags
     }
 
-    // For imported KeeAgent/KeePassXC-style databases, treat entries with SSH
-    // private key attachments as SSH Key entries in memory.
-    #[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
-    pub(crate) fn adjust_imported_ssh_key_attachment_entries(
-        &mut self,
-        meta: &super::Meta,
-        attachment_content: &dyn Fn(&AttachmentHashValue) -> Option<Vec<u8>>,
-    ) {
-        use crate::constants::{entry_keyvalue_key, entry_type_uuid, GENERATOR_NAME};
-
-        log::debug!(
-            "In adjust_imported_ssh_key_attachment_entries call for generator {}",
-            meta.generator
-        );
-        if meta.generator == GENERATOR_NAME {
-            return;
-        }
-
-        log::debug!("Going to check attachments for ssh keys");
-
-        if !self
-            .all_entries
-            .values()
-            .any(|entry| !entry.binary_key_values.is_empty())
-        {
-            log::debug!("No attachments found and returning");
-            return;
-        }
-
-        let ssh_key_type_uuid = crate::build_uuid!(entry_type_uuid::SSH_KEY);
-        let ssh_key_entry_type = super::EntryType::standard_type_by_id(&ssh_key_type_uuid);
-        let sftp_type_uuid = crate::build_uuid!(entry_type_uuid::REMOTE_CONNECTION_SFTP);
-
-        for entry in self.all_entries.values_mut() {
-            if entry.binary_key_values.is_empty()
-                || entry.entry_field.entry_type.uuid == ssh_key_entry_type.uuid
-                || entry.entry_field.entry_type.uuid == sftp_type_uuid
-                || !entry_has_ssh_private_key_attachment(entry, attachment_content)
-            {
-                continue;
-            }
-
-            log::debug!(
-                "SSH agent: treating imported entry '{}' as SSH Key because it has an SSH private key attachment",
-                entry
-                    .entry_field
-                    .find_key_value(entry_keyvalue_key::TITLE)
-                    .map(|kv| kv.value.as_str())
-                    .unwrap_or("")
-            );
-
-            entry.entry_field.entry_type = ssh_key_entry_type.clone();
-
-            if entry
-                .entry_field
-                .find_key_value(entry_keyvalue_key::ADD_TO_SSH_AGENT)
-                .is_none()
-            {
-                entry.entry_field.insert_key_value(KeyValue::from(
-                    entry_keyvalue_key::ADD_TO_SSH_AGENT.into(),
-                    "true".into(),
-                    false,
-                ));
-            }
-        }
-    }
-
     // Visit each group starting with the root and do some action using the node group's data
     fn root_group_visitor_action(&self, acc: &mut dyn GroupVisitor) {
         self.group_visitor_action(&self.root_uuid, acc);
@@ -1301,35 +1204,4 @@ impl Root {
             }
         }
     }
-}
-
-// Checks whether any attachment content starts with a known SSH private key
-// header. Attachment names are ignored because users can name key files freely.
-#[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
-fn entry_has_ssh_private_key_attachment(
-    entry: &Entry,
-    attachment_content: &dyn Fn(&AttachmentHashValue) -> Option<Vec<u8>>,
-) -> bool {
-    entry.binary_key_values.iter().any(|bkv| {
-        attachment_content(&bkv.data_hash)
-            .as_deref()
-            .map_or(false, attachment_looks_like_ssh_private_key)
-    })
-}
-
-// Lightweight content sniffing used only to decide whether an imported entry
-// should be shown/handled as an SSH Key entry.
-#[cfg(any(feature = "desktop-ssh-agent", rust_analyzer))]
-fn attachment_looks_like_ssh_private_key(bytes: &[u8]) -> bool {
-    let sniff_len = bytes.len().min(256);
-    let Ok(text) = std::str::from_utf8(&bytes[..sniff_len]) else {
-        return false;
-    };
-    let text = text.trim_start_matches('\u{feff}').trim_start();
-
-    text.starts_with("PuTTY-User-Key-File-")
-        || text.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
-        || text.starts_with("-----BEGIN RSA PRIVATE KEY-----")
-        || text.starts_with("-----BEGIN EC PRIVATE KEY-----")
-        || text.starts_with("-----BEGIN DSA PRIVATE KEY-----")
 }

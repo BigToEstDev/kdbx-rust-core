@@ -5,17 +5,6 @@ mod attachment;
 mod custom_icon;
 mod io;
 
-// URL-based autofill entry matching — shared by the desktop browser extension
-// and the mobile autofill flows (no cfg gate).
-pub mod autofill;
-
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub mod browser_extension;
-
-// Enumerates agent-enabled SSH_KEY entries for the desktop SSH agent service.
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub mod ssh_agent;
-
 // Note: Moved module storage to db_service_ffi crate as it is used only in mobile apps for now
 
 // Modules storage and callback_service are used for now only in mobile apps
@@ -25,9 +14,8 @@ pub mod ssh_agent;
 // pub mod storage;
 
 use crate::db::{self, KdbxFile};
-use crate::db_content::{standard_types_ordered_by_id, Entry, KeepassFile, OtpData};
+use crate::db_content::{Entry, KeepassFile, OtpData};
 use crate::db_merge;
-use crate::form_data;
 use crate::searcher;
 use crate::util;
 
@@ -77,44 +65,23 @@ pub use crate::db::{
 };
 
 pub use crate::db_content::{
-    AllTags, EntryCloneOption, EntryType, FieldDataType, Group, GroupSortCriteria, OtpSettings,
+    AllTags, EntryCloneOption, FieldDataType, Group, GroupSortCriteria, OtpSettings,
 };
 
 pub use crate::form_data::{
-    CategoryDetail, CurrentOtpTokenData, DbSettings, EntryCategories, EntryCategory,
-    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary, EntryTypeFormData,
-    EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree, KdbxLoaded,
-    KdbxSaved,
+    CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData, EntryListOtpToken, EntrySummary,
+    GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
-pub use crate::constants::entry_type_uuid;
 
 pub use crate::db_merge::MergeResult;
 
 pub use crate::custom_icons::{CustomIconData, CustomIconSummary};
 
-// Re-export so the mobile FFI command dispatcher (which calls db_service::<fn>)
-// can reach the URL-only autofill manual search, and its TOTP-mode variant.
-pub use autofill::{autofill_search_term, autofill_search_term_filtered};
-
-// Re-export so the Android autofill FFI can associate a native-app token with an
-// entry (capture-on-fill). See db_service::autofill::associate_app_to_entry.
-pub use autofill::associate_app_to_entry;
-
 pub use custom_icon::{
     add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon, set_entry_custom_icon,
     set_group_custom_icon,
-};
-
-// Behind the default-off feature `csv-import` -- see the comment on `mod import` in lib.rs.
-// Not part of the v1 API surface.
-#[cfg(feature = "csv-import")]
-pub use crate::import::csv_reader::{CsvImport, CsvImportMapping, CsvImportOptions, CvsHeaderInfo};
-
-#[cfg(feature = "csv-import")]
-pub use crate::import::profile::{
-    all_profiles, profile_mapping, DetectedProfile, ProfileInfo, SuggestedMapping,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -154,9 +121,7 @@ pub(crate) struct KdbxContext {
     pub(crate) last_write_time: NaiveDateTime,
     pub(crate) save_pending: bool,
     // Whether the database is currently locked (UI-authorization state). A fresh
-    // open/create starts unlocked. Used to gate browser-extension access to
-    // unlocked databases only (see `unlocked_kdbx_cache_keys`). Available to both
-    // desktop and mobile since this is the shared core.
+    // open/create starts unlocked.
     pub(crate) locked: bool,
     // Memory-security lock: while `locked`, the decrypted content is removed
     // from `kdbx_file.keepass_main_content` and held here as ciphertext (encrypted
@@ -377,19 +342,6 @@ pub fn all_kdbx_cache_keys() -> Result<Vec<String>> {
     let mut vec = vec![];
     for k in store.keys() {
         vec.push(k.clone());
-    }
-    Ok(vec)
-}
-
-// Open db keys that are currently unlocked. Used to gate browser-extension access
-// so that a locked (but still open) database is not reachable for autofill.
-pub fn unlocked_kdbx_cache_keys() -> Result<Vec<String>> {
-    let store = main_store().lock().unwrap();
-    let mut vec = vec![];
-    for (k, ctx) in store.iter() {
-        if !ctx.locked {
-            vec.push(k.clone());
-        }
     }
     Ok(vec)
 }
@@ -735,21 +687,6 @@ pub struct EntrySearchResult {
     pub entry_items: Vec<EntrySummary>,
 }
 
-// Returns true if entries of this type are offered for autofill candidate lists.
-// Login, Credit/Debit Card and Bank Account all carry a
-// Login Details section (UserName/Password/URL/Additional URLs), so all three are
-// username/password candidates. This is the single source of truth for autofill
-// type eligibility, shared by the desktop browser extension and the mobile
-// autofill flows. To allow more types, add their type UUIDs to the eligible list.
-pub(crate) fn is_autofill_eligible_type(type_uuid: &Uuid) -> bool {
-    let eligible = [
-        crate::build_uuid!(crate::constants::entry_type_uuid::LOGIN),
-        crate::build_uuid!(crate::constants::entry_type_uuid::CREDIT_DEBIT_CARD),
-        crate::build_uuid!(crate::constants::entry_type_uuid::BANK_ACCOUNT),
-    ];
-    eligible.contains(type_uuid)
-}
-
 // A simple term search. The term is searched in all fields of each entry and returned all matching entry ids
 pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
     main_content_action!(db_key, |k: &KeepassFile| {
@@ -767,8 +704,6 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
                     parent_group_uuid: e.parent_group_uuid(),
                     title: t1,
                     secondary_title: t2,
-                    entry_type_name: e.entry_field.entry_type.name.clone(),
-                    entry_type_uuid: e.entry_field.entry_type.uuid.to_string(),
                     icon_id: e.icon_id,
                     custom_icon_uuid: e.custom_icon_uuid.map(|u| u.to_string()),
                     history_index: None,
@@ -780,38 +715,6 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
             }
         }
         Ok(search_result)
-    })
-}
-
-pub fn entry_type_headers(db_key: &str) -> Result<EntryTypeHeaders> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        let to_headers = |v: Vec<&EntryType>| {
-            v.into_iter()
-                .map(|e| EntryTypeHeader {
-                    uuid: e.uuid,
-                    name: e.name.clone(),
-                    icon_name: e.icon_name.clone(),
-                })
-                .collect()
-        };
-
-        let custom: Vec<EntryTypeHeader> = k.meta.with_custom_entry_type(to_headers);
-        let standard = to_headers(standard_types_ordered_by_id());
-
-        Ok(EntryTypeHeaders { custom, standard })
-    })
-}
-
-pub fn insert_or_update_custom_entry_type(
-    db_key: &str,
-    entry_type_form_data: &EntryTypeFormData,
-) -> Result<Uuid> {
-    main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        let et: EntryType = entry_type_form_data.into();
-        let entry_type_uuid = et.uuid;
-        k.meta
-            .insert_or_update_custom_entry_type(entry_type_form_data.into());
-        Ok(entry_type_uuid)
     })
 }
 
@@ -870,20 +773,6 @@ fn create_groups_summary_data(k: &KeepassFile) -> Result<GroupTree> {
 
 pub fn groups_summary_data(db_key: &str) -> Result<GroupTree> {
     main_content_action!(db_key, create_groups_summary_data)
-}
-
-// All categories that can be shown in the UI layer
-pub fn combined_category_details(
-    db_key: &str,
-    grouping_kind: &EntryCategoryGrouping,
-) -> Result<EntryCategories> {
-    let action = |k: &KeepassFile| {
-        Ok(form_data::combined_category_details(
-            k,
-            grouping_kind.clone(),
-        ))
-    };
-    main_content_action!(db_key, action)
 }
 
 pub fn mark_group_as_category(db_key: &str, group_id: &str) -> Result<()> {
@@ -1027,8 +916,7 @@ pub fn set_entry_otp(db_key: &str, entry_uuid: &Uuid, otp_settings: &OtpSettings
     })
 }
 
-// Removes the 2fa of an entry without leaving a tail: every TimeOtp field goes, and the standard
-// `otp` field is emptied rather than dropped, as it belongs to the entry type
+// Removes the 2fa of an entry without leaving a tail: every TimeOtp field and the `otp` field go
 pub fn delete_entry_otp(db_key: &str, entry_uuid: &Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         let mut updated_entry = match k.root.entry_by_id(entry_uuid) {
@@ -1180,34 +1068,9 @@ pub fn empty_trash(db_key: &str) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| { k.empty_trash() })
 }
 
-// Returns the deleted custom entry type's header to the caller
-pub fn delete_custom_entry_type_by_id(
-    db_key: &str,
-    entry_type_uuid: &Uuid,
-) -> Result<EntryTypeHeader> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        let et_opt = k.delete_custom_entry_type_by_id(entry_type_uuid)?;
-        let entry_type_header = et_opt.map_or_else(EntryTypeHeader::default, |e| EntryTypeHeader {
-            uuid: e.uuid,
-            name: e.name.clone(),
-            icon_name: None,
-        });
-        Ok(entry_type_header)
-    })
-}
-
-pub fn new_entry_form_data_by_id(
-    db_key: &str,
-    entry_type_uuid: &Uuid,
-    parent_group_uuid: Option<&Uuid>,
-) -> Result<EntryFormData> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        Ok(EntryFormData::new_form_entry_by_type_id(
-            entry_type_uuid,
-            k.meta.get_custom_entry_type_by_id(entry_type_uuid),
-            parent_group_uuid,
-        ))
-    })
+// The form of a new entry of the standard preset - nothing of the database is needed for it
+pub fn new_entry_form_data(parent_group_uuid: Option<&Uuid>) -> EntryFormData {
+    EntryFormData::new_form_entry(parent_group_uuid)
 }
 
 pub fn new_blank_group(mark_as_category: bool) -> Group {

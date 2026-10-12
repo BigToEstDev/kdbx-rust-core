@@ -53,8 +53,8 @@ impl Group {
         &self.name
     }
 
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
+    // Used only by the db_merge tests
+    #[cfg(test)]
     pub(crate) fn set_name(&mut self, name: &str) -> &mut Self {
         self.name = name.to_string();
         self
