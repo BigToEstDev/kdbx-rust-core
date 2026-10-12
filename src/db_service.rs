@@ -916,8 +916,7 @@ pub fn set_entry_otp(db_key: &str, entry_uuid: &Uuid, otp_settings: &OtpSettings
     })
 }
 
-// Removes the 2fa of an entry without leaving a tail: every TimeOtp field goes, and the standard
-// `otp` field is emptied rather than dropped, as it belongs to the entry type
+// Removes the 2fa of an entry without leaving a tail: every TimeOtp field and the `otp` field go
 pub fn delete_entry_otp(db_key: &str, entry_uuid: &Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         let mut updated_entry = match k.root.entry_by_id(entry_uuid) {

@@ -478,14 +478,12 @@ impl Entry {
         Ok(())
     }
 
-    // Removes the entry's 2fa without leaving a tail: all TimeOtp fields go, and the standard `otp`
-    // field is emptied rather than dropped - it belongs to the entry type and the form expects it
+    // Removes the entry's 2fa without leaving a tail: all TimeOtp fields go, and so does the `otp`
+    // field - it is not a field of the preset, and an empty one would stay in the form as a custom
+    // field holding nothing (Step 43)
     pub(crate) fn remove_otp(&mut self) {
         time_otp::remove_all(&mut self.entry_field);
-        if self.entry_field.find_key_value(OTP).is_some() {
-            self.entry_field.remove_key_value(OTP);
-            self.set_otp_url(EMPTY_STR);
-        }
+        self.entry_field.remove_key_value(OTP);
         self.parse_all_otp_fields();
     }
 
@@ -1226,14 +1224,14 @@ mod tests {
         assert!(e.parsed_otp_values.is_none());
     }
 
-    // The standard field belongs to the entry type, so the form still expects to find it
+    // otp is not a field of the preset: an emptied one would stay in the form as an empty custom field
     #[test]
-    fn removing_a_2fa_empties_the_standard_field_instead_of_dropping_it() {
+    fn removing_a_2fa_drops_the_otp_field() {
         let mut e = entry_with_otp_fields(&[("otp", &otp_url(TIME_OTP_TEST_SECRET))]);
 
         e.remove_otp();
 
-        assert_eq!(value_of(&e, "otp").unwrap(), "");
+        assert!(value_of(&e, "otp").is_none());
         assert!(e.parsed_otp_values.is_none());
     }
 }
