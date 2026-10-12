@@ -68,9 +68,7 @@ pub mod custom_data_key {
 }
 
 pub mod general_category_names {
-    pub const ALL_ENTRIES: &str = "AllEntries";
     pub const FAVORITES: &str = "Favorites";
-    pub const DELETED: &str = "Deleted";
 }
 
 #[allow(dead_code)]

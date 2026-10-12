@@ -16,7 +16,6 @@ mod io;
 use crate::db::{self, KdbxFile};
 use crate::db_content::{standard_types_ordered_by_id, Entry, KeepassFile, OtpData};
 use crate::db_merge;
-use crate::form_data;
 use crate::searcher;
 use crate::util;
 
@@ -70,10 +69,9 @@ pub use crate::db_content::{
 };
 
 pub use crate::form_data::{
-    CategoryDetail, CurrentOtpTokenData, DbSettings, EntryCategories, EntryCategory,
-    EntryCategoryGrouping, EntryFormData, EntryListOtpToken, EntrySummary, EntryTypeFormData,
-    EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree, KdbxLoaded,
-    KdbxSaved,
+    CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData, EntryListOtpToken, EntrySummary,
+    EntryTypeFormData, EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree,
+    KdbxLoaded, KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -811,20 +809,6 @@ fn create_groups_summary_data(k: &KeepassFile) -> Result<GroupTree> {
 
 pub fn groups_summary_data(db_key: &str) -> Result<GroupTree> {
     main_content_action!(db_key, create_groups_summary_data)
-}
-
-// All categories that can be shown in the UI layer
-pub fn combined_category_details(
-    db_key: &str,
-    grouping_kind: &EntryCategoryGrouping,
-) -> Result<EntryCategories> {
-    let action = |k: &KeepassFile| {
-        Ok(form_data::combined_category_details(
-            k,
-            grouping_kind.clone(),
-        ))
-    };
-    main_content_action!(db_key, action)
 }
 
 pub fn mark_group_as_category(db_key: &str, group_id: &str) -> Result<()> {
