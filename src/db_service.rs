@@ -135,9 +135,7 @@ pub(crate) struct KdbxContext {
     pub(crate) last_write_time: NaiveDateTime,
     pub(crate) save_pending: bool,
     // Whether the database is currently locked (UI-authorization state). A fresh
-    // open/create starts unlocked. Used to gate browser-extension access to
-    // unlocked databases only (see `unlocked_kdbx_cache_keys`). Available to both
-    // desktop and mobile since this is the shared core.
+    // open/create starts unlocked.
     pub(crate) locked: bool,
     // Memory-security lock: while `locked`, the decrypted content is removed
     // from `kdbx_file.keepass_main_content` and held here as ciphertext (encrypted
@@ -358,19 +356,6 @@ pub fn all_kdbx_cache_keys() -> Result<Vec<String>> {
     let mut vec = vec![];
     for k in store.keys() {
         vec.push(k.clone());
-    }
-    Ok(vec)
-}
-
-// Open db keys that are currently unlocked. Used to gate browser-extension access
-// so that a locked (but still open) database is not reachable for autofill.
-pub fn unlocked_kdbx_cache_keys() -> Result<Vec<String>> {
-    let store = main_store().lock().unwrap();
-    let mut vec = vec![];
-    for (k, ctx) in store.iter() {
-        if !ctx.locked {
-            vec.push(k.clone());
-        }
     }
     Ok(vec)
 }
