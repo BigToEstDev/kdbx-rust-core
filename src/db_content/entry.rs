@@ -323,13 +323,6 @@ impl Entry {
         self
     }
 
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
-    pub(crate) fn set_tags(&mut self, tags: &str) -> &mut Self {
-        self.tags = tags.into();
-        self
-    }
-
     pub(crate) fn new_blank_entry_by_type_id(
         entry_type_uuid: &Uuid,
         custom_entry_type: Option<EntryType>,
@@ -345,14 +338,6 @@ impl Entry {
             // IMPORTANT: The caller needs to set the parent Group uuid later if not passed
         }
         entry
-    }
-
-    // An Entry with default login entry type
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
-    pub(crate) fn new_login_entry(parent_group_uuid: Option<&Uuid>) -> Self {
-        let entry_type_uuid = crate::build_uuid!(crate::constants::entry_type_uuid::LOGIN);
-        Entry::new_blank_entry_by_type_id(&entry_type_uuid, None, parent_group_uuid)
     }
 
     // Any entry specific custom data parsing and setting in Entry to be done here
@@ -1244,17 +1229,6 @@ impl KeyValue {
         }
     }
 
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
-    pub(crate) fn from(key: String, value: String, protected: bool) -> Self {
-        KeyValue {
-            key,
-            value,
-            protected,
-            data_type: FieldDataType::default(),
-        }
-    }
-
     pub fn key(&self) -> &String {
         &self.key
     }
@@ -1417,13 +1391,6 @@ mod tests {
         let parent_id = Uuid::new_v4();
         e.set_parent_group_uuid(&parent_id);
         assert_eq!(e.parent_group_uuid(), parent_id);
-    }
-
-    #[test]
-    fn entry_set_tags() {
-        let mut e = Entry::new();
-        e.set_tags("Work;Finance");
-        assert_eq!(e.tags, "Work;Finance");
     }
 
     #[test]

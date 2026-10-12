@@ -71,15 +71,6 @@ impl EntryTypeV1 {
         v.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>()
     }
 
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
-    pub(crate) fn add_section(&mut self, section: &Section) {
-        // Add the passed section with its field definitions only if is not done earlier
-        if !self.sections.iter().any(|s| s.name == section.name) {
-            self.sections.push(section.clone());
-        }
-    }
-
     pub(crate) fn changed(&self, other: &EntryType) -> bool {
         // We check only changes in sections of these two EntryType
         // skipping other fields like 'name', secondary_title, icon_name for now as the incoming
@@ -513,19 +504,6 @@ impl Section {
         Self {
             name: name.into(),
             field_defs: vec![],
-        }
-    }
-
-    // Used only by the parked csv import (feature `csv-import`)
-    #[cfg(feature = "csv-import")]
-    pub(crate) fn new_custom_field_section(field_names: Vec<&str>) -> Self {
-        let field_defs = field_names
-            .iter()
-            .map(|s| FieldDef::new(s))
-            .collect::<Vec<_>>();
-        Self {
-            name: "Custom Fields".into(),
-            field_defs,
         }
     }
 }

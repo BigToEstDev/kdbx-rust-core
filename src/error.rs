@@ -177,11 +177,6 @@ pub enum Error {
     // Used in a situation where we can't provide any solution for this kind of errors
     #[error("UnRecoverableError: {0}")]
     UnRecoverableError(String),
-
-    // Only the csv import produces this, and it is behind the feature `csv-import`
-    #[cfg(feature = "csv-import")]
-    #[error("CsvImportError: {0}")]
-    CsvImportError(#[from] csv::Error),
 }
 
 // Tauri main converts App error such as above as "hooks::InvokeError" using serde call and then returns to to the UI

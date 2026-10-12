@@ -88,16 +88,6 @@ pub use custom_icon::{
     set_group_custom_icon,
 };
 
-// Behind the default-off feature `csv-import` -- see the comment on `mod import` in lib.rs.
-// Not part of the v1 API surface.
-#[cfg(feature = "csv-import")]
-pub use crate::import::csv_reader::{CsvImport, CsvImportMapping, CsvImportOptions, CvsHeaderInfo};
-
-#[cfg(feature = "csv-import")]
-pub use crate::import::profile::{
-    all_profiles, profile_mapping, DetectedProfile, ProfileInfo, SuggestedMapping,
-};
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SaveStatus {
     Success,
