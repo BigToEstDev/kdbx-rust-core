@@ -203,16 +203,6 @@ impl Root {
         removed
     }
 
-    // Used by db_service::io::copy_and_write_autofill_ready_db, which is compiled only under
-    // #[cfg(target_os = "ios")] - hence dead_code on every other target
-    #[allow(dead_code)]
-    pub fn remove_all_binary_kvs_and_history_entries(&mut self) {
-        for entry in self.all_entries.values_mut() {
-            entry.delete_history_entries();
-            entry.binary_key_values = vec![];
-        }
-    }
-
     pub fn entry_by_id_mut(&mut self, entry_uuid: &Uuid) -> Option<&mut Entry> {
         self.all_entries.get_mut(entry_uuid)
     }

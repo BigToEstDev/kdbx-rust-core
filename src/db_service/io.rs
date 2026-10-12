@@ -430,34 +430,6 @@ pub fn create_and_write_to_writer<W: Read + Write + Seek>(
     Ok(kdbx_loaded)
 }
 
-// iOS
-// Called to copy the database data from memory found by the db_key to a file
-// We are using file name instead of writer as this is an internal file and accessible by file name
-#[cfg(target_os = "ios")]
-pub fn copy_and_write_autofill_ready_db(db_key: &str, full_file_name: &str) -> Result<()> {
-    use super::call_kdbx_context_action;
-    use crate::db::KdfAlgorithm;
-
-    let mut kdbx_file =
-        call_kdbx_context_action(db_key, |ctx: &KdbxContext| Ok(ctx.kdbx_file.clone()))?;
-
-    // If we plan to use PIN instead of the existing credentials for this copied db, we need to something like newdb call
-
-    // Argon2d parameters are set so that memory requirement of iOS autofill extension can be met
-    // The iOS autofill extension can not take more than 120 MB for decryption etc
-    let kdf = KdfAlgorithm::as_argon2(1, 100, 1);
-    kdbx_file.set_kdf_algorithm(kdf)?;
-
-    // Need to remove entry histories, attachments etc to make db size small
-    if let Some(ref mut kc) = kdbx_file.keepass_main_content {
-        kc.root.remove_all_binary_kvs_and_history_entries();
-    }
-
-    write_kdbx_content_to_file(&mut kdbx_file, full_file_name)?;
-
-    Ok(())
-}
-
 // Mobile
 pub fn verify_db_file_checksum<R: Read + Seek>(db_key: &str, reader: &mut R) -> Result<()> {
     call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {

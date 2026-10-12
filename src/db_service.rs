@@ -5,10 +5,6 @@ mod attachment;
 mod custom_icon;
 mod io;
 
-// URL-based autofill entry matching — shared by the desktop browser extension
-// and the mobile autofill flows (no cfg gate).
-pub mod autofill;
-
 // Note: Moved module storage to db_service_ffi crate as it is used only in mobile apps for now
 
 // Modules storage and callback_service are used for now only in mobile apps
@@ -86,14 +82,6 @@ pub use crate::constants::entry_type_uuid;
 pub use crate::db_merge::MergeResult;
 
 pub use crate::custom_icons::{CustomIconData, CustomIconSummary};
-
-// Re-export so the mobile FFI command dispatcher (which calls db_service::<fn>)
-// can reach the URL-only autofill manual search, and its TOTP-mode variant.
-pub use autofill::{autofill_search_term, autofill_search_term_filtered};
-
-// Re-export so the Android autofill FFI can associate a native-app token with an
-// entry (capture-on-fill). See db_service::autofill::associate_app_to_entry.
-pub use autofill::associate_app_to_entry;
 
 pub use custom_icon::{
     add_custom_icon, get_custom_icon, list_custom_icons, remove_custom_icon, set_entry_custom_icon,
@@ -726,21 +714,6 @@ pub fn set_db_settings(
 pub struct EntrySearchResult {
     pub term: String,
     pub entry_items: Vec<EntrySummary>,
-}
-
-// Returns true if entries of this type are offered for autofill candidate lists.
-// Login, Credit/Debit Card and Bank Account all carry a
-// Login Details section (UserName/Password/URL/Additional URLs), so all three are
-// username/password candidates. This is the single source of truth for autofill
-// type eligibility, shared by the desktop browser extension and the mobile
-// autofill flows. To allow more types, add their type UUIDs to the eligible list.
-pub(crate) fn is_autofill_eligible_type(type_uuid: &Uuid) -> bool {
-    let eligible = [
-        crate::build_uuid!(crate::constants::entry_type_uuid::LOGIN),
-        crate::build_uuid!(crate::constants::entry_type_uuid::CREDIT_DEBIT_CARD),
-        crate::build_uuid!(crate::constants::entry_type_uuid::BANK_ACCOUNT),
-    ];
-    eligible.contains(type_uuid)
 }
 
 // A simple term search. The term is searched in all fields of each entry and returned all matching entry ids
