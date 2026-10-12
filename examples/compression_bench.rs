@@ -23,7 +23,6 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use kdbx_rust_core::db_content;
 use kdbx_rust_core::db_service::{self, NewDatabase};
 use kdbx_rust_core::util;
 use uuid::Uuid;
@@ -127,17 +126,12 @@ fn new_db(db_key: &str) -> NewDatabase {
 }
 
 fn add_entry(db_key: &str, parent_group_uuid: &Uuid, i: usize) {
-    let login_type_uuid = db_content::standard_type_uuid_by_name("Login");
-    let form =
-        db_service::new_entry_form_data_by_id(db_key, login_type_uuid, Some(parent_group_uuid))
-            .unwrap();
+    let form = db_service::new_entry_form_data(Some(parent_group_uuid));
 
     let mut value = serde_json::to_value(&form).unwrap();
     value["title"] = serde_json::json!(format!("Entry {}", i));
 
-    let section = value["section_fields"]["Login Details"]
-        .as_array_mut()
-        .unwrap();
+    let section = value["preset_fields"].as_array_mut().unwrap();
     for field in section.iter_mut() {
         match field["key"].as_str() {
             Some("UserName") => {

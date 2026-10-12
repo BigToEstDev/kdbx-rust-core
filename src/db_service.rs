@@ -14,7 +14,7 @@ mod io;
 // pub mod storage;
 
 use crate::db::{self, KdbxFile};
-use crate::db_content::{standard_types_ordered_by_id, Entry, KeepassFile, OtpData};
+use crate::db_content::{Entry, KeepassFile, OtpData};
 use crate::db_merge;
 use crate::searcher;
 use crate::util;
@@ -65,17 +65,15 @@ pub use crate::db::{
 };
 
 pub use crate::db_content::{
-    AllTags, EntryCloneOption, EntryType, FieldDataType, Group, GroupSortCriteria, OtpSettings,
+    AllTags, EntryCloneOption, FieldDataType, Group, GroupSortCriteria, OtpSettings,
 };
 
 pub use crate::form_data::{
     CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData, EntryListOtpToken, EntrySummary,
-    EntryTypeFormData, EntryTypeHeader, EntryTypeHeaders, EntryTypeNames, GroupSummary, GroupTree,
-    KdbxLoaded, KdbxSaved,
+    GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
-pub use crate::constants::entry_type_uuid;
 
 pub use crate::db_merge::MergeResult;
 
@@ -706,8 +704,6 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
                     parent_group_uuid: e.parent_group_uuid(),
                     title: t1,
                     secondary_title: t2,
-                    entry_type_name: e.entry_field.entry_type.name.clone(),
-                    entry_type_uuid: e.entry_field.entry_type.uuid.to_string(),
                     icon_id: e.icon_id,
                     custom_icon_uuid: e.custom_icon_uuid.map(|u| u.to_string()),
                     history_index: None,
@@ -719,38 +715,6 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
             }
         }
         Ok(search_result)
-    })
-}
-
-pub fn entry_type_headers(db_key: &str) -> Result<EntryTypeHeaders> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        let to_headers = |v: Vec<&EntryType>| {
-            v.into_iter()
-                .map(|e| EntryTypeHeader {
-                    uuid: e.uuid,
-                    name: e.name.clone(),
-                    icon_name: e.icon_name.clone(),
-                })
-                .collect()
-        };
-
-        let custom: Vec<EntryTypeHeader> = k.meta.with_custom_entry_type(to_headers);
-        let standard = to_headers(standard_types_ordered_by_id());
-
-        Ok(EntryTypeHeaders { custom, standard })
-    })
-}
-
-pub fn insert_or_update_custom_entry_type(
-    db_key: &str,
-    entry_type_form_data: &EntryTypeFormData,
-) -> Result<Uuid> {
-    main_content_mut_action!(db_key, |k: &mut KeepassFile| {
-        let et: EntryType = entry_type_form_data.into();
-        let entry_type_uuid = et.uuid;
-        k.meta
-            .insert_or_update_custom_entry_type(entry_type_form_data.into());
-        Ok(entry_type_uuid)
     })
 }
 
@@ -1105,34 +1069,9 @@ pub fn empty_trash(db_key: &str) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| { k.empty_trash() })
 }
 
-// Returns the deleted custom entry type's header to the caller
-pub fn delete_custom_entry_type_by_id(
-    db_key: &str,
-    entry_type_uuid: &Uuid,
-) -> Result<EntryTypeHeader> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        let et_opt = k.delete_custom_entry_type_by_id(entry_type_uuid)?;
-        let entry_type_header = et_opt.map_or_else(EntryTypeHeader::default, |e| EntryTypeHeader {
-            uuid: e.uuid,
-            name: e.name.clone(),
-            icon_name: None,
-        });
-        Ok(entry_type_header)
-    })
-}
-
-pub fn new_entry_form_data_by_id(
-    db_key: &str,
-    entry_type_uuid: &Uuid,
-    parent_group_uuid: Option<&Uuid>,
-) -> Result<EntryFormData> {
-    main_content_action!(db_key, |k: &KeepassFile| {
-        Ok(EntryFormData::new_form_entry_by_type_id(
-            entry_type_uuid,
-            k.meta.get_custom_entry_type_by_id(entry_type_uuid),
-            parent_group_uuid,
-        ))
-    })
+// The form of a new entry of the standard preset - nothing of the database is needed for it
+pub fn new_entry_form_data(parent_group_uuid: Option<&Uuid>) -> EntryFormData {
+    EntryFormData::new_form_entry(parent_group_uuid)
 }
 
 pub fn new_blank_group(mark_as_category: bool) -> Group {

@@ -8,7 +8,6 @@ mod common;
 
 use std::io::Cursor;
 
-use kdbx_rust_core::db_content;
 use kdbx_rust_core::db_service::{self, NewDatabase};
 
 const PASSWORD: &str = "master-s3cret";
@@ -59,15 +58,10 @@ fn an_entry_form_does_not_show_its_fields() {
         .unwrap();
 
     let root = db_service::groups_summary_data(db_key).unwrap().root_uuid;
-    let login = db_content::standard_type_uuid_by_name("Login");
-    let form = db_service::new_entry_form_data_by_id(db_key, login, Some(&root)).unwrap();
+    let form = db_service::new_entry_form_data(Some(&root));
 
     let mut v = serde_json::to_value(&form).unwrap();
-    for field in v["section_fields"]["Login Details"]
-        .as_array_mut()
-        .unwrap()
-        .iter_mut()
-    {
+    for field in v["preset_fields"].as_array_mut().unwrap().iter_mut() {
         if field["key"] == "Password" {
             field["value"] = serde_json::json!(ENTRY_PASSWORD);
         }

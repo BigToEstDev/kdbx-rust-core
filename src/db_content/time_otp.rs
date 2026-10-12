@@ -22,7 +22,6 @@ use crate::{
     },
     db_content::{
         entry::{EntryField, KeyValue},
-        entry_type::FieldDataType,
         otp::{OtpAlgorithm, OtpData, OtpSettings},
     },
     error::{Error, Result},
@@ -205,12 +204,11 @@ fn set_field(entry_field: &mut EntryField, field_name: &str, value: &str, protec
     if entry_field.find_key_value(field_name).is_some() {
         entry_field.update_value(field_name, value);
     } else {
-        entry_field.insert_key_value(KeyValue {
-            key: field_name.to_string(),
-            value: value.to_string(),
-            protected: protect_when_new,
-            data_type: FieldDataType::default(),
-        });
+        entry_field.insert_key_value(KeyValue::from(
+            field_name.to_string(),
+            value.to_string(),
+            protect_when_new,
+        ));
     }
 }
 

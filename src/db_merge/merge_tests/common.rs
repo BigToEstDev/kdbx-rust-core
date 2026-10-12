@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
 use crate::{
-    constants::{entry_keyvalue_key::TITLE, entry_type_name},
+    constants::entry_keyvalue_key::TITLE,
     db::{KdbxFile, NewDatabase},
-    db_content::{standard_type_uuid_by_name, Entry, Group, KeepassFile},
+    db_content::{Entry, Group, KeepassFile},
 };
 
 #[allow(dead_code)]
@@ -23,13 +23,11 @@ pub(crate) fn create_test_dbs_4() -> (KdbxFile, KdbxFile) {
     group2.set_name("group2");
     source_db.root.insert_group(group2).unwrap();
 
-    let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry1 = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(&group1_uuid));
+    let mut entry1 = Entry::new_blank_entry(Some(&group1_uuid));
     entry1.entry_field.update_value(TITLE, "entry1");
     source_db.root.insert_entry(entry1).unwrap();
 
-    let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry2 = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(&group2_uuid));
+    let mut entry2 = Entry::new_blank_entry(Some(&group2_uuid));
     entry2.entry_field.update_value(TITLE, "entry2");
     source_db.root.insert_entry(entry2).unwrap();
 
@@ -54,13 +52,11 @@ pub(crate) fn create_test_dbs_5() -> (KdbxFile, KdbxFile) {
     group2.set_name("group2");
     source_db.root.insert_group(group2).unwrap();
 
-    let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry1 = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(&group1_uuid));
+    let mut entry1 = Entry::new_blank_entry(Some(&group1_uuid));
     entry1.entry_field.update_value(TITLE, "entry1");
     source_db.root.insert_entry(entry1).unwrap();
 
-    let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry2 = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(&group2_uuid));
+    let mut entry2 = Entry::new_blank_entry(Some(&group2_uuid));
     entry2.entry_field.update_value(TITLE, "entry2");
     source_db.root.insert_entry(entry2).unwrap();
 
@@ -89,8 +85,7 @@ pub(crate) fn create_group(
 }
 
 pub(crate) fn create_entry(keepassfile: &mut KeepassFile, title: &str, group_uuid: &Uuid) -> Entry {
-    let entry_type_uuid = standard_type_uuid_by_name(entry_type_name::LOGIN);
-    let mut entry = Entry::new_blank_entry_by_type_id(entry_type_uuid, None, Some(group_uuid));
+    let mut entry = Entry::new_blank_entry(Some(group_uuid));
     entry.entry_field.update_value(TITLE, title);
     keepassfile.root.insert_entry(entry.clone()).unwrap();
     entry

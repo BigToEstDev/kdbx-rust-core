@@ -3,10 +3,8 @@ use uuid::Uuid;
 
 use crate::db_content::{AttachmentHashValue, Entry, Meta, Root, UnknownElements};
 
-use crate::error::{self, Result};
+use crate::error::Result;
 use crate::util;
-
-use super::EntryType;
 
 #[derive(Debug, Clone)]
 pub(crate) struct KeepassFile {
@@ -69,32 +67,6 @@ impl KeepassFile {
         self.root.deleted_group_uuids()
     }
 
-    // pub fn delete_custom_entry_type(&mut self, entry_type_name: &str) -> Result<()> {
-    //     if self.root.custom_entry_type_entries(entry_type_name).len() != 0 {
-    //         //error::Error::DataError("Entry type can not be deleted as some entries are of this type")
-    //         return Err(error::Error::CustomEntryTypeInUse);
-    //     }
-    //     else {
-    //         return Ok(self.meta.delete_custom_entry_type(entry_type_name));
-    //     }
-    // }
-
-    pub(crate) fn delete_custom_entry_type_by_id(
-        &mut self,
-        entry_type_uuid: &Uuid,
-    ) -> Result<Option<EntryType>> {
-        if !self
-            .root
-            .custom_entry_type_entries_by_id(entry_type_uuid)
-            .is_empty()
-        {
-            //error::Error::DataError("Entry type can not be deleted as some entries are of this type")
-            Err(error::Error::CustomEntryTypeInUse)
-        } else {
-            Ok(self.meta.delete_custom_entry_type_by_id(entry_type_uuid))
-        }
-    }
-
     // Ensures that the meta share for the newly created entry is initialized properly
     pub(crate) fn insert_entry(&mut self, mut entry: Entry) -> Result<()> {
         entry.meta_share = self.meta.clone_meta_share();
@@ -116,9 +88,6 @@ impl KeepassFile {
         &mut self,
         attachment_hash_indexed: &HashMap<i32, (AttachmentHashValue, usize)>,
     ) {
-        // Need to read any meta specific custom data first
-        self.meta.copy_from_custom_data();
-
         // IMPORTANT:We need to set attachment hashes in all entries read from xml
         self.root.set_attachment_hashes(attachment_hash_indexed);
 
@@ -140,8 +109,6 @@ impl KeepassFile {
         &mut self,
         hash_index_ref: &HashMap<AttachmentHashValue, i32>,
     ) {
-        self.meta.copy_to_custom_data();
-
         // Need to set the new index_refs of all attachments after writing the binaries
         self.root.set_attachment_index_refs(hash_index_ref);
 

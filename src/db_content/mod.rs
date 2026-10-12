@@ -1,12 +1,12 @@
 mod custom_data;
 mod entry;
-mod entry_type;
+mod field_data_type;
 mod group;
 mod keepass;
 mod meta;
 mod otp;
 mod root;
-mod standard_entry_types;
+mod standard_preset;
 mod time_otp;
 mod unknown_element;
 
@@ -22,17 +22,14 @@ pub use self::entry::{
     Association, AutoType, BinaryKeyValue, Entry, EntryField, History, KeyValue,
 };
 
-pub use self::entry_type::{EntryType, FieldDataType, FieldDef, Section};
+pub use self::field_data_type::FieldDataType;
 pub use self::group::Group;
 
 pub use self::otp::{CurrentOtpTokenData, OtpAlgorithm, OtpSettings};
 
 pub use self::root::{AllTags, EntryCloneOption, GroupSortCriteria};
 
-pub use self::standard_entry_types::{
-    standard_type_uuid_by_name, standard_type_uuids_names_ordered_by_id,
-    standard_types_ordered_by_id,
-};
+pub use self::standard_preset::{PresetField, STANDARD_PRESET_FIELDS};
 
 pub type AttachmentHashValue = u64;
 

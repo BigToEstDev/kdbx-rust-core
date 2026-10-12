@@ -129,12 +129,6 @@ pub enum Error {
     #[error("{0}")]
     RegexError(#[from] ReError),
 
-    #[error("{0}")]
-    RmpEncodeError(#[from] rmp_serde::encode::Error),
-
-    #[error("{0}")]
-    RmpDecodeError(#[from] rmp_serde::decode::Error),
-
     // To be removed
     #[error("{0}")]
     Base64DecodeError(#[from] base64::DecodeError),
@@ -147,9 +141,6 @@ pub enum Error {
 
     #[error("OtpKeyDecodeError: {0}")]
     OtpKeyDecodeError(String),
-
-    #[error("CustomEntryTypeInUse")]
-    CustomEntryTypeInUse,
 
     #[error("{0}")]
     JsonConversionError(#[from] serde_json::Error),

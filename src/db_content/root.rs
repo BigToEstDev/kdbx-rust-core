@@ -317,25 +317,6 @@ impl Root {
         v
     }
 
-    /// Gets all entries whose entry type matches a given custom entry type uuid
-    pub(crate) fn custom_entry_type_entries_by_id<'a>(
-        &'a self,
-        entry_type_uuid: &Uuid,
-    ) -> Vec<&'a Entry> {
-        // IMPORTANT:
-        // It is assumed that all entries have their Entrytype struct is initialized
-        // properly with the type, section and field info - see after_xml_reading method of Keepass
-        let entries: Vec<&Entry> = self
-            .all_entries
-            .values()
-            .filter(|x| {
-                x.entry_field.entry_type.uuid == *entry_type_uuid
-                    && x.meta_share.get_entry_type_by_id(entry_type_uuid).is_some()
-            })
-            .collect();
-        entries
-    }
-
     // TODO: Combine set_recycle_bin_group_on_merge and recycle_bin_group
 
     pub(crate) fn set_recycle_bin_group_on_merge(&mut self, source_recycle_bin_uuid: Uuid) {
@@ -930,7 +911,6 @@ impl Root {
 
         // Remove the source entry's histories if required
         if !entry_clone_option.keep_histories {
-            // This should remove histories and history realted entry type custom data
             cloned_entry.delete_history_entries();
         }
         // Change the times for this cloned entry
