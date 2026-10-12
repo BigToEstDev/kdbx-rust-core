@@ -108,14 +108,6 @@ impl KdfAlgorithm {
             KdfAlgorithm::NoValidKdfAvailable => Err(Error::SupportedOnlyArgon2dKdfAlgorithm),
         }
     }
-
-    // Creates argon2 with specific parameters values
-    // The arg 'memory' size is in bytes
-    pub fn as_argon2(memory: u64, iterations: u64, parallelism: u32) -> Self {
-        // The incoming memory bytes size needs to be converted to size in Mb
-        let mem = memory * 1024 * 1024;
-        KdfAlgorithm::Argon2id(crypto::kdf::Argon2Kdf::from(mem, iterations, parallelism))
-    }
 }
 
 #[derive(Default, Clone)]

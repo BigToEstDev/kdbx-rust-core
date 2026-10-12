@@ -73,7 +73,8 @@ impl Default for Argon2Kdf {
 
 impl Argon2Kdf {
     // Creates argon2kdf with specific parameters values
-    // The arg 'memory' size is in bytes
+    // The arg 'memory' size is in bytes. Used only by the tests against the reference vectors
+    #[cfg(test)]
     pub(crate) fn from(memory: u64, iterations: u64, parallelism: u32) -> Self {
         Self {
             memory,
