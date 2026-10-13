@@ -100,12 +100,6 @@ impl EntryField {
         }
     }
 
-    // Takes the first field with the key out of the entry as it is, unlike remove_key_value - used on a
-    // copy of the fields, when building the form
-    pub(crate) fn take(&mut self, key: &str) -> Option<KeyValue> {
-        self.position(key).map(|i| self.fields.remove(i))
-    }
-
     fn position(&self, key: &str) -> Option<usize> {
         self.fields.iter().position(|f| f.key == key)
     }

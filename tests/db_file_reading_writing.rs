@@ -39,15 +39,9 @@ fn insert_login_entry(
     let mut v = serde_json::to_value(&form).unwrap();
     let entry_uuid_str = v["uuid"].as_str().unwrap().to_string();
 
-    v["title"] = serde_json::json!(title);
-    let section = v["preset_fields"].as_array_mut().unwrap();
-    for field in section.iter_mut() {
-        match field["key"].as_str() {
-            Some("UserName") => field["value"] = serde_json::json!(username),
-            Some("Password") => field["value"] = serde_json::json!(password),
-            _ => {}
-        }
-    }
+    common::form::set_field(&mut v, "Title", title);
+    common::form::set_field(&mut v, "UserName", username);
+    common::form::set_field(&mut v, "Password", password);
 
     let form: EntryFormData = serde_json::from_value(v).unwrap();
     db_service::insert_entry_from_form_data(db_key, form).unwrap();
@@ -257,30 +251,21 @@ fn verify_entry_1() {
     );
 
     let v = serde_json::to_value(entry_form.unwrap()).unwrap();
-    assert_eq!(v["title"], serde_json::json!("My Test Entry"));
-
-    let section = v["preset_fields"].as_array().unwrap();
-    let field_value = |key: &str| {
-        section
-            .iter()
-            .find(|f| f["key"] == serde_json::json!(key))
-            .and_then(|f| f["value"].as_str())
-            .map(|s| s.to_string())
-    };
-    assert_eq!(field_value("UserName").as_deref(), Some("testuser"));
-    assert_eq!(field_value("Password").as_deref(), Some("s3cret"));
+    assert_eq!(common::form::field(&v, "Title"), Some("My Test Entry"));
+    assert_eq!(common::form::field(&v, "UserName"), Some("testuser"));
+    assert_eq!(common::form::field(&v, "Password"), Some("s3cret"));
 
     let _ = db_service::close_kdbx(&db_key);
     let _ = std::fs::remove_file(&db_key);
 }
 
-// Custom fields keep the order the user gave them through saving and reopening (Step 43: the core
-// keeps the fields of an entry in the order of the file); an empty Service is not written
+// The fields keep the order of the form through saving and reopening (Step 43: the core keeps the
+// fields of an entry in the order of the file; Step 45: the order is the app's - any order it sends)
 #[test]
-fn custom_fields_keep_their_order_through_the_file() {
+fn fields_keep_the_order_of_the_form_through_the_file() {
     common::init();
 
-    let db_key = temp_path("okp_custom_fields_order.kdbx");
+    let db_key = temp_path("okp_fields_order.kdbx");
     let _ = std::fs::remove_file(&db_key);
     let password = "test-pass-1234";
     create_kdbx(make_new_db(&db_key, password)).unwrap();
@@ -290,17 +275,10 @@ fn custom_fields_keep_their_order_through_the_file() {
 
     let form = get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap();
     let mut v = serde_json::to_value(&form).unwrap();
-    let template = v["preset_fields"][0].clone();
-    let custom: Vec<serde_json::Value> = ["Zeta", "Alpha", "Mid"]
-        .iter()
-        .map(|key| {
-            let mut f = template.clone();
-            f["key"] = serde_json::json!(key);
-            f["value"] = serde_json::json!(format!("{} value", key));
-            f
-        })
-        .collect();
-    v["custom_fields"] = serde_json::json!(custom);
+    for key in ["Zeta", "Alpha", "Mid"] {
+        common::form::set_field(&mut v, key, &format!("{} value", key));
+    }
+    v["fields"].as_array_mut().unwrap().reverse();
     update_entry_from_form_data(&db_key, serde_json::from_value(v).unwrap()).unwrap();
 
     db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
@@ -308,18 +286,9 @@ fn custom_fields_keep_their_order_through_the_file() {
     load_kdbx(&db_key, Some(password), None).unwrap();
 
     let v = serde_json::to_value(get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap()).unwrap();
-    let keys: Vec<&str> = v["custom_fields"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| f["key"].as_str().unwrap())
-        .collect();
-    assert_eq!(keys, vec!["Zeta", "Alpha", "Mid"]);
-
-    let fields = db_service::entry_key_value_fields(&db_key, &entry_uuid).unwrap();
-    assert!(
-        !fields.contains_key("Service"),
-        "пустой Service не пишется в файл"
+    assert_eq!(
+        common::form::keys(&v),
+        vec!["Mid", "Alpha", "Zeta", "Notes", "URL", "Password", "UserName", "Title"]
     );
 
     let _ = db_service::close_kdbx(&db_key);

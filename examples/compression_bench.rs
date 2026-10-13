@@ -129,21 +129,14 @@ fn add_entry(db_key: &str, parent_group_uuid: &Uuid, i: usize) {
     let form = db_service::new_entry_form_data(Some(parent_group_uuid));
 
     let mut value = serde_json::to_value(&form).unwrap();
-    value["title"] = serde_json::json!(format!("Entry {}", i));
-
-    let section = value["preset_fields"].as_array_mut().unwrap();
-    for field in section.iter_mut() {
-        match field["key"].as_str() {
-            Some("UserName") => {
-                field["value"] = serde_json::json!(format!("user{}@example.com", i))
-            }
-            Some("Password") => {
-                field["value"] = serde_json::json!(format!("p{:0>24x}", i * 2654435761))
-            }
-            Some("URL") => field["value"] = serde_json::json!(format!("https://site{}.example", i)),
-            _ => {}
-        }
-    }
+    common::form::set_field(&mut value, "Title", &format!("Entry {}", i));
+    common::form::set_field(&mut value, "UserName", &format!("user{}@example.com", i));
+    common::form::set_field(
+        &mut value,
+        "Password",
+        &format!("p{:0>24x}", i * 2654435761),
+    );
+    common::form::set_field(&mut value, "URL", &format!("https://site{}.example", i));
 
     let form = serde_json::from_value(value).unwrap();
     db_service::insert_entry_from_form_data(db_key, form).unwrap();

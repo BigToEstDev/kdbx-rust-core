@@ -61,11 +61,7 @@ fn an_entry_form_does_not_show_its_fields() {
     let form = db_service::new_entry_form_data(Some(&root));
 
     let mut v = serde_json::to_value(&form).unwrap();
-    for field in v["preset_fields"].as_array_mut().unwrap().iter_mut() {
-        if field["key"] == "Password" {
-            field["value"] = serde_json::json!(ENTRY_PASSWORD);
-        }
-    }
+    common::form::set_field(&mut v, "Password", ENTRY_PASSWORD);
     let form: db_service::EntryFormData = serde_json::from_value(v).unwrap();
 
     let debug = format!("{:?}", form);

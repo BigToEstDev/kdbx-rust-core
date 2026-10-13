@@ -973,7 +973,7 @@ pub fn history_entries_summary(db_key: &str, entry_uuid: &Uuid) -> Result<Vec<En
 
 pub fn update_entry_from_form_data(db_key: &str, form_data: EntryFormData) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.update_entry((&form_data).into())
+        k.root.update_entry(Entry::try_from(&form_data)?)
     })
 }
 
@@ -982,7 +982,7 @@ pub fn insert_entry_from_form_data(db_key: &str, form_data: EntryFormData) -> Re
         // entry.meta_share is not yet set when EntryFormData is converted to
         // an Entry. It is set in Keepass's insert_entry which in turn
         // calls k.root.insert_entry
-        k.insert_entry((&form_data).into())
+        k.insert_entry(Entry::try_from(&form_data)?)
     })
 }
 

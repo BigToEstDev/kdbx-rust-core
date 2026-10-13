@@ -248,7 +248,7 @@ fn an_entry_edit_keeps_okp_custom_data_and_foreign_fields() {
     let uuid = entry_uuid(&db_key, "My SFTP");
     let form = db_service::get_entry_form_data_by_id(&db_key, &uuid).unwrap();
     let mut v = serde_json::to_value(&form).unwrap();
-    v["notes"] = serde_json::json!("edited by us");
+    common::form::set_field(&mut v, "Notes", "edited by us");
     let form: EntryFormData = serde_json::from_value(v).unwrap();
     db_service::update_entry_from_form_data(&db_key, form).unwrap();
 

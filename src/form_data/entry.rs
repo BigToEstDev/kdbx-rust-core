@@ -8,13 +8,11 @@ use uuid::Uuid;
 use crate::constants::entry_keyvalue_key::*;
 use crate::password_generator::PasswordScore;
 
-use crate::util::empty_str;
-
 use crate::error::{Error, Result};
 
 use crate::db_content::{
     join_tags, split_tags, AutoType, BinaryKeyValue, Entry, EntryField, FieldDataType, KeepassFile,
-    KeyValue, OtpData, Root, STANDARD_PRESET_FIELDS,
+    KeyValue, OtpData, Root,
 };
 
 pub use crate::db_content::CurrentOtpTokenData;
@@ -85,21 +83,6 @@ impl From<&KeyValueData> for KeyValue {
 }
 
 impl KeyValueData {
-    // An empty field of the standard preset, for an entry that does not have it in the file
-    fn empty_preset_field(key: &str, protected: bool) -> Self {
-        Self {
-            key: key.into(),
-            value: Some(String::default()),
-            protected,
-            ..Default::default()
-        }
-    }
-
-    // A value nobody filled in - such a field of the preset is not always written (see into_entry)
-    fn is_empty(&self) -> bool {
-        self.value.as_deref().is_none_or(str::is_empty)
-    }
-
     // Called to generate an otp token if there is a parsed otp data available for this KV
     // The data type will be overriden to be 'OneTimePassword'
     //
@@ -124,9 +107,10 @@ impl KeyValueData {
 
 use super::{categories, parsing};
 
-// The form of an entry: the fields of the standard preset in the preset's order, then the fields of
-// the entry itself in the order of the file. The ui lays it out as icon, title, preset fields,
-// notes, custom fields - title and notes are separate, as every kdbx entry has them
+// The form of an entry: every string of the entry - Title and Notes too - in the order of the entry.
+// The core knows no preset: which fields the form shows, in what order and which of them are required
+// is the app's business. Keys are unique in a form the app sends back; a form read from a foreign file
+// may hold a repeated key, and it is kept as it is
 #[derive(Debug, Clone, Serialize, Deserialize)]
 //#[serde(rename_all = "kebab-case")]
 // Using the rename will only this struct. It will not rename the child struct fields 'kebab-case' unless
@@ -151,12 +135,8 @@ pub struct EntryFormData {
     tags: Vec<String>,
     binary_key_values: Vec<BinaryKeyValue>,
     history_count: i32,
-    title: String,
-    // Always every field of the standard preset, in its order - empty when the entry lacks one
-    preset_fields: Vec<KeyValueData>,
-    notes: String,
-    // The other fields of the entry, in the order of the file
-    custom_fields: Vec<KeyValueData>,
+    // The strings of the entry, in its order
+    fields: Vec<KeyValueData>,
 
     auto_type: AutoType,
 
@@ -169,29 +149,14 @@ pub struct EntryFormData {
 impl EntryFormData {
     // Creates the EntryFormData from the given entry and is ready to be used by UI layer
     fn from_entry(entry: &Entry) -> Self {
-        // All available fields that are read from xml content, in the order of the file
-        let mut fields = entry.entry_field.clone();
-
-        // These two are treated separatley in UI layer. So we extract them from the list
-        let title: String = fields
-            .take(TITLE)
-            .map_or("No Title".into(), |x| x.value.clone());
-        let notes: String = fields.take(NOTES).map_or(empty_str(), |x| x.value.clone());
-
-        let preset_fields = STANDARD_PRESET_FIELDS
-            .iter()
-            .map(|pf| match fields.take(pf.key) {
-                Some(kv) => (&kv).into(),
-                None => KeyValueData::empty_preset_field(pf.key, pf.protected),
-            })
-            .collect();
-
-        let custom_fields = fields
+        // All fields read from the xml content, in the order of the file
+        let fields = entry
+            .entry_field
             .fields
             .iter()
             .map(|kv| {
                 let mut kvd: KeyValueData = kv.into();
-                // A custom field may hold a totp: an otp url, or the TimeOtp-* fields of KeePass
+                // Any field may hold a totp: an otp url, or the TimeOtp-* fields of KeePass
                 kvd.generate_otp_on_check(&entry.parsed_otp_values);
                 kvd
             })
@@ -212,44 +177,22 @@ impl EntryFormData {
             auto_type: entry.auto_type.clone(),
 
             history_count: entry.history.entries.len() as i32,
-            title,
-            preset_fields,
-            notes,
-            custom_fields,
+            fields,
             tags: split_tags(&entry.tags), //entry.tags.clone()
             binary_key_values: entry.binary_key_values.clone(),
             parsed_fields: HashMap::default(),
         }
     }
 
-    fn into_entry(entry_form_data: &EntryFormData) -> Entry {
+    // Fails on a repeated key: the app checks the names before saving, this is the guard behind it.
+    // Fields are written in the order of the form
+    fn into_entry(entry_form_data: &EntryFormData) -> Result<Entry> {
         let mut entry_field = EntryField::default();
-        entry_field.insert_key_value(KeyValue::from(
-            TITLE.into(),
-            entry_form_data.title.clone(),
-            false,
-        ));
-
-        for kvd in entry_form_data.preset_fields.iter() {
-            // Service is a field of our preset, not of kdbx: written only when filled in, so that
-            // saving does not give every entry - foreign ones too - an empty custom field. The kdbx
-            // standard fields are always written, as KeePass does
-            if kvd.key == SERVICE && kvd.is_empty() {
-                continue;
+        for kvd in entry_form_data.fields.iter() {
+            if entry_field.find_key_value(&kvd.key).is_some() {
+                return Err(Error::DuplicateFieldKey);
             }
-            entry_field.insert_key_value(kvd.into());
-        }
-
-        entry_field.insert_key_value(KeyValue::from(
-            NOTES.into(),
-            entry_form_data.notes.clone(),
-            false,
-        ));
-
-        // Here we are assuming we have unique field names for an entry. A custom field named as a
-        // preset one replaces it - the names are checked by the app before saving
-        for kvd in entry_form_data.custom_fields.iter() {
-            entry_field.insert_key_value(kvd.into());
+            entry_field.push_key_value(kvd.into());
         }
 
         let mut entry = Entry::new();
@@ -271,7 +214,7 @@ impl EntryFormData {
         // Attachment references if any
         entry.binary_key_values = entry_form_data.binary_key_values.clone();
 
-        entry
+        Ok(entry)
     }
 
     // Resolves all place holders for the entry fields
@@ -310,7 +253,7 @@ impl EntryFormData {
         Ok(kvs)
     }
 
-    // The form of a new blank entry of the standard preset
+    // The form of a new blank entry: the kdbx standard fields, as KeePass creates them
     pub fn new_form_entry(parent_group_uuid: Option<&Uuid>) -> Self {
         (&Entry::new_blank_entry(parent_group_uuid)).into()
     }
@@ -358,8 +301,10 @@ impl From<&Entry> for EntryFormData {
     }
 }
 
-impl From<&EntryFormData> for Entry {
-    fn from(entry_form_data: &EntryFormData) -> Self {
+impl TryFrom<&EntryFormData> for Entry {
+    type Error = Error;
+
+    fn try_from(entry_form_data: &EntryFormData) -> Result<Self> {
         EntryFormData::into_entry(entry_form_data)
     }
 }
@@ -547,19 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn a_new_entry_has_every_preset_field_in_order_and_no_custom_ones() {
+    fn a_new_entry_form_has_the_kdbx_standard_fields() {
         let form = EntryFormData::new_form_entry(None);
 
         assert_eq!(
-            keys(&form.preset_fields),
-            vec![USER_NAME, PASSWORD, SERVICE, URL]
+            keys(&form.fields),
+            vec![TITLE, USER_NAME, PASSWORD, URL, NOTES]
         );
-        assert!(form.custom_fields.is_empty());
-        let password = form
-            .preset_fields
-            .iter()
-            .find(|f| f.key == PASSWORD)
-            .unwrap();
+        let password = form.fields.iter().find(|f| f.key == PASSWORD).unwrap();
         assert!(password.protected, "пароль защищён");
     }
 
@@ -576,7 +516,7 @@ mod tests {
         assert_eq!(keys, vec![TITLE, USER_NAME, PASSWORD, URL, NOTES]);
     }
 
-    // A foreign entry: the standard fields in KeePass order, no Service, fields of its own
+    // A foreign entry: the standard fields not in KeePass order, no Service, fields of its own
     fn foreign_entry() -> Entry {
         let mut entry = Entry::new_blank_entry(None);
         entry.entry_field = EntryField::default();
@@ -596,55 +536,56 @@ mod tests {
     }
 
     #[test]
-    fn preset_fields_come_in_preset_order_and_custom_ones_in_file_order() {
+    fn the_form_has_every_field_in_the_order_of_the_entry() {
         let form: EntryFormData = (&foreign_entry()).into();
 
-        assert_eq!(form.title, "Bank");
-        assert_eq!(form.notes, "notes");
         assert_eq!(
-            keys(&form.preset_fields),
-            vec![USER_NAME, PASSWORD, SERVICE, URL]
+            keys(&form.fields),
+            vec![NOTES, "PIN", PASSWORD, TITLE, "Card", URL, USER_NAME, "Answer"]
         );
-        assert_eq!(value_of(&form.preset_fields, SERVICE), Some(""));
-        assert_eq!(keys(&form.custom_fields), vec!["PIN", "Card", "Answer"]);
-        assert!(form.custom_fields[0].protected, "защита поля - из файла");
+        assert_eq!(value_of(&form.fields, TITLE), Some("Bank"));
+        assert!(form.fields[1].protected, "защита поля - из файла");
+    }
+
+    // No "No Title" any more: an empty title is an empty string, the app labels it
+    #[test]
+    fn an_empty_title_is_given_as_it_is() {
+        let mut entry = foreign_entry();
+        entry.entry_field.update_value(TITLE, "");
+        let form: EntryFormData = (&entry).into();
+        assert_eq!(value_of(&form.fields, TITLE), Some(""));
+
+        entry.entry_field.remove_key_value(TITLE);
+        let form: EntryFormData = (&entry).into();
+        assert!(
+            value_of(&form.fields, TITLE).is_none(),
+            "нет в записи - нет и в форме"
+        );
     }
 
     #[test]
-    fn an_empty_service_is_not_written_and_a_filled_one_is() {
-        let form: EntryFormData = (&foreign_entry()).into();
-        let entry: Entry = (&form).into();
-        assert!(entry.entry_field.find_key_value(SERVICE).is_none());
-
-        let mut form = form;
-        form.preset_fields
-            .iter_mut()
-            .find(|f| f.key == SERVICE)
-            .unwrap()
-            .value = Some("Mail".into());
-        let entry: Entry = (&form).into();
-        assert_eq!(entry.find_kv_field_value(SERVICE).as_deref(), Some("Mail"));
-    }
-
-    #[test]
-    fn the_form_round_trip_keeps_every_field_and_the_order_of_custom_ones() {
+    fn the_form_round_trip_keeps_every_field_in_its_order() {
         let entry = foreign_entry();
         let form: EntryFormData = (&entry).into();
-        let back: Entry = (&form).into();
+        let back = Entry::try_from(&form).unwrap();
 
-        let custom: Vec<&str> = back
-            .entry_field
-            .get_key_values()
-            .iter()
-            .map(|kv| kv.key.as_str())
-            .filter(|k| !matches!(*k, TITLE | USER_NAME | PASSWORD | URL | NOTES))
-            .collect();
-        assert_eq!(custom, vec!["PIN", "Card", "Answer"]);
-        for kv in entry.entry_field.get_key_values() {
-            let after = back.entry_field.find_key_value(&kv.key).unwrap();
-            assert_eq!(after.value, kv.value, "{}", kv.key);
-            assert_eq!(after.protected, kv.protected, "{}", kv.key);
-        }
+        assert_eq!(back.entry_field, entry.entry_field);
+    }
+
+    #[test]
+    fn a_repeated_key_is_in_the_form_and_a_form_with_one_is_refused() {
+        let mut entry = foreign_entry();
+        entry.entry_field.push_key_value(kv("PIN", "5678", true));
+        let form: EntryFormData = (&entry).into();
+        assert_eq!(
+            keys(&form.fields).iter().filter(|k| **k == "PIN").count(),
+            2
+        );
+
+        assert!(matches!(
+            Entry::try_from(&form),
+            Err(crate::error::Error::DuplicateFieldKey)
+        ));
     }
 
     #[test]
@@ -657,22 +598,22 @@ mod tests {
     }
 
     #[test]
-    fn the_form_json_has_two_lists_and_no_sections() {
+    fn the_form_json_has_one_list_of_fields() {
         let form = EntryFormData::new_form_entry(None);
         let json = serde_json::to_value(&form).unwrap();
 
-        assert!(json["preset_fields"].is_array());
-        assert!(json["custom_fields"].is_array());
+        assert!(json["fields"].is_array());
         for gone in [
+            "title",
+            "notes",
+            "preset_fields",
+            "custom_fields",
             "section_fields",
-            "section_names",
-            "standard_section_names",
-            "entry_type_name",
             "entry_type_uuid",
         ] {
             assert!(json.get(gone).is_none(), "{} ушло из формы", gone);
         }
-        let field = &json["preset_fields"][0];
+        let field = &json["fields"][0];
         for gone in [
             "required",
             "helper_text",

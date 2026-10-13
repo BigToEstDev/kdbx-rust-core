@@ -51,16 +51,9 @@ fn add_entry(
 
     let mut value = serde_json::to_value(&form).unwrap();
     let entry_uuid = value["uuid"].as_str().unwrap().to_string();
-    value["title"] = serde_json::json!(title);
-
-    let section = value["preset_fields"].as_array_mut().unwrap();
-    for field in section.iter_mut() {
-        match field["key"].as_str() {
-            Some("UserName") => field["value"] = serde_json::json!(username),
-            Some("Password") => field["value"] = serde_json::json!(password),
-            _ => {}
-        }
-    }
+    common::form::set_field(&mut value, "Title", title);
+    common::form::set_field(&mut value, "UserName", username);
+    common::form::set_field(&mut value, "Password", password);
 
     let form = serde_json::from_value(value).unwrap();
     db_service::insert_entry_from_form_data(db_key, form).unwrap();
@@ -68,30 +61,18 @@ fn add_entry(
 }
 
 // TOTP в KeePass — обычное строковое поле otp с protected-значением.
-// Новое поле собираем копией существующего Password-поля: у KeyValueData нет
-// serde(default), поэтому объект целиком из литерала не соберётся.
 fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &str) {
     let info = db_service::upload_entry_attachment(db_key, attachment_source).unwrap();
 
     let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
     let mut value = serde_json::to_value(&form).unwrap();
-    value["notes"] = serde_json::json!("roundtrip entry with attachment and totp");
-
-    let mut otp_field = value["preset_fields"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|f| f["key"].as_str() == Some("Password"))
-        .cloned()
-        .expect("поле Password не найдено");
-    otp_field["key"] = serde_json::json!("otp");
-    otp_field["value"] = serde_json::json!(TOTP_URL);
-    otp_field["protected"] = serde_json::json!(true);
-    // otp - не поле пресета, а своё поле записи
-    value["custom_fields"]
-        .as_array_mut()
-        .unwrap()
-        .push(otp_field);
+    common::form::set_field(
+        &mut value,
+        "Notes",
+        "roundtrip entry with attachment and totp",
+    );
+    common::form::set_field(&mut value, "otp", TOTP_URL);
+    common::form::protect(&mut value, "otp");
 
     // index_ref пересчитывается при записи по data_hash, поэтому здесь 0
     value["binary_key_values"] = serde_json::json!([{
