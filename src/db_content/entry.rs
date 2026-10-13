@@ -1,5 +1,4 @@
 use chrono::NaiveDateTime;
-use indexmap::IndexMap;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,11 +18,14 @@ use super::time_otp;
 use super::Meta;
 
 // The fields of an entry. Kept in the order of the file - read in that order and written back in it -
-// so that the custom fields of an entry are shown and saved as the user arranged them
+// so that the custom fields of an entry are shown and saved as the user arranged them.
+//
+// A plain list, not a map: an entry has a handful of fields, and a file written by another program may
+// hold two strings under one key - both are kept and written back, nothing of a foreign entry is lost.
+// Lookups by key go to the first field with that key
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct EntryField {
-    // All fields of this entry. For easy look up, stored in a map keyed by the key of the KeyValue
-    pub(crate) fields: IndexMap<String, KeyValue>,
+    pub(crate) fields: Vec<KeyValue>,
 }
 
 impl EntryField {
@@ -43,21 +45,25 @@ impl EntryField {
         entry_field
     }
 
-    /// Called after reading the field KeyValue while parsing the XML content
+    // Sets a field: replaces the first field with the same key in its place, or adds the field at the
+    // end
     pub fn insert_key_value(&mut self, kv: KeyValue) {
-        self.fields.insert(kv.key.clone(), kv);
+        match self.position(&kv.key) {
+            Some(i) => self.fields[i] = kv,
+            None => self.fields.push(kv),
+        }
     }
 
-    pub fn insert_key_values(&mut self, kvs: Vec<KeyValue>) {
-        for kv in kvs {
-            self.fields.insert(kv.key.clone(), kv);
-        }
+    // Called after reading the field KeyValue while parsing the XML content: always adds at the end, so a
+    // repeated key of a foreign file is kept as it is
+    pub(crate) fn push_key_value(&mut self, kv: KeyValue) {
+        self.fields.push(kv);
     }
 
     /// Called to get all fields of this entry and used while writing to XML content
     pub fn get_key_values(&self) -> Vec<&KeyValue> {
         // In the order of the file
-        self.fields.values().collect()
+        self.fields.iter().collect()
     }
 
     // Memory-security lock: volatile-zero every field value in place (all
@@ -66,32 +72,42 @@ impl EntryField {
     // linger in freed heap.
     pub(crate) fn zeroize_values(&mut self) {
         use zeroize::Zeroize;
-        for kv in self.fields.values_mut() {
+        for kv in self.fields.iter_mut() {
             kv.value.zeroize();
         }
     }
 
     pub fn find_key_value(&self, key: &str) -> Option<&KeyValue> {
-        self.fields.values().find(|f| f.key == key)
+        self.fields.iter().find(|f| f.key == key)
     }
 
-    // Drops a field from the entry. The removed value is zeroized on the way out: a totp secret
-    // is one of the things removed this way (see db_content/time_otp.rs)
+    // Drops the first field with the key from the entry. The removed value is zeroized on the way out:
+    // a totp secret is one of the things removed this way (see db_content/time_otp.rs)
     pub(crate) fn remove_key_value(&mut self, key: &str) -> Option<KeyValue> {
         use zeroize::Zeroize;
-        // shift_remove keeps the order of the rest of the fields
-        self.fields.shift_remove(key).map(|mut kv| {
+        // Vec::remove keeps the order of the rest of the fields
+        self.position(key).map(|i| {
+            let mut kv = self.fields.remove(i);
             kv.value.zeroize();
             kv
         })
     }
 
-    // finds a KeyValue from the 'fields' map and updates its 'value' field with the passed value
-    // The update is done only if an entry is found
+    // Updates the value of the first field with the key. The update is done only if a field is found
     pub fn update_value(&mut self, key: &str, value: &str) {
-        self.fields
-            .entry(key.to_string())
-            .and_modify(|e| e.value = value.into());
+        if let Some(i) = self.position(key) {
+            self.fields[i].value = value.into();
+        }
+    }
+
+    // Takes the first field with the key out of the entry as it is, unlike remove_key_value - used on a
+    // copy of the fields, when building the form
+    pub(crate) fn take(&mut self, key: &str) -> Option<KeyValue> {
+        self.position(key).map(|i| self.fields.remove(i))
+    }
+
+    fn position(&self, key: &str) -> Option<usize> {
+        self.fields.iter().position(|f| f.key == key)
     }
 }
 
@@ -581,7 +597,7 @@ impl Entry {
         let mut char_count: u64 = 0;
 
         bytes += self.entry_field.fields.len() as u64 * 40;
-        for kv in self.entry_field.fields.values() {
+        for kv in &self.entry_field.fields {
             char_count += chars(&kv.key) + chars(&kv.value);
         }
 
@@ -866,15 +882,47 @@ mod tests {
     }
 
     #[test]
-    fn entry_field_insert_key_values_batch() {
+    fn entry_field_insert_replaces_in_place_and_appends_new_keys() {
         let mut ef = EntryField::default();
-        let kvs = vec![
-            make_kv("Title", "Gmail", false),
-            make_kv("UserName", "user@gmail.com", false),
-        ];
-        ef.insert_key_values(kvs);
-        assert!(ef.find_key_value("Title").is_some());
-        assert!(ef.find_key_value("UserName").is_some());
+        ef.insert_key_value(make_kv("Title", "Gmail", false));
+        ef.insert_key_value(make_kv("UserName", "alice", false));
+        ef.insert_key_value(make_kv("Title", "Mail", false));
+        ef.insert_key_value(make_kv("URL", "mail.example", false));
+        let keys: Vec<_> = ef
+            .get_key_values()
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["Title", "UserName", "URL"]);
+        assert_eq!(ef.find_key_value("Title").unwrap().value, "Mail");
+    }
+
+    #[test]
+    fn entry_field_push_keeps_a_repeated_key() {
+        let mut ef = EntryField::default();
+        ef.push_key_value(make_kv("PIN", "1111", true));
+        ef.push_key_value(make_kv("PIN", "2222", true));
+        assert_eq!(ef.get_key_values().len(), 2);
+        // Lookups go to the first one
+        assert_eq!(ef.find_key_value("PIN").unwrap().value, "1111");
+    }
+
+    #[test]
+    fn entry_field_remove_and_update_keep_the_order() {
+        let mut ef = EntryField::default();
+        for key in ["A", "B", "C", "D"] {
+            ef.insert_key_value(make_kv(key, key, false));
+        }
+        let removed = ef.remove_key_value("B").unwrap();
+        assert_eq!(removed.value, "", "the removed value is zeroized");
+        ef.update_value("C", "changed");
+        let keys: Vec<_> = ef
+            .get_key_values()
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["A", "C", "D"]);
+        assert_eq!(ef.find_key_value("C").unwrap().value, "changed");
     }
 
     // Entry tests

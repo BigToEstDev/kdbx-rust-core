@@ -170,26 +170,25 @@ impl EntryFormData {
     // Creates the EntryFormData from the given entry and is ready to be used by UI layer
     fn from_entry(entry: &Entry) -> Self {
         // All available fields that are read from xml content, in the order of the file
-        let mut fields = entry.entry_field.fields.clone();
+        let mut fields = entry.entry_field.clone();
 
         // These two are treated separatley in UI layer. So we extract them from the list
         let title: String = fields
-            .shift_remove(TITLE)
+            .take(TITLE)
             .map_or("No Title".into(), |x| x.value.clone());
-        let notes: String = fields
-            .shift_remove(NOTES)
-            .map_or(empty_str(), |x| x.value.clone());
+        let notes: String = fields.take(NOTES).map_or(empty_str(), |x| x.value.clone());
 
         let preset_fields = STANDARD_PRESET_FIELDS
             .iter()
-            .map(|pf| match fields.shift_remove(pf.key) {
+            .map(|pf| match fields.take(pf.key) {
                 Some(kv) => (&kv).into(),
                 None => KeyValueData::empty_preset_field(pf.key, pf.protected),
             })
             .collect();
 
         let custom_fields = fields
-            .values()
+            .fields
+            .iter()
             .map(|kv| {
                 let mut kvd: KeyValueData = kv.into();
                 // A custom field may hold a totp: an otp url, or the TimeOtp-* fields of KeePass
@@ -325,7 +324,7 @@ impl Entry {
         let mut entry_fields_with_place_holders: HashMap<String, String> = HashMap::default();
 
         // Checks whether any one of the entry field contain palce holder variable
-        let parsing_required = self.entry_field.fields.values().into_iter().any(|kvd| {
+        let parsing_required = self.entry_field.fields.iter().any(|kvd| {
             if !kvd.value.trim().is_empty() {
                 parsing::place_holder_marker_found(&kvd.value)
             } else {
@@ -337,7 +336,7 @@ impl Entry {
         if parsing_required {
             // All non empty field values are collected to a HashMap irresespective whether the field
             // contains any placeholder or not
-            entry_fields_with_place_holders = self.entry_field.fields.values().fold(
+            entry_fields_with_place_holders = self.entry_field.fields.iter().fold(
                 entry_fields_with_place_holders,
                 |mut acc, kvd| {
                     if !kvd.value.trim().is_empty() {
