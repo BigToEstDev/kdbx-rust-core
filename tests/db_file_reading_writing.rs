@@ -259,6 +259,66 @@ fn verify_entry_1() {
     let _ = std::fs::remove_file(&db_key);
 }
 
+// Field names in any script survive saving and reopening, protected ones too (the inner stream walks
+// them in order). Keys are compared exactly: names in another case are two fields - folding case is the
+// app's rule for the names it writes, not the core's
+#[test]
+fn field_names_in_any_script_survive_the_file() {
+    common::init();
+
+    let db_key = temp_path("okp_field_names_scripts.kdbx");
+    let _ = std::fs::remove_file(&db_key);
+    let password = "test-pass-1234";
+    create_kdbx(make_new_db(&db_key, password)).unwrap();
+
+    let root = db_service::groups_summary_data(&db_key).unwrap().root_uuid;
+    let entry_uuid = insert_login_entry(&db_key, &root, "Scripts", "user", "pw");
+
+    let fields = [
+        ("Пароль банка", "секрет 1", false),
+        ("كلمة السر", "سر ٢", true),
+        ("密码", "秘密 3", true),
+        ("ПИН", "1111", false),
+        ("пин", "2222", false),
+    ];
+    let form = get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap();
+    let mut v = serde_json::to_value(&form).unwrap();
+    for (key, value, protected) in fields {
+        common::form::set_field(&mut v, key, value);
+        if protected {
+            common::form::protect(&mut v, key);
+        }
+    }
+    update_entry_from_form_data(&db_key, serde_json::from_value(v).unwrap()).unwrap();
+
+    db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
+    let _ = db_service::close_kdbx(&db_key);
+    load_kdbx(&db_key, Some(password), None).unwrap();
+
+    let v = serde_json::to_value(get_entry_form_data_by_id(&db_key, &entry_uuid).unwrap()).unwrap();
+    let read: Vec<(String, String, bool)> = v["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(5)
+        .map(|f| {
+            (
+                f["key"].as_str().unwrap().to_string(),
+                f["value"].as_str().unwrap().to_string(),
+                f["protected"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, String, bool)> = fields
+        .iter()
+        .map(|(k, v, p)| (k.to_string(), v.to_string(), *p))
+        .collect();
+    assert_eq!(read, expected);
+
+    let _ = db_service::close_kdbx(&db_key);
+    let _ = std::fs::remove_file(&db_key);
+}
+
 // The fields keep the order of the form through saving and reopening (Step 43: the core keeps the
 // fields of an entry in the order of the file; Step 45: the order is the app's - any order it sends)
 #[test]
