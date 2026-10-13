@@ -159,6 +159,12 @@ def flatten(kp, el, path, out):
         key = child.findtext(key_tag) if key_tag else None
         if key is not None:
             segment = "%s[%s]" % (child.tag, key)
+            # Повтор ключа (две String с одним Key в чужой записи, Step 45) - с номером,
+            # иначе второй затёр бы первый и потеря одного из них прошла бы незамеченной.
+            n = seen.get(segment, 0)
+            seen[segment] = n + 1
+            if n:
+                segment = "%s[%s#%d]" % (child.tag, key, n + 1)
         else:
             # Повторяющиеся теги без ключа (Association, записи истории) — по позиции.
             n = seen.get(child.tag, 0)

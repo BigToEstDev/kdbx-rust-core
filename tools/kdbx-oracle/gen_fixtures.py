@@ -1003,6 +1003,69 @@ def build_long_password_fixture():
     return db_path
 
 
+# --- Фикстура с повторяющимся ключом строки записи (Step 45) ------------------
+#
+# Формат не запрещает две строки <String> с одним <Key> в записи, и чужой клиент может такую записать.
+# Ядро обязано прочитать обе и сохранить обе, в их порядке. Одна пара дублей protected - сдвиг inner
+# stream при пропуске protected-значения испортил бы и соседние пароли. pykeepass дубли не создаёт,
+# поэтому строки добавляются через lxml. Значения продублированы в tests/duplicate_keys.rs.
+DUPLICATE_KEYS_FIXTURE = "duplicate_keys_41.kdbx"
+DUPLICATE_KEYS_TITLE = "Dup"
+DUPLICATE_KEYS_EXTRA = (
+    # (ключ, значение, protected) - дописываются после стандартных строк записи
+    ("PIN", "1111", True),
+    ("Note", "first", False),
+    ("PIN", "2222", True),
+    ("Note", "second", False),
+)
+
+
+def add_string(entry, key, value, protected):
+    el = entry._element
+    strings = el.findall("String")
+    string = SubElement(el, "String")
+    # сразу за последней строкой записи, а не в конце (после AutoType / History)
+    strings[-1].addnext(string)
+    SubElement(string, "Key").text = key
+    value_el = SubElement(string, "Value")
+    value_el.text = value
+    if protected:
+        value_el.set("Protected", "True")
+
+
+def verify_duplicate_keys_fixture(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    entry = kp.find_entries(title=DUPLICATE_KEYS_TITLE, first=True)
+    extra = [
+        (s.findtext("Key"), s.findtext("Value"))
+        for s in entry._element.findall("String")
+        if s.findtext("Key") in ("PIN", "Note")
+    ]
+    assert extra == [(k, v) for k, v, _ in DUPLICATE_KEYS_EXTRA], extra
+
+
+def build_duplicate_keys_fixture():
+    db_path = OUT_DIR / DUPLICATE_KEYS_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+    header = kp.kdbx.header.value.dynamic_header
+    params = header.kdf_parameters.data.dict
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    entry = kp.add_entry(kp.root_group, DUPLICATE_KEYS_TITLE, "dup-user", "dup-pass-1")
+    for key, value, protected in DUPLICATE_KEYS_EXTRA:
+        add_string(entry, key, value, protected)
+
+    kp.save()
+    verify_duplicate_keys_fixture(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -1156,6 +1219,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (пароль длиннее лимита ядра)"
         % (LONG_PASSWORD_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_duplicate_keys_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (две строки записи с одним ключом)"
+        % (DUPLICATE_KEYS_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 
