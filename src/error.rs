@@ -89,6 +89,10 @@ pub enum Error {
     #[error("PasswordTooLong: The password is longer than the longest one accepted")]
     PasswordTooLong,
 
+    // An entry form with two fields under one key - see form_data::entry
+    #[error("DuplicateFieldKey: The entry has two fields with the same key")]
+    DuplicateFieldKey,
+
     /// Unknown key derivation function UUID.
     // #[error("Invalid KDF ID.Only `Argon2` and `AES` are supported")]
     // UnsupportedKdf(Vec<u8>),

@@ -1004,7 +1004,7 @@ impl<'a> XmlReader<'a> {
                 STRING => {
                     let (kv, unknown) = self.read_keyed(|s| s.read_key_value())?;
                     self.keep_keyed(STRING, &kv.key, unknown);
-                    entry.entry_field.insert_key_value(kv);
+                    entry.entry_field.push_key_value(kv);
                 },
                 BINARY => {
                     let (kv, unknown) = self.read_keyed(|s| s.read_binary_key_value())?;
@@ -2390,6 +2390,49 @@ mod tests {
             assert_eq!(entry.tags, "x&y;z");
             let kv = entry.entry_field.find_key_value("K & k").unwrap();
             assert_eq!(kv.value, "v & v");
+        }
+    }
+
+    // Step 45: a foreign file may hold two strings under one key in an entry - both are read and
+    // written back in their order. Before, the first one was silently dropped
+    #[test]
+    fn a_repeated_string_key_survives_read_write_read() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <UUID>Wg46TgAAQACAAAAAAAAAAQ==</UUID>
+      <Entry>
+        <UUID>Wg46TgAAQACAAAAAAAAAEA==</UUID>
+        <String><Key>Title</Key><Value>Bank</Value></String>
+        <String><Key>PIN</Key><Value>1111</Value></String>
+        <String><Key>Notes</Key><Value>n</Value></String>
+        <String><Key>PIN</Key><Value>2222</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>"#;
+        let first = parse(xml.as_bytes(), None).unwrap();
+        let written = write_xml(&first, None).unwrap();
+        let second = parse(&written, None).unwrap();
+
+        for kp in [&first, &second] {
+            let entry = kp.root.all_entries().values().next().unwrap();
+            let fields: Vec<_> = entry
+                .entry_field
+                .get_key_values()
+                .iter()
+                .map(|kv| (kv.key.as_str(), kv.value.as_str()))
+                .collect();
+            assert_eq!(
+                fields,
+                vec![
+                    ("Title", "Bank"),
+                    ("PIN", "1111"),
+                    ("Notes", "n"),
+                    ("PIN", "2222")
+                ]
+            );
         }
     }
 

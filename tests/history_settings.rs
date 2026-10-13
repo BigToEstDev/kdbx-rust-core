@@ -139,7 +139,7 @@ fn add_entry(db_key: &str, title: &str) -> Uuid {
     let form = db_service::new_entry_form_data(Some(&root_uuid));
     let mut v = serde_json::to_value(&form).unwrap();
     let uuid = Uuid::parse_str(v["uuid"].as_str().unwrap()).unwrap();
-    v["title"] = serde_json::json!(title);
+    common::form::set_field(&mut v, "Title", title);
     db_service::insert_entry_from_form_data(db_key, serde_json::from_value(v).unwrap()).unwrap();
     uuid
 }
@@ -148,7 +148,7 @@ fn add_entry(db_key: &str, title: &str) -> Uuid {
 fn update_title(db_key: &str, entry_uuid: &Uuid, title: &str) {
     let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
     let mut v = serde_json::to_value(&form).unwrap();
-    v["title"] = serde_json::json!(title);
+    common::form::set_field(&mut v, "Title", title);
     db_service::update_entry_from_form_data(db_key, serde_json::from_value(v).unwrap()).unwrap();
 }
 

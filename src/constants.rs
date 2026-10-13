@@ -67,9 +67,6 @@ pub mod entry_keyvalue_key {
     pub const PASSWORD: &str = "Password";
     pub const URL: &str = "URL";
 
-    // The field of our standard preset that kdbx does not have - a custom string for other programs
-    pub const SERVICE: &str = "Service";
-
     // TOTP as KeePassXC / KeePassDX and we write it: one field holding an otpauth:// url
     pub const OTP: &str = "otp";
 

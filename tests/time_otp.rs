@@ -79,9 +79,11 @@ fn tokens(db_key: &str, title: &str) -> HashMap<String, (String, u64)> {
     let form_data = db_service::get_entry_form_data_by_id(db_key, &uuid).unwrap();
     let json = serde_json::to_value(&form_data).unwrap();
 
-    ["preset_fields", "custom_fields"]
-        .iter()
-        .flat_map(|list| json[list].as_array().cloned().unwrap_or_default())
+    json["fields"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
         .filter_map(|field| {
             let token = field.get("current_opt_token")?;
             if token.is_null() {
