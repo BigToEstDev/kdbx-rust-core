@@ -6,7 +6,6 @@ mod keepass;
 mod meta;
 mod otp;
 mod root;
-mod standard_preset;
 mod time_otp;
 mod unknown_element;
 
@@ -28,8 +27,6 @@ pub use self::group::Group;
 pub use self::otp::{CurrentOtpTokenData, OtpAlgorithm, OtpSettings};
 
 pub use self::root::{AllTags, EntryCloneOption, GroupSortCriteria};
-
-pub use self::standard_preset::{PresetField, STANDARD_PRESET_FIELDS};
 
 pub type AttachmentHashValue = u64;
 

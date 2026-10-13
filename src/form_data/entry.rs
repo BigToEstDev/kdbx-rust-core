@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_entry_has_the_kdbx_standard_fields_and_not_service() {
+    fn a_new_entry_has_the_kdbx_standard_fields() {
         let entry = Entry::new_blank_entry(None);
         let keys: Vec<&str> = entry
             .entry_field

@@ -1068,7 +1068,7 @@ pub fn empty_trash(db_key: &str) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| { k.empty_trash() })
 }
 
-// The form of a new entry of the standard preset - nothing of the database is needed for it
+// The form of a new entry, with the kdbx standard fields - nothing of the database is needed for it
 pub fn new_entry_form_data(parent_group_uuid: Option<&Uuid>) -> EntryFormData {
     EntryFormData::new_form_entry(parent_group_uuid)
 }

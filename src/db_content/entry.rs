@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use crate::constants::OTP_URL_PREFIX;
 use crate::constants::{entry_keyvalue_key::*, EMPTY_STR};
-use crate::db_content::STANDARD_PRESET_FIELDS;
 use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElements};
 use crate::error::Result;
 use crate::util;
@@ -29,19 +28,19 @@ pub struct EntryField {
 }
 
 impl EntryField {
-    // The fields of a new entry: the kdbx standard ones, as KeePass creates them. Service of the
-    // standard preset is not among them - it is written only when filled in
+    // The fields of a new entry: the kdbx standard ones, empty, as KeePass creates them - the password
+    // protected. The core knows no preset: the app adds the fields of its preset to the form
     fn new_entry_fields() -> EntryField {
         let mut entry_field = EntryField::default();
-        entry_field.insert_key_value(KeyValue::from(TITLE.into(), String::default(), false));
-        for f in STANDARD_PRESET_FIELDS.iter().filter(|f| f.key != SERVICE) {
-            entry_field.insert_key_value(KeyValue::from(
-                f.key.into(),
-                String::default(),
-                f.protected,
-            ));
+        for (key, protected) in [
+            (TITLE, false),
+            (USER_NAME, false),
+            (PASSWORD, true),
+            (URL, false),
+            (NOTES, false),
+        ] {
+            entry_field.push_key_value(KeyValue::from(key.into(), String::default(), protected));
         }
-        entry_field.insert_key_value(KeyValue::from(NOTES.into(), String::default(), false));
         entry_field
     }
 
@@ -260,7 +259,7 @@ impl Entry {
         self
     }
 
-    // A new entry of the standard preset
+    // A new entry with the kdbx standard fields
     pub(crate) fn new_blank_entry(parent_group_uuid: Option<&Uuid>) -> Entry {
         let mut entry = Entry::new();
         entry.uuid = uuid::Uuid::new_v4();
@@ -489,8 +488,7 @@ impl Entry {
     }
 
     // Removes the entry's 2fa without leaving a tail: all TimeOtp fields go, and so does the `otp`
-    // field - it is not a field of the preset, and an empty one would stay in the form as a custom
-    // field holding nothing (Step 43)
+    // field - an empty one would stay in the form as a field holding nothing (Step 43)
     pub(crate) fn remove_otp(&mut self) {
         time_otp::remove_all(&mut self.entry_field);
         self.entry_field.remove_key_value(OTP);
@@ -1266,7 +1264,7 @@ mod tests {
         assert!(e.parsed_otp_values.is_none());
     }
 
-    // otp is not a field of the preset: an emptied one would stay in the form as an empty custom field
+    // An emptied otp would stay in the form as an empty field
     #[test]
     fn removing_a_2fa_drops_the_otp_field() {
         let mut e = entry_with_otp_fields(&[("otp", &otp_url(TIME_OTP_TEST_SECRET))]);
