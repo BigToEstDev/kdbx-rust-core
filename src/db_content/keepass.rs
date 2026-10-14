@@ -41,15 +41,10 @@ impl KeepassFile {
     // TODO:
     // Instead of this way of copying recycle_bin_uuid etc to 'root' and back, all methods in 'root' that
     // depend on 'meta' fields should be implemented in 'meta' and then call 'root' method
-    // with that data. For example,  'get_all_entries' and other move to recycle methods in 'root'
+    // with that data. For example, the move to recycle methods in 'root'
     // should accept the relevant meta field and then use.
 
     // See 'empty_trash' method for additional comments
-
-    // TODO: For now we are just delegating to 'root' and need to pass excluded group ids (recycle group id and template group id )
-    pub(crate) fn get_all_entries(&self, exclude: bool) -> Vec<&Entry> {
-        self.root.get_all_entries(exclude)
-    }
 
     // Collects all entries that are not in recycle bin
     pub(crate) fn collect_all_active_entries(&self) -> Vec<&Entry> {

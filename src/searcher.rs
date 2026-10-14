@@ -1,203 +1,79 @@
-use crate::db_content::Entry;
-use crate::error::{Error, Result};
-use log::error;
-use regex::Regex;
+//! The term search behind `search_term`: an entry is found by what its card shows - the title and the
+//! user name - and never by a protected field.
+//!
+//! The term is plain text, not a pattern: what the user types is looked for as it is, case aside.
 
-/// A simple search that searches in all fields of an entry
-/// Returns true if there is a case sensitive match of term in any part of a field
-pub fn term_search_all_entry_fields(term: &str, entry: &Entry) -> Result<bool> {
-    search_term_with_options(term, true, entry)
+use crate::constants::entry_keyvalue_key::{TITLE, USER_NAME};
+use crate::db_content::Entry;
+use crate::form_data::EntrySummary;
+
+/// The term as it is matched - trimmed and lower-cased; None when nothing is left to look for.
+pub(crate) fn normalized_term(term: &str) -> Option<String> {
+    let term = term.trim();
+    (!term.is_empty()).then(|| term.to_lowercase())
 }
 
-// Searches the term with some regex options
-// For now only case insensitive or case sensitive option is used to search all
-// entry fields. Later we can use some advanced search options
-// using 'SourceToSearch' and 'SearchOption' - See commented code below
-
-pub fn search_term_with_options(term: &str, case_insensitive: bool, entry: &Entry) -> Result<bool> {
-    if term.trim().is_empty() {
-        return Ok(false);
-    }
-
-    // See https://docs.rs/regex/1.10.5/regex/#grouping-and-flags - case-insensitive flag explained there
-    let modified_term = if case_insensitive {
-        "(?i)".to_owned() + term
-    } else {
-        term.to_string()
+/// Whether the entry is found by `term`, taken from [normalized_term].
+///
+/// The values matched are those of `summary` - place holders resolved, as the card shows them; whether a
+/// field may be matched at all is the entry's: a field marked protected is never looked into, whatever
+/// its key.
+pub(crate) fn matches(term: &str, entry: &Entry, summary: &EntrySummary) -> bool {
+    let open = |key: &str| {
+        entry
+            .entry_field
+            .find_key_value(key)
+            .is_some_and(|kv| !kv.protected)
+    };
+    let holds = |value: &Option<String>| {
+        value
+            .as_deref()
+            .is_some_and(|v| v.to_lowercase().contains(term))
     };
 
-    // println!("Modified term to match is {}",&modified_term);
-
-    let re = match Regex::new(&modified_term) {
-        Ok(reg) => reg,
-        Err(e) => {
-            error!("{}", e);
-            return Err(Error::RegexError(e));
-        }
-    };
-
-    let matched = false
-    // If there is a match in any of fields - title, user, password, url, notes, all custom fields..
-    ||  entry.entry_field.get_key_values().iter().any( |k|  re.is_match(&k.value))
-    // Check if there is any match in the tags
-    || re.is_match(&entry.tags)
-    // If there is a match in any attachment's name
-    || entry.binary_key_values.iter().any( |k|  re.is_match(&k.key));
-
-    Ok(matched)
+    (open(TITLE) && holds(&summary.title)) || (open(USER_NAME) && holds(&summary.secondary_title))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::db_content::{Entry, KeyValue};
-    use crate::searcher::*;
+    use super::*;
+    use crate::db_content::{BinaryKeyValue, KeyValue};
 
-    #[test]
-    fn verify_simple_search() {
-        let mut e = Entry::new();
-        e.tags = "Banks;Money deposit;Tag3".into();
-
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Title".into(),
-            value: "BOA".into(),
-            protected: false,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "User Name".into(),
-            value: "mainuser".into(),
-            protected: false,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Password".into(),
-            value: "changeIt".into(),
-            protected: true,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Test Custom Key".into(),
-            value: "Test Custom Value - Custom".into(),
-            protected: false,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Test Custom Key 2".into(),
-            value: "Test Custom Value Protected".into(),
-            protected: true,
-        });
-
-        // Matches part of BOA
-        let found = term_search_all_entry_fields("BO", &e).unwrap();
-        assert!(found);
-
-        // Casesensitive search and will not match any field
-        // let found = term_search_all_entry_fields("boa".into(), &e).unwrap();
-        // assert_eq!(found, false);
-
-        // Matching in Tags field
-        let found = term_search_all_entry_fields("Banks", &e).unwrap();
-        assert!(found);
-
-        let found = term_search_all_entry_fields(" ", &e).unwrap();
-        //println!("found is {}", found );
-        assert!(!found);
-
-        let found = term_search_all_entry_fields("user\\", &e);
-        assert!(found.is_err());
-        if let Err(e) = found {
-            println!("found is {}", e);
-        }
-    }
-
-    // --- Non-ignored unit tests ---
-
-    fn make_test_entry() -> Entry {
+    fn entry(fields: &[(&str, &str, bool)]) -> Entry {
         let mut e = Entry::new();
         e.tags = "Banks;Finance".into();
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Title".into(),
-            value: "MyBank".into(),
-            protected: false,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "UserName".into(),
-            value: "alice".into(),
-            protected: false,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "Password".into(),
-            value: "Secr3t!".into(),
-            protected: true,
-        });
-        e.entry_field.insert_key_value(KeyValue {
-            key: "URL".into(),
-            value: "https://mybank.com".into(),
-            protected: false,
-        });
+        for (key, value, protected) in fields {
+            e.entry_field.insert_key_value(KeyValue {
+                key: (*key).into(),
+                value: (*value).into(),
+                protected: *protected,
+            });
+        }
         e
     }
 
-    #[test]
-    fn search_matches_title_case_insensitive() {
-        let e = make_test_entry();
-        assert!(search_term_with_options("mybank", true, &e).unwrap());
-        assert!(search_term_with_options("MYBANK", true, &e).unwrap());
+    fn summary_of(e: &Entry) -> EntrySummary {
+        EntrySummary {
+            title: e.find_kv_field_value(TITLE),
+            secondary_title: e.find_kv_field_value(USER_NAME),
+            ..Default::default()
+        }
     }
 
-    #[test]
-    fn search_does_not_match_title_wrong_case_sensitive() {
-        let e = make_test_entry();
-        // "MyBank" matches exactly (case-sensitive)
-        assert!(search_term_with_options("MyBank", false, &e).unwrap());
-        // "ALICE" does not match "alice" when case-sensitive
-        assert!(!search_term_with_options("ALICE", false, &e).unwrap());
+    fn found(term: &str, e: &Entry) -> bool {
+        let summary = summary_of(e);
+        normalized_term(term).is_some_and(|t| matches(&t, e, &summary))
     }
 
-    #[test]
-    fn search_matches_tag_case_insensitive() {
-        let e = make_test_entry();
-        assert!(search_term_with_options("Banks", true, &e).unwrap());
-        assert!(search_term_with_options("finance", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_matches_protected_password_field() {
-        let e = make_test_entry();
-        assert!(search_term_with_options("Secr3t", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_matches_url_field() {
-        let e = make_test_entry();
-        assert!(search_term_with_options("mybank.com", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_empty_term_returns_false() {
-        let e = make_test_entry();
-        assert!(!search_term_with_options("", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_whitespace_only_returns_false() {
-        let e = make_test_entry();
-        assert!(!search_term_with_options("   ", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_no_match_returns_false() {
-        let e = make_test_entry();
-        assert!(!search_term_with_options("xyznonexistent", true, &e).unwrap());
-    }
-
-    #[test]
-    fn search_invalid_regex_returns_error() {
-        let e = make_test_entry();
-        let result = search_term_with_options("user\\", true, &e);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn search_matches_attachment_name() {
-        use crate::db_content::BinaryKeyValue;
-        let mut e = Entry::new();
+    fn bank() -> Entry {
+        let mut e = entry(&[
+            ("Title", "MyBank", false),
+            ("UserName", "Alice", false),
+            ("Password", "Secr3t!", true),
+            ("URL", "https://mybank.com", false),
+            ("Notes", "branch on main street", false),
+            ("PIN", "4321", false),
+        ]);
         e.binary_key_values.push(BinaryKeyValue {
             key: "resume.pdf".into(),
             value: String::default(),
@@ -205,44 +81,87 @@ mod tests {
             data_hash: 0,
             data_size: 0,
         });
-        assert!(search_term_with_options("resume", true, &e).unwrap());
-        assert!(!search_term_with_options("cover_letter", true, &e).unwrap());
+        e
     }
 
     #[test]
-    fn term_search_all_entry_fields_is_case_insensitive() {
-        let e = make_test_entry();
-        assert!(term_search_all_entry_fields("mybank", &e).unwrap());
-        assert!(term_search_all_entry_fields("ALICE", &e).unwrap());
+    fn the_title_is_matched_by_a_part_of_it_whatever_the_case() {
+        let e = bank();
+        assert!(found("bank", &e));
+        assert!(found("MYBANK", &e));
+        assert!(found("yBa", &e));
+    }
+
+    #[test]
+    fn the_user_name_is_matched_too() {
+        assert!(found("alice", &bank()));
+    }
+
+    #[test]
+    fn letters_beyond_ascii_are_matched_whatever_the_case() {
+        let e = entry(&[
+            ("Title", "Почта Яндекса", false),
+            ("UserName", "Ärger", false),
+        ]);
+        assert!(found("ПОЧТА", &e));
+        assert!(found("яндекс", &e));
+        assert!(found("ärg", &e));
+    }
+
+    #[test]
+    fn the_password_is_never_looked_into() {
+        assert!(!found("Secr3t", &bank()));
+    }
+
+    #[test]
+    fn other_fields_tags_and_attachments_are_not_looked_into() {
+        let e = bank();
+        assert!(!found("mybank.com", &e));
+        assert!(!found("street", &e));
+        assert!(!found("4321", &e));
+        assert!(!found("Finance", &e));
+        assert!(!found("resume", &e));
+    }
+
+    #[test]
+    fn a_protected_title_or_user_name_is_not_looked_into() {
+        let e = entry(&[("Title", "Hidden", true), ("UserName", "bob", true)]);
+        assert!(!found("hidden", &e));
+        assert!(!found("bob", &e));
+    }
+
+    #[test]
+    fn the_term_is_text_and_not_a_pattern() {
+        let e = entry(&[
+            ("Title", "c++ (work) [old]", false),
+            ("UserName", "a.b", false),
+        ]);
+        assert!(found("c++", &e));
+        assert!(found("(work)", &e));
+        assert!(found("[old", &e));
+        assert!(found("a.b", &e));
+        // What used to be a broken pattern is a term that is simply not there
+        assert!(!found("user\\", &e));
+        // A dot is a dot, not "any character"
+        assert!(!found(".", &bank()));
+    }
+
+    #[test]
+    fn a_blank_term_finds_nothing() {
+        assert_eq!(normalized_term(""), None);
+        assert_eq!(normalized_term("   "), None);
+        assert!(!found(" ", &bank()));
+    }
+
+    #[test]
+    fn spaces_around_the_term_are_not_part_of_it() {
+        assert_eq!(normalized_term("  Bank "), Some("bank".to_string()));
+        assert!(found(" bank ", &bank()));
+    }
+
+    #[test]
+    fn an_entry_without_title_and_user_name_is_not_found() {
+        let e = entry(&[("Password", "x", true)]);
+        assert!(!found("x", &e));
     }
 }
-
-// #[derive(Serialize, Deserialize)]
-// pub enum SourceToSearch {
-//     //AllEntryInfo,
-//     EntryTitle,
-//     UserName,
-//     Password,
-//     Url,
-//     Notes,
-//     Tags,
-//     CustomFields,
-//     GroupName,
-//     GroupTag,
-// }
-
-// impl SourceToSearch {
-//     fn all_entry_info() -> Vec<SourceToSearch> {
-//         vec![Self::EntryTitle,Self::UserName,Self::Password,]
-//     }
-// }
-
-// #[derive(Serialize, Deserialize)]
-// pub struct SearchOption {
-//     case_sensitive:bool,
-//     include_history_entries:bool,
-//     include_deleted_entries:bool,
-//     sources_to_search:Vec<SourceToSearch>,
-// }
-
-//pub fn search_term_with_options(term: &str, search_option:SearchOption,entry: &Entry,group:&Group) -> Result<bool> {

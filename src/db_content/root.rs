@@ -265,38 +265,21 @@ impl Root {
     //     Ok(group.entry_uuids().is_empty() && group.sub_group_uuids().is_empty())
     // }
 
-    // Fix these duplicate implementations ?
-    // TODO: Verify whether we replace get_all_entries with collect_all_active_entries
-
-    // Gets all entries. The flag exclude determines whether to include or exclude entries from the special groups in the list
-    // TODO: intead of 'exclude', accept the list of group ids to exclude. See comments in 'KeepassFile'
-    pub(crate) fn get_all_entries(&self, exclude: bool) -> Vec<&Entry> {
-        self.all_entries
-            .values()
-            .filter(|x| {
-                if exclude {
-                    // For now only entries from recycle group is excluded
-                    x.parent_group_uuid != self.recycle_bin_uuid
-                } else {
-                    true
-                }
-            })
-            .collect()
+    // Every entry of the database, the recycle bin included; collect_all_active_entries leaves the bin out
+    pub(crate) fn get_all_entries(&self) -> Vec<&Entry> {
+        self.all_entries.values().collect()
     }
 
-    // Collects all entries that are not in recycle bin
+    // Collects all entries that are not in recycle bin, nor in any group below it
     pub(crate) fn collect_all_active_entries(&self, recycle_group_uuid: Uuid) -> Vec<&Entry> {
-        let mut excluded_group_ids = self.deleted_group_uuids();
-        excluded_group_ids.push(recycle_group_uuid);
-        let v: Vec<&Entry> = self
-            .all_entries
+        // A set: the check runs once for every entry of the database
+        let mut excluded_group_ids: HashSet<Uuid> =
+            self.deleted_group_uuids().into_iter().collect();
+        excluded_group_ids.insert(recycle_group_uuid);
+        self.all_entries
             .values()
-            .filter(|x| {
-                // Is this entry' parent group is in recycle bin or its parent is recycle bin?
-                !excluded_group_ids.contains(&x.parent_group_uuid)
-            })
-            .collect();
-        v
+            .filter(|x| !excluded_group_ids.contains(&x.parent_group_uuid))
+            .collect()
     }
 
     /// Collects all entries that are not in recycle bin and has tag 'Favorites'
@@ -1160,7 +1143,7 @@ impl Root {
         // First collect all the unique tags used at group levels
         self.root_group_visitor_action(&mut all_tags);
         // Now collect all unique tags used at entry level
-        for e in self.get_all_entries(false) {
+        for e in self.get_all_entries() {
             for t in split_tags(&e.tags) {
                 all_tags.entry_tags.insert(t);
             }
