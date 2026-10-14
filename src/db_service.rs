@@ -687,34 +687,29 @@ pub struct EntrySearchResult {
     pub entry_items: Vec<EntrySummary>,
 }
 
-// A simple term search. The term is searched in all fields of each entry and returned all matching entry ids
+/// The entries found by a term, with the term itself beside them.
+///
+/// An entry is found by its title or its user name - the values its card shows, place holders resolved -
+/// holding the term as plain text, case aside; a protected field is never looked into. Entries in the
+/// recycle bin, in the groups inside it too, are not looked at. A blank term finds nothing. The entries
+/// come in no particular order: the caller sorts them.
 pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
     main_content_action!(db_key, |k: &KeepassFile| {
-        let mut search_result = EntrySearchResult {
-            term: term.into(),
-            entry_items: vec![],
+        let entry_items = match searcher::normalized_term(term) {
+            None => vec![],
+            Some(needle) => k
+                .collect_all_active_entries()
+                .into_iter()
+                .filter_map(|e| {
+                    let summary = EntrySummary::of(k, e);
+                    searcher::matches(&needle, e, &summary).then_some(summary)
+                })
+                .collect(),
         };
-
-        // Use collect_all_active_entries instead of get_all_entries ?
-        for e in k.get_all_entries(true) {
-            if searcher::term_search_all_entry_fields(term, e)? {
-                let (t1, t2) = extract_entry_titles(e);
-                search_result.entry_items.push(EntrySummary {
-                    uuid: e.uuid.to_string(),
-                    parent_group_uuid: e.parent_group_uuid(),
-                    title: t1,
-                    secondary_title: t2,
-                    icon_id: e.icon_id,
-                    custom_icon_uuid: e.custom_icon_uuid.map(|u| u.to_string()),
-                    history_index: None,
-                    #[allow(deprecated)]
-                    modified_time: Some(e.times.last_modification_time.timestamp()),
-                    #[allow(deprecated)]
-                    created_time: Some(e.times.creation_time.timestamp()),
-                });
-            }
-        }
-        Ok(search_result)
+        Ok(EntrySearchResult {
+            term: term.into(),
+            entry_items,
+        })
     })
 }
 
@@ -781,20 +776,6 @@ pub fn mark_group_as_category(db_key: &str, group_id: &str) -> Result<()> {
         k.root.mark_group_as_category(&gid);
         Ok(())
     })
-}
-
-// Extracts the primary, secondary title and icon id only to show the entries in a list
-// TODO: Deprecate after changing its use in "search_term" fn
-fn extract_entry_titles(entry: &Entry) -> (Option<String>, Option<String>) {
-    let mut titles: (Option<String>, Option<String>) = (None, None);
-    for kv in &entry.entry_field.get_key_values() {
-        if kv.key == "Title" {
-            titles.0 = Some(kv.value.clone());
-        } else if kv.key == "UserName" {
-            titles.1 = Some(kv.value.clone());
-        }
-    }
-    titles
 }
 
 pub fn entry_summary_data(
