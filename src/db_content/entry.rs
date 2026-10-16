@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::constants::OTP_URL_PREFIX;
 use crate::constants::{entry_keyvalue_key::*, EMPTY_STR};
 use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElements};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::util;
 
 use super::meta::MetaShare;
@@ -703,15 +703,18 @@ impl Entry {
         })
     }
 
-    pub(crate) fn delete_history_entry_by_index(&mut self, index: i32) {
-        let idx = index as usize;
-        if idx < self.history.entries.len() {
-            self.history.entries.remove(idx);
-        } else {
-            log::error!(
-                "delete_history_entry_by_index called with invalid index {}",
-                idx
-            );
+    // Deletes the history entry at the index; an index with no version there - negative or past the end -
+    // is refused and the history is left as it was, so the caller does not think a version is gone
+    pub(crate) fn delete_history_entry_by_index(&mut self, index: i32) -> Result<()> {
+        match usize::try_from(index) {
+            Ok(idx) if idx < self.history.entries.len() => {
+                self.history.entries.remove(idx);
+                Ok(())
+            }
+            _ => Err(Error::NotFound(format!(
+                "No history entry at the index {}",
+                index
+            ))),
         }
     }
 
@@ -1364,6 +1367,26 @@ mod history_limit_tests {
             .iter()
             .map(|h| (h.times.last_modification_time - at(0)).num_minutes())
             .collect()
+    }
+
+    // An index with no version there is refused, the history stays (pass-docs, Step 51 п.1)
+    #[test]
+    fn deleting_a_history_entry_by_index() {
+        let mut e =
+            entry_with_history(vec![version(10, 0), version(20, 0), version(30, 0)], -1, -1);
+
+        assert!(e.delete_history_entry_by_index(1).is_ok());
+        assert_eq!(minutes(&e.history.entries), vec![10, 30]);
+
+        assert!(matches!(
+            e.delete_history_entry_by_index(2),
+            Err(crate::error::Error::NotFound(_))
+        ));
+        assert!(matches!(
+            e.delete_history_entry_by_index(-1),
+            Err(crate::error::Error::NotFound(_))
+        ));
+        assert_eq!(minutes(&e.history.entries), vec![10, 30]);
     }
 
     // KeePass: HistoryMaxItems = 0 means no history at all (we used to keep one version)

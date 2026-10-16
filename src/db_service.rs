@@ -931,15 +931,13 @@ pub fn history_entry_by_index(
 
 pub fn delete_history_entry_by_index(db_key: &str, entry_uuid: &Uuid, index: i32) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.delete_history_entry_by_index(entry_uuid, index);
-        Ok(())
+        k.root.delete_history_entry_by_index(entry_uuid, index)
     })
 }
 
 pub fn delete_history_entries(db_key: &str, entry_uuid: &Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.delete_history_entries(entry_uuid);
-        Ok(())
+        k.root.delete_history_entries(entry_uuid)
     })
 }
 

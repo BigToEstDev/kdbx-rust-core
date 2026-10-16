@@ -182,15 +182,22 @@ impl Root {
             .and_then(|e| e.history_entry_by_index(index))
     }
 
-    pub fn delete_history_entry_by_index(&mut self, entry_uuid: &Uuid, index: i32) {
-        if let Some(e) = self.entry_by_id_mut(entry_uuid) {
-            e.delete_history_entry_by_index(index);
+    // An entry that is not there is refused, not passed over: the caller has to know nothing was deleted
+    pub fn delete_history_entry_by_index(&mut self, entry_uuid: &Uuid, index: i32) -> Result<()> {
+        match self.entry_by_id_mut(entry_uuid) {
+            Some(e) => e.delete_history_entry_by_index(index),
+            None => Err(Error::NotFound("No entry found for the id".into())),
         }
     }
 
-    pub fn delete_history_entries(&mut self, entry_uuid: &Uuid) {
-        if let Some(e) = self.entry_by_id_mut(entry_uuid) {
-            e.delete_history_entries();
+    // An entry that is not there is refused; an entry with no history has nothing to delete - that is fine
+    pub fn delete_history_entries(&mut self, entry_uuid: &Uuid) -> Result<()> {
+        match self.entry_by_id_mut(entry_uuid) {
+            Some(e) => {
+                e.delete_history_entries();
+                Ok(())
+            }
+            None => Err(Error::NotFound("No entry found for the id".into())),
         }
     }
 
