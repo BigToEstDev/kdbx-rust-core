@@ -510,6 +510,18 @@ impl SecuredDatabaseKeys {
         Ok(())
     }
 
+    // Checks a password alone against the stored one - the key file, when there is one, is not asked
+    // for: its hash is kept apart (Step 60). A database without a password matches no password.
+    pub(crate) fn matches_password(&self, db_key: &str, password: &str) -> Result<bool> {
+        let Some(stored) = &self.password_hash else {
+            return Ok(false);
+        };
+        let phash = crypto::sha256_hash_from_slice(password.as_bytes())?;
+        let existing = self.decrypt_key(db_key, stored)?;
+
+        Ok(phash == existing)
+    }
+
     pub(crate) fn credentials_used_state(&self) -> (bool, bool) {
         (
             self.password_hash.is_some(),
