@@ -69,8 +69,8 @@ pub use crate::db_content::{
 };
 
 pub use crate::form_data::{
-    CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData, EntryListOtpToken, EntrySummary,
-    GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
+    CredentialsUsed, CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData,
+    EntryListOtpToken, EntrySummary, GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -513,6 +513,23 @@ pub fn unlock_kdbx(
             file_name: util::file_name(db_key),
             key_file_name: ctx.kdbx_file.get_key_file_name(),
         })
+    })
+}
+
+// Whether `password` is the password of the open database - checked alone, the key file of the database
+// not asked for: what the app asks before it keeps the password for biometrics (Step 60). A database
+// without a password matches none. Locked or not, nothing changes: neither the content nor the lock.
+pub fn verify_password(db_key: &str, password: &str) -> Result<bool> {
+    call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        ctx.kdbx_file.matches_password(password)
+    })
+}
+
+// Whether the key of the open database has a password, a key file or both (Step 60)
+pub fn credentials_used(db_key: &str) -> Result<CredentialsUsed> {
+    call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        let (password, key_file) = ctx.kdbx_file.credentials_used_state();
+        Ok(CredentialsUsed { password, key_file })
     })
 }
 

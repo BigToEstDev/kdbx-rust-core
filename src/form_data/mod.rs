@@ -58,6 +58,13 @@ impl From<&MetaFormData> for Meta {
     }
 }
 
+/// What the key of an open database is made of - a password, a key file or both (Step 60).
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+pub struct CredentialsUsed {
+    pub password: bool,
+    pub key_file: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct KdbxLoaded {
     // Full database uri

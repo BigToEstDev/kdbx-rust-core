@@ -71,6 +71,12 @@ impl KdbxFile {
             .compare_keys(&self.database_file_name, password, file_key)
     }
 
+    // The password alone, the key file not asked for - see `SecuredDatabaseKeys::matches_password`
+    pub fn matches_password(&self, password: &str) -> Result<bool> {
+        self.secured_database_keys
+            .matches_password(&self.database_file_name, password)
+    }
+
     //----------------------------
     pub fn get_database_name(&self) -> &str {
         if let Some(kp) = self.keepass_main_content.as_ref() {
