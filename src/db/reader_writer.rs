@@ -15,6 +15,7 @@ use crate::util;
 use crate::xml_parse;
 
 use crate::db::kdbx_file::KdbxFile;
+use crate::db::{Compression, KdbxVersion};
 
 pub struct KdbxFileReader<'a, T>
 where
@@ -87,8 +88,10 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
                 return Err(Error::OldUnsupportedKdbxFormat);
             }
 
-            (constants::SIG1, constants::SIG2, constants::VERSION_40) => (),
-            (constants::SIG1, constants::SIG2, constants::VERSION_41) => (),
+            (constants::SIG1, constants::SIG2, v) => {
+                self.kdbx_file.version =
+                    KdbxVersion::from_signature(v).ok_or(Error::InvalidKeePassFile)?;
+            }
             _ => {
                 return Err(Error::InvalidKeePassFile);
             }
@@ -118,8 +121,8 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
                     self.kdbx_file.main_header.cipher_id = self.read_header_field()?;
                 }
                 header_type::COMPRESSION_FLAGS => {
-                    self.kdbx_file.main_header.compression_flag =
-                        util::to_i32(&self.read_header_field()?)?;
+                    self.kdbx_file.main_header.compression =
+                        Compression::from_flag(util::to_i32(&self.read_header_field()?)?)?;
                 }
                 header_type::MASTER_SEED => {
                     self.kdbx_file.main_header.master_seed = self.read_header_field()?;
@@ -282,7 +285,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
             start.elapsed().as_secs()
         );
 
-        if self.kdbx_file.main_header.compression_flag == 1 {
+        if self.kdbx_file.main_header.compression == Compression::GZip {
             let start = std::time::Instant::now();
             payload = util::decompress(&payload[..])?;
             debug!(
@@ -453,6 +456,9 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
 
         self.writer.flush()?;
 
+        // Written as 4.1 whatever it was read as
+        self.kdbx_file.version = KdbxVersion::V41;
+
         Ok(())
     }
 
@@ -519,7 +525,7 @@ impl<'a, W: Read + Write + Seek> KdbxFileWriter<'a, W> {
         let start = std::time::Instant::now();
         let v = buf.into_inner();
         debug!("Compressing started for data with  size {} ", v.len());
-        let mut payload = if self.kdbx_file.main_header.compression_flag == 1 {
+        let mut payload = if self.kdbx_file.main_header.compression == Compression::GZip {
             util::compress(&v)?
         } else {
             v

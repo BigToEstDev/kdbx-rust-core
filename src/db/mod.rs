@@ -1,4 +1,5 @@
 mod credential_limits;
+mod file_format;
 mod file_key;
 mod kdbx_file;
 mod key_secure;
@@ -38,6 +39,7 @@ use kdbx_file::MainHeader;
 // Reexports
 pub(crate) use self::credential_limits::check_new_password;
 pub use self::credential_limits::{KEY_FILE_MAX_SIZE, PASSWORD_MAX_CHARS};
+pub use self::file_format::{Compression, KdbxVersion};
 pub use self::file_key::FileKey;
 pub(crate) use self::file_key::KeyFileData;
 pub use crypto::ContentCipherId;
@@ -620,6 +622,8 @@ pub fn read_db_from_reader<R: Read + Seek>(
         // See db_service::read_kdbx
         database_file_name: db_file_name.into(),
         file_key,
+        // What the signature says replaces it as the file is read
+        version: KdbxVersion::V41,
         main_header: MainHeader::default(),
         inner_header: InnerHeader::default(),
         secured_database_keys,

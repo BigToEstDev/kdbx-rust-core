@@ -60,8 +60,9 @@ pub use crate::password_generator::{AnalyzedPassword, PasswordGenerationOptions,
 pub use crate::service_util;
 
 pub use crate::db::{
-    calculate_db_file_checksum, FileKey, KeyStoreOperation, KeyStoreService, KeyStoreServiceType,
-    NewDatabase, SecureKeyInfo, KEY_FILE_MAX_SIZE, PASSWORD_MAX_CHARS,
+    calculate_db_file_checksum, Compression, FileKey, KdbxVersion, KeyStoreOperation,
+    KeyStoreService, KeyStoreServiceType, NewDatabase, SecureKeyInfo, KEY_FILE_MAX_SIZE,
+    PASSWORD_MAX_CHARS,
 };
 
 pub use crate::db_content::{
@@ -565,6 +566,8 @@ pub fn get_db_settings(db_key: &str) -> Result<DbSettings> {
             key_file_changed: false,
             key_file_name_part,
             database_file_name: ctx.kdbx_file.get_database_file_name().to_string(),
+            kdbx_version: ctx.kdbx_file.get_version(),
+            compression: ctx.kdbx_file.get_compression(),
             meta: (&kp.meta).into(),
         };
         Ok(db_settings)
@@ -688,6 +691,8 @@ pub fn set_db_settings(
 
         ctx.kdbx_file.set_kdf_algorithm(db_settings.kdf)?;
         ctx.kdbx_file.set_content_cipher_id(db_settings.cipher_id)?;
+        // kdbx_version is not read: the file is written as 4.1 whatever it says
+        ctx.kdbx_file.set_compression(db_settings.compression);
 
         // Like KeePass after its settings dialog: new history limits apply to all entries now, not
         // only to entries edited later. Done last, after every validation above has passed
