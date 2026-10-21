@@ -23,6 +23,17 @@ const ATTACHMENT_DATA: &[u8] = b"example doc\n2 lines\n";
 const TOTP_URL: &str =
     "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30";
 
+// Скрытые поля новой базы, как у KeePass и KeePassXC; имена — как в `Meta/MemoryProtection` без `Protect`
+const DEFAULT_PROTECTED: &[&str] = &["Password"];
+// Имя в файле -> ключ формы настроек ядра
+const PROTECTION_KEYS: &[(&str, &str)] = &[
+    ("Title", "protect_title"),
+    ("UserName", "protect_username"),
+    ("Password", "protect_password"),
+    ("URL", "protect_url"),
+    ("Notes", "protect_notes"),
+];
+
 // NewDatabase собирается через serde: поля pub(crate), но структура Serialize/Deserialize.
 // Так же поступают интеграционные тесты.
 fn new_db(db_key: &str, cipher_id: &str, kdf: &str, key_file: Option<&str>) -> NewDatabase {
@@ -104,6 +115,7 @@ fn build_db(
     kdf: &str,
     key_file_kind: KeyFile,
     compression: Compression,
+    protected: &[&str],
 ) {
     let db_key = format!("{}/{}", out_dir, file_name);
     let _ = std::fs::remove_file(&db_key);
@@ -178,16 +190,29 @@ fn build_db(
         db_service::set_db_settings(&db_key, settings, None).unwrap();
     }
 
+    // Скрытые поля — тоже через настройки, как приложение (Step 66); форма — через serde, поля pub(crate)
+    if protected != DEFAULT_PROTECTED {
+        let mut settings =
+            serde_json::to_value(db_service::get_db_settings(&db_key).unwrap()).unwrap();
+        for (name, key) in PROTECTION_KEYS {
+            settings["meta"]["memory_protection"][key] =
+                serde_json::json!(protected.contains(name));
+        }
+        db_service::set_db_settings(&db_key, serde_json::from_value(settings).unwrap(), None)
+            .unwrap();
+    }
+
     db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
     db_service::close_kdbx(&db_key).unwrap();
 
     println!(
-        "{}|{}|{}|{}|{:?}",
+        "{}|{}|{}|{}|{:?}|{}",
         db_key,
         cipher_id,
         kdf,
         key_file.unwrap_or_default(),
-        compression
+        compression,
+        protected.join(",")
     );
 }
 
@@ -206,6 +231,7 @@ fn main() {
         "Argon2d",
         KeyFile::None,
         Compression::GZip,
+        DEFAULT_PROTECTED,
     );
     build_db(
         &out_dir,
@@ -214,6 +240,7 @@ fn main() {
         "Argon2id",
         KeyFile::None,
         Compression::GZip,
+        DEFAULT_PROTECTED,
     );
     build_db(
         &out_dir,
@@ -222,6 +249,7 @@ fn main() {
         "Argon2d",
         KeyFile::Path,
         Compression::GZip,
+        DEFAULT_PROTECTED,
     );
     build_db(
         &out_dir,
@@ -230,6 +258,7 @@ fn main() {
         "Argon2id",
         KeyFile::Bytes,
         Compression::GZip,
+        DEFAULT_PROTECTED,
     );
     build_db(
         &out_dir,
@@ -238,5 +267,6 @@ fn main() {
         "Argon2id",
         KeyFile::None,
         Compression::None,
+        &["Title", "URL", "Notes"],
     );
 }

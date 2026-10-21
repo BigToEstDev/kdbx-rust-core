@@ -6,7 +6,10 @@ pub(crate) mod parsing;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{db::KdbxFile, db_content::Meta};
+use crate::{
+    db::KdbxFile,
+    db_content::{MemoryProtection, Meta},
+};
 
 pub use self::categories::*;
 pub use self::entry::*;
@@ -29,6 +32,9 @@ pub struct MetaFormData {
     pub(crate) history_max_items: i32,
     // Bytes (KeePass shows it in MB)
     pub(crate) history_max_size: i64,
+    // Which standard fields of an entry are private - `Meta/MemoryProtection`. The core does not apply it, the
+    // app does (Step 66)
+    pub(crate) memory_protection: MemoryProtection,
 }
 
 impl From<&Meta> for MetaFormData {
@@ -38,6 +44,7 @@ impl From<&Meta> for MetaFormData {
             database_description: meta.database_description.clone(),
             history_max_items: meta.meta_share.history_max_items(),
             history_max_size: meta.meta_share.history_max_size(),
+            memory_protection: meta.memory_protection.clone(),
         }
     }
 }
@@ -53,6 +60,7 @@ impl From<&MetaFormData> for Meta {
             .set_history_max_items(form_data.history_max_items);
         meta.meta_share
             .set_history_max_size(form_data.history_max_size);
+        meta.memory_protection = form_data.memory_protection.clone();
 
         meta
     }
@@ -135,7 +143,7 @@ mod tests {
         MetaFormData::from(meta)
     }
 
-    // The settings form carries only name, description and the two history limits. Saving it must not
+    // The settings form carries only name, description, the two history limits and the memory protection. Saving it must not
     // reset Meta fields the form does not have - they come from the file (KeePass, KeePassXC)
     #[test]
     fn update_from_settings_form_keeps_fields_not_in_the_form() {
@@ -171,5 +179,19 @@ mod tests {
 
         assert_eq!(shared.history_max_items(), 3);
         assert_eq!(shared.history_max_size(), 4096_i64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn update_from_settings_form_sets_the_memory_protection() {
+        let mut meta = Meta::new();
+
+        let mut settings = form(&meta);
+        settings.memory_protection.protect_title = true;
+        settings.memory_protection.protect_password = false;
+        meta.update((&settings).into()).unwrap();
+
+        assert!(meta.memory_protection.protect_title);
+        assert!(!meta.memory_protection.protect_password);
+        assert!(!meta.memory_protection.protect_username);
     }
 }
