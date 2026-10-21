@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     check_new_password,
     kdbx_file::{InnerHeader, MainHeader},
-    ContentCipherId, FileKey, KdbxFile, KdfAlgorithm, SecuredDatabaseKeys,
+    Compression, ContentCipherId, FileKey, KdbxFile, KdbxVersion, KdfAlgorithm,
+    SecuredDatabaseKeys,
 };
 use crate::error::Result;
 use crate::{
@@ -74,8 +75,8 @@ impl NewDatabase {
         let mh = MainHeader {
             cipher_id: cid,
             master_seed: rn32,
-            compression_flag: 1, // 0 => no compression
-            encryption_iv: eiv,  //rng.get_bytes::<16>() for AES,rng.get_bytes::<12>() for CHACHA20
+            compression: Compression::GZip,
+            encryption_iv: eiv, //rng.get_bytes::<16>() for AES,rng.get_bytes::<12>() for CHACHA20
             public_custom_data: vec![],
             comment: vec![],
             unknown_data: (0, vec![]),
@@ -116,6 +117,7 @@ impl NewDatabase {
         let k = KdbxFile {
             database_file_name: self.database_file_name.clone(),
             file_key,
+            version: KdbxVersion::V41,
             main_header: mh,
             inner_header: ih,
             secured_database_keys,

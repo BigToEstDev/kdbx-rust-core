@@ -13,7 +13,7 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use kdbx_rust_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::db_service::{self, Compression, NewDatabase};
 use uuid::Uuid;
 
 // Значения должны совпадать с verify_roundtrip.py — он их проверяет
@@ -97,7 +97,14 @@ enum KeyFile {
     Bytes,
 }
 
-fn build_db(out_dir: &str, file_name: &str, cipher_id: &str, kdf: &str, key_file_kind: KeyFile) {
+fn build_db(
+    out_dir: &str,
+    file_name: &str,
+    cipher_id: &str,
+    kdf: &str,
+    key_file_kind: KeyFile,
+    compression: Compression,
+) {
     let db_key = format!("{}/{}", out_dir, file_name);
     let _ = std::fs::remove_file(&db_key);
 
@@ -164,15 +171,23 @@ fn build_db(out_dir: &str, file_name: &str, cipher_id: &str, kdf: &str, key_file
     std::fs::write(&attachment_source, ATTACHMENT_DATA).unwrap();
     add_totp_and_attachment(&db_key, &server_uuid, &attachment_source);
 
+    // Новая база — GZip; другое сжатие — через настройки, как его задаёт приложение (Step 64)
+    if compression != Compression::GZip {
+        let mut settings = db_service::get_db_settings(&db_key).unwrap();
+        settings.set_compression(compression);
+        db_service::set_db_settings(&db_key, settings, None).unwrap();
+    }
+
     db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
     db_service::close_kdbx(&db_key).unwrap();
 
     println!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{:?}",
         db_key,
         cipher_id,
         kdf,
-        key_file.unwrap_or_default()
+        key_file.unwrap_or_default(),
+        compression
     );
 }
 
@@ -190,6 +205,7 @@ fn main() {
         "Aes256",
         "Argon2d",
         KeyFile::None,
+        Compression::GZip,
     );
     build_db(
         &out_dir,
@@ -197,6 +213,7 @@ fn main() {
         "ChaCha20",
         "Argon2id",
         KeyFile::None,
+        Compression::GZip,
     );
     build_db(
         &out_dir,
@@ -204,6 +221,7 @@ fn main() {
         "Aes256",
         "Argon2d",
         KeyFile::Path,
+        Compression::GZip,
     );
     build_db(
         &out_dir,
@@ -211,5 +229,14 @@ fn main() {
         "Aes256",
         "Argon2id",
         KeyFile::Bytes,
+        Compression::GZip,
+    );
+    build_db(
+        &out_dir,
+        "written_chacha20_argon2id_uncompressed.kdbx",
+        "ChaCha20",
+        "Argon2id",
+        KeyFile::None,
+        Compression::None,
     );
 }

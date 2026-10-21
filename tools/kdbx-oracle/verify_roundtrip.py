@@ -42,6 +42,9 @@ EXPECTED_GROUPS = ["RoundTripDb", "Work"]
 # Имена из вывода write_roundtrip_dbs (как в serde нашего ядра) -> значения в заголовке по pykeepass.
 # Сверяем заголовок, а не только факт открытия: файл, записанный не тем KDF/шифром, но
 # внутренне согласованный, откроется без ошибок (так и пропустили баг Argon2Kdf.variant).
+# Сжатие в заголовке, как его читает pykeepass (Step 64)
+EXPECTED_COMPRESSION = {"GZip": True, "None": False}
+
 EXPECTED_CIPHERS = {"Aes256": "aes256", "ChaCha20": "chacha20"}
 EXPECTED_KDF_UUIDS = {"Argon2d": kdf_uuids["argon2"], "Argon2id": kdf_uuids["argon2id"]}
 
@@ -53,7 +56,7 @@ EXPECTED_PASSWORDS = {
 
 
 def write_databases(out_dir):
-    """Просит наше ядро записать базы. Возвращает список (путь, шифр, kdf, key-file)."""
+    """Просит наше ядро записать базы. Возвращает список (путь, шифр, kdf, key-file, сжатие)."""
     result = subprocess.run(
         [
             "cargo",
@@ -74,11 +77,11 @@ def write_databases(out_dir):
 
     databases = []
     for line in result.stdout.splitlines():
-        # Пример печатает: путь|шифр|kdf|key-file (последнее поле может быть пустым)
+        # Пример печатает: путь|шифр|kdf|key-file|сжатие (key-file может быть пустым)
         parts = line.strip().split("|")
-        if len(parts) == 4 and parts[0].endswith(".kdbx"):
-            path, cipher, kdf, key_file = parts
-            databases.append((path, cipher, kdf, key_file or None))
+        if len(parts) == 5 and parts[0].endswith(".kdbx"):
+            path, cipher, kdf, key_file, compression = parts
+            databases.append((path, cipher, kdf, key_file or None, compression))
 
     if not databases:
         print("пример не напечатал ни одной базы; вывод был:\n%s" % result.stdout)
@@ -86,9 +89,15 @@ def write_databases(out_dir):
     return databases
 
 
-def verify_header(kp, cipher, kdf):
-    """Шифр и KDF в заголовке должны совпадать с тем, что заявил пример."""
+def verify_header(kp, cipher, kdf, compression):
+    """Шифр, KDF и сжатие в заголовке должны совпадать с тем, что заявил пример."""
     header = kp.kdbx.header.value.dynamic_header
+
+    written_compression = header.compression_flags.data.compression
+    assert written_compression == EXPECTED_COMPRESSION[compression], "сжатие: заявлено %s, записано %s" % (
+        compression,
+        written_compression,
+    )
 
     written_cipher = header.cipher_id.data
     assert written_cipher == EXPECTED_CIPHERS[cipher], "шифр: заявлен %s, записан %s" % (
@@ -104,10 +113,10 @@ def verify_header(kp, cipher, kdf):
     )
 
 
-def verify(path, cipher, kdf, key_file):
+def verify(path, cipher, kdf, key_file, compression):
     """Открывает базу сторонней реализацией и сверяет заголовок и содержимое."""
     kp = PyKeePass(path, password=PASSWORD, keyfile=key_file)
-    verify_header(kp, cipher, kdf)
+    verify_header(kp, cipher, kdf, compression)
 
     titles = sorted(entry.title for entry in kp.entries)
     assert titles == EXPECTED_TITLES, "записи: %s" % titles
@@ -141,14 +150,15 @@ def main():
         print("Наше ядро пишет базы в %s" % out_dir)
         databases = write_databases(out_dir)
 
-        for path, cipher, kdf, key_file in databases:
-            verify(path, cipher, kdf, key_file)
+        for path, cipher, kdf, key_file, compression in databases:
+            verify(path, cipher, kdf, key_file, compression)
             print(
-                "  OK  %-38s %-9s %-9s%s"
+                "  OK  %-44s %-9s %-9s %-5s%s"
                 % (
                     Path(path).name,
                     cipher,
                     kdf,
+                    compression,
                     "  + key-file" if key_file else "",
                 )
             )

@@ -9,7 +9,8 @@
 //!   ни при чём, даже неверный;
 //! - испорчен байт в содержимом — `ContentCorrupted`: блоки проверяются HMAC уже с верным ключом;
 //! - файл обрезан (недокачанная синхронизация) — тоже «повреждён», на любой длине: `HeaderCorrupted` или
-//!   `ContentCorrupted` в зависимости от того, где оборвался.
+//!   `ContentCorrupted` в зависимости от того, где оборвался;
+//! - флаг сжатия, которого в KDBX 4 нет, — `HeaderCorrupted` (Step 64): раньше читался как «без сжатия».
 //!
 //! Чтение — через `read_kdbx` из байтов, как это делает приложение.
 
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use kdbx_rust_core::db_service::{self, Error};
+use sha2::{Digest, Sha256};
 
 const PASSWORD: &str = "test-pass-1234";
 const FIXTURE: &str = "aes256_argon2d.kdbx";
@@ -70,6 +72,7 @@ fn header_layout(bytes: &[u8], field_type: u8) -> (usize, usize) {
 }
 
 const MASTER_SEED: u8 = 4;
+const COMPRESSION_FLAGS: u8 = 3;
 
 #[test]
 fn the_fixture_opens_untouched() {
@@ -115,6 +118,25 @@ fn damaged_content_is_content_corrupted() {
     let loaded = read(bytes, PASSWORD);
     assert!(
         matches!(loaded, Err(Error::ContentCorrupted)),
+        "{:?}",
+        loaded.err()
+    );
+}
+
+/// Флаг сжатия вне `0 | 1`, а хэш заголовка сходится — заголовок написан так, но такого флага в KDBX 4 нет.
+/// До Step 64 он молча читался как «без сжатия», и чтение падало дальше, на разборе того, что не было XML.
+#[test]
+fn an_unknown_compression_flag_is_header_corrupted() {
+    let mut bytes = fixture();
+    let (flag, header_end) = header_layout(&bytes, COMPRESSION_FLAGS);
+    bytes[flag..flag + 4].copy_from_slice(&2u32.to_le_bytes());
+    // Хэш заголовка пересчитан: ловить должен разбор флага, а не проверка хэша
+    let hash = Sha256::digest(&bytes[..header_end]);
+    bytes[header_end..header_end + 32].copy_from_slice(&hash);
+
+    let loaded = read(bytes, PASSWORD);
+    assert!(
+        matches!(loaded, Err(Error::HeaderCorrupted)),
         "{:?}",
         loaded.err()
     );

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::db::{ContentCipherId, KdfAlgorithm};
+use crate::db::{Compression, ContentCipherId, KdbxVersion, KdfAlgorithm};
 
 use super::MetaFormData;
 
@@ -21,6 +21,11 @@ pub struct DbSettings {
     // Used in mobile mainly
     pub(crate) key_file_name_part: Option<String>,
     pub(crate) database_file_name: String,
+    // Output only, as key_file_name: the version the file was read as, 4.1 once saved - the core writes no
+    // other (Step 64)
+    pub(crate) kdbx_version: KdbxVersion,
+    // Both ways: how the content is packed from the next save on
+    pub(crate) compression: Compression,
     pub(crate) meta: MetaFormData,
 }
 
@@ -38,6 +43,8 @@ impl std::fmt::Debug for DbSettings {
             .field("key_file_changed", &self.key_file_changed)
             .field("key_file_name_part", &self.key_file_name_part)
             .field("database_file_name", &self.database_file_name)
+            .field("kdbx_version", &self.kdbx_version)
+            .field("compression", &self.compression)
             .field("meta", &self.meta)
             .finish()
     }
@@ -52,6 +59,20 @@ impl DbSettings {
 
     pub fn set_database_name(&mut self, name: &str) -> &mut Self {
         self.meta.database_name = name.into();
+        self
+    }
+
+    /// The version of KDBX the file was read as; 4.1 once it is saved. Output only.
+    pub fn kdbx_version(&self) -> KdbxVersion {
+        self.kdbx_version
+    }
+
+    pub fn compression(&self) -> Compression {
+        self.compression
+    }
+
+    pub fn set_compression(&mut self, compression: Compression) -> &mut Self {
+        self.compression = compression;
         self
     }
 

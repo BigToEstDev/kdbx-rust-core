@@ -11,6 +11,9 @@ pub struct KdbxFile {
 
     pub(crate) file_key: Option<FileKey>,
 
+    // The version the file was read as; 4.1 once it is written - the core writes nothing else
+    pub(crate) version: KdbxVersion,
+
     pub(crate) main_header: MainHeader,
     pub(crate) inner_header: InnerHeader,
     pub(crate) secured_database_keys: SecuredDatabaseKeys,
@@ -216,6 +219,20 @@ impl KdbxFile {
         Ok(())
     }
 
+    /// The version of KDBX the file was read as; 4.1 after it is saved.
+    pub fn get_version(&self) -> KdbxVersion {
+        self.version
+    }
+
+    pub fn get_compression(&self) -> Compression {
+        self.main_header.compression
+    }
+
+    /// Packs the content so from the next save on.
+    pub fn set_compression(&mut self, compression: Compression) {
+        self.main_header.compression = compression;
+    }
+
     pub fn get_kdf_algorithm(&self) -> KdfAlgorithm {
         self.main_header.kdf_algorithm.clone()
     }
@@ -413,7 +430,7 @@ pub(crate) struct MainHeader {
     // Required in determining various keys
     pub(crate) master_seed: Vec<u8>,
     /// Formed from 4 LE bytes [1, 0, 0, 0]  
-    pub(crate) compression_flag: i32,
+    pub(crate) compression: Compression,
     // Required to use with a cryptographic primitive to provide the initial state
     pub(crate) encryption_iv: Vec<u8>,
     pub(crate) public_custom_data: Vec<u8>,
@@ -590,7 +607,7 @@ impl MainHeader {
         write_header_with_size!(writer, header_type::CIPHER_ID, &self.cipher_id);
         writer.write_all(&[header_type::COMPRESSION_FLAGS])?;
         writer.write_all(&4_u32.to_le_bytes())?;
-        writer.write_all(&self.compression_flag.to_le_bytes())?;
+        writer.write_all(&self.compression.flag().to_le_bytes())?;
 
         write_header_with_size!(writer, header_type::MASTER_SEED, &self.master_seed);
         //write kdf parameters
