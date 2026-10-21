@@ -181,6 +181,7 @@ impl Meta {
             .set_history_max_items(other.meta_share.history_max_items());
         self.meta_share
             .set_history_max_size(other.meta_share.history_max_size());
+        self.memory_protection = other.memory_protection;
         self.settings_changed = current_time;
         Ok(())
     }

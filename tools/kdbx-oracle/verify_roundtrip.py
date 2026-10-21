@@ -44,6 +44,8 @@ EXPECTED_GROUPS = ["RoundTripDb", "Work"]
 # внутренне согласованный, откроется без ошибок (так и пропустили баг Argon2Kdf.variant).
 # Сжатие в заголовке, как его читает pykeepass (Step 64)
 EXPECTED_COMPRESSION = {"GZip": True, "None": False}
+# Скрытые поля базы, `Meta/MemoryProtection/Protect<имя>` (Step 66)
+PROTECTION_NAMES = ["Title", "UserName", "Password", "URL", "Notes"]
 
 EXPECTED_CIPHERS = {"Aes256": "aes256", "ChaCha20": "chacha20"}
 EXPECTED_KDF_UUIDS = {"Argon2d": kdf_uuids["argon2"], "Argon2id": kdf_uuids["argon2id"]}
@@ -56,7 +58,7 @@ EXPECTED_PASSWORDS = {
 
 
 def write_databases(out_dir):
-    """Просит наше ядро записать базы. Возвращает список (путь, шифр, kdf, key-file, сжатие)."""
+    """Просит наше ядро записать базы. Возвращает список (путь, шифр, kdf, key-file, сжатие, скрытые поля)."""
     result = subprocess.run(
         [
             "cargo",
@@ -77,11 +79,11 @@ def write_databases(out_dir):
 
     databases = []
     for line in result.stdout.splitlines():
-        # Пример печатает: путь|шифр|kdf|key-file|сжатие (key-file может быть пустым)
+        # Пример печатает: путь|шифр|kdf|key-file|сжатие|скрытые поля через запятую (key-file может быть пустым)
         parts = line.strip().split("|")
-        if len(parts) == 5 and parts[0].endswith(".kdbx"):
-            path, cipher, kdf, key_file, compression = parts
-            databases.append((path, cipher, kdf, key_file or None, compression))
+        if len(parts) == 6 and parts[0].endswith(".kdbx"):
+            path, cipher, kdf, key_file, compression, protected = parts
+            databases.append((path, cipher, kdf, key_file or None, compression, protected.split(",")))
 
     if not databases:
         print("пример не напечатал ни одной базы; вывод был:\n%s" % result.stdout)
@@ -113,10 +115,24 @@ def verify_header(kp, cipher, kdf, compression):
     )
 
 
-def verify(path, cipher, kdf, key_file, compression):
+def verify_protection(kp, protected):
+    """Скрытые поля в `Meta/MemoryProtection` должны совпадать с тем, что заявил пример."""
+    for name in PROTECTION_NAMES:
+        element = kp.tree.find("Meta/MemoryProtection/Protect%s" % name)
+        assert element is not None, "нет Meta/MemoryProtection/Protect%s" % name
+        written = element.text == "True"
+        assert written == (name in protected), "Protect%s: заявлено %s, записано %r" % (
+            name,
+            name in protected,
+            element.text,
+        )
+
+
+def verify(path, cipher, kdf, key_file, compression, protected):
     """Открывает базу сторонней реализацией и сверяет заголовок и содержимое."""
     kp = PyKeePass(path, password=PASSWORD, keyfile=key_file)
     verify_header(kp, cipher, kdf, compression)
+    verify_protection(kp, protected)
 
     titles = sorted(entry.title for entry in kp.entries)
     assert titles == EXPECTED_TITLES, "записи: %s" % titles
@@ -150,15 +166,16 @@ def main():
         print("Наше ядро пишет базы в %s" % out_dir)
         databases = write_databases(out_dir)
 
-        for path, cipher, kdf, key_file, compression in databases:
-            verify(path, cipher, kdf, key_file, compression)
+        for path, cipher, kdf, key_file, compression, protected in databases:
+            verify(path, cipher, kdf, key_file, compression, protected)
             print(
-                "  OK  %-44s %-9s %-9s %-5s%s"
+                "  OK  %-44s %-9s %-9s %-5s %-18s%s"
                 % (
                     Path(path).name,
                     cipher,
                     kdf,
                     compression,
+                    ",".join(protected),
                     "  + key-file" if key_file else "",
                 )
             )
