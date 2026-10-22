@@ -4,13 +4,16 @@
 //! сами группы насовсем; выключена — всё насовсем, корзина не создаётся. Насовсем — значит в `DeletedObjects`.
 //! Выключение корзины через `set_db_settings` удаляет её группу со всем содержимым. При переносе записи ставится
 //! `PreviousParentGroup` (KDBX 4.1) — прежняя группа для восстановления.
+//!
+//! Экран корзины: `trash_entries` — записи корзины с любой глубины, с прежней группой, пока она жива, и временем
+//! удаления; `search_trash` — поиск по ним, как `search_term`.
 
 mod common;
 
 use common::xml::{parse_xml, Node};
 use kdbx_rust_core::db_service::{self, DbSettings, NewDatabase};
 use kdbx_rust_core::error::Error;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 const PASSWORD: &str = "recycle-bin-1234";
@@ -338,4 +341,115 @@ fn an_unknown_uuid_is_not_found() {
         db_service::delete_group(&db.0, Uuid::new_v4()),
         Err(Error::NotFound(_))
     ));
+}
+
+fn trash(db: &Db) -> Vec<Value> {
+    let v = serde_json::to_value(db_service::trash_entries(&db.0).unwrap()).unwrap();
+    v.as_array().unwrap().clone()
+}
+
+fn trash_item(db: &Db, entry: Uuid) -> Value {
+    trash(db)
+        .into_iter()
+        .find(|t| t["entry"]["uuid"] == entry.to_string())
+        .unwrap_or_else(|| panic!("записи {} нет в корзине", entry))
+}
+
+fn found_in_trash(db: &Db, term: &str) -> Vec<String> {
+    let v = serde_json::to_value(db_service::search_trash(&db.0, term).unwrap()).unwrap();
+    let mut titles: Vec<String> = v["entry_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["entry"]["title"].as_str().unwrap_or_default().to_string())
+        .collect();
+    titles.sort();
+    titles
+}
+
+#[test]
+fn without_a_bin_the_trash_is_empty() {
+    let db = create_db("trash_none");
+    add_entry(&db, root(&db), "Mail");
+    assert!(trash(&db).is_empty());
+}
+
+#[test]
+fn the_trash_lists_deleted_entries_only() {
+    let db = create_db("trash_list");
+    let root = root(&db);
+    add_entry(&db, root, "Kept");
+    let mail = add_entry(&db, root, "Mail");
+    let work = add_group(&db, root, "Work");
+    let jira = add_entry(&db, work, "Jira");
+
+    db_service::delete_entry(&db.0, mail).unwrap();
+    db_service::delete_group(&db.0, work).unwrap();
+
+    let mut listed: Vec<String> = trash(&db)
+        .iter()
+        .map(|t| t["entry"]["uuid"].as_str().unwrap().to_string())
+        .collect();
+    listed.sort();
+    let mut expected = vec![mail.to_string(), jira.to_string()];
+    expected.sort();
+    assert_eq!(listed, expected);
+}
+
+// Прежняя группа есть — она предвыбрана на экране; удалена вместе с записью — выбор группы без подсказки
+#[test]
+fn a_trash_entry_carries_its_previous_group_while_it_lives() {
+    let db = create_db("trash_previous");
+    let root = root(&db);
+    let kept = add_group(&db, root, "Kept");
+    let gone = add_group(&db, root, "Gone");
+    let mail = add_entry(&db, kept, "Mail");
+    let jira = add_entry(&db, gone, "Jira");
+
+    db_service::delete_entry(&db.0, mail).unwrap();
+    db_service::delete_group(&db.0, gone).unwrap();
+
+    assert_eq!(
+        trash_item(&db, mail)["previous_group_uuid"],
+        json!(kept.to_string())
+    );
+    assert_eq!(trash_item(&db, jira)["previous_group_uuid"], Value::Null);
+
+    // Переживает файл: PreviousParentGroup пишется и читается
+    save_and_reopen(&db);
+    assert_eq!(
+        trash_item(&db, mail)["previous_group_uuid"],
+        json!(kept.to_string())
+    );
+}
+
+#[test]
+fn a_trash_entry_carries_the_time_it_was_deleted() {
+    let db = create_db("trash_time");
+    let mail = add_entry(&db, root(&db), "Mail");
+    let before = chrono::Utc::now().timestamp();
+
+    db_service::delete_entry(&db.0, mail).unwrap();
+
+    let item = trash_item(&db, mail);
+    let deleted = item["deleted_time"].as_i64().unwrap();
+    assert!(deleted >= before, "{} < {}", deleted, before);
+    assert!(deleted >= item["entry"]["created_time"].as_i64().unwrap());
+}
+
+#[test]
+fn the_trash_search_finds_deleted_entries_by_title_and_user_name() {
+    let db = create_db("trash_search");
+    let root = root(&db);
+    add_entry(&db, root, "Bank kept");
+    let binned = add_entry(&db, root, "Bank binned");
+    let other = add_entry(&db, root, "Mail");
+    db_service::delete_entry(&db.0, binned).unwrap();
+    db_service::delete_entry(&db.0, other).unwrap();
+
+    assert_eq!(found_in_trash(&db, "BANK"), vec!["Bank binned"]);
+    assert!(found_in_trash(&db, "   ").is_empty());
+    let v = serde_json::to_value(db_service::search_trash(&db.0, "mail").unwrap()).unwrap();
+    assert_eq!(v["term"], "mail");
+    assert_eq!(v["entry_items"][0]["entry"]["uuid"], other.to_string());
 }

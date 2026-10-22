@@ -352,6 +352,13 @@ impl Root {
             .collect()
     }
 
+    /// A group an entry can live in: it is in the database, and it is not the recycle bin or in it
+    pub(crate) fn is_active_group(&self, group_uuid: &Uuid) -> bool {
+        self.all_groups.contains_key(group_uuid)
+            && *group_uuid != self.recycle_bin_uuid
+            && !self.deleted_group_uuids().contains(group_uuid)
+    }
+
     /// Gets all entries that are moved to recycle bin
     pub(crate) fn deleted_entry_uuids(&self) -> Vec<Uuid> {
         // true is passed for 'entry_ids_wanted' as we want all deleted entry uuids

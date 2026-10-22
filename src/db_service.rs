@@ -72,7 +72,7 @@ pub use crate::db_content::{
 
 pub use crate::form_data::{
     CredentialsUsed, CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData,
-    EntryListOtpToken, EntrySummary, GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
+    EntryListOtpToken, EntrySummary, GroupSummary, GroupTree, KdbxLoaded, KdbxSaved, TrashEntry,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -742,6 +742,45 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
                 .collect(),
         };
         Ok(EntrySearchResult {
+            term: term.into(),
+            entry_items,
+        })
+    })
+}
+
+/// The entries of the recycle bin, from any depth of it: groups get there only from other apps (KeePass,
+/// KeePassXC) and are not shown (Step 69). The entries come in no particular order: the caller sorts them.
+pub fn trash_entries(db_key: &str) -> Result<Vec<TrashEntry>> {
+    main_content_action!(db_key, |k: &KeepassFile| {
+        Ok(k.root
+            .deleted_entries()
+            .into_iter()
+            .map(|e| TrashEntry::of(k, e))
+            .collect())
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TrashSearchResult {
+    pub term: String,
+    pub entry_items: Vec<TrashEntry>,
+}
+
+/// The entries of the recycle bin found by a term - the same match as `search_term`, over `trash_entries`.
+pub fn search_trash(db_key: &str, term: &str) -> Result<TrashSearchResult> {
+    main_content_action!(db_key, |k: &KeepassFile| {
+        let entry_items = match searcher::normalized_term(term) {
+            None => vec![],
+            Some(needle) => k
+                .root
+                .deleted_entries()
+                .into_iter()
+                .map(|e| (e, TrashEntry::of(k, e)))
+                .filter(|(e, item)| searcher::matches(&needle, e, &item.entry))
+                .map(|(_, item)| item)
+                .collect(),
+        };
+        Ok(TrashSearchResult {
             term: term.into(),
             entry_items,
         })
