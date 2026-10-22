@@ -108,15 +108,36 @@ enum KeyFile {
     Bytes,
 }
 
+/// Что задаётся через настройки базы после создания — так, как это делает приложение
+struct Settings<'a> {
+    /// Новая база — GZip; другое сжатие — через настройки (Step 64)
+    compression: Compression,
+    /// Скрытые поля (Step 66)
+    protected: &'a [&'a str],
+    /// Шифр и KDF, с которыми база создаётся; в настройках меняются на заявленные (Step 68). `None` — сразу с ними
+    created_as: Option<(&'a str, &'a str)>,
+}
+
+const DEFAULT_SETTINGS: Settings = Settings {
+    compression: Compression::GZip,
+    protected: DEFAULT_PROTECTED,
+    created_as: None,
+};
+
 fn build_db(
     out_dir: &str,
     file_name: &str,
     cipher_id: &str,
     kdf: &str,
     key_file_kind: KeyFile,
-    compression: Compression,
-    protected: &[&str],
+    settings: Settings,
 ) {
+    let Settings {
+        compression,
+        protected,
+        created_as,
+    } = settings;
+    let (created_cipher, created_kdf) = created_as.unwrap_or((cipher_id, kdf));
     let db_key = format!("{}/{}", out_dir, file_name);
     let _ = std::fs::remove_file(&db_key);
 
@@ -142,7 +163,7 @@ fn build_db(
         let mut buffer = std::io::Cursor::new(Vec::new());
         db_service::create_and_write_to_writer(
             &mut buffer,
-            new_db(&db_key, cipher_id, kdf, None),
+            new_db(&db_key, created_cipher, created_kdf, None),
             Some(file_key),
         )
         .unwrap();
@@ -150,7 +171,13 @@ fn build_db(
         // дальше база правится и сохраняется тем же кодом, что и остальные
         std::fs::write(&db_key, buffer.into_inner()).unwrap();
     } else {
-        db_service::create_kdbx(new_db(&db_key, cipher_id, kdf, key_file.as_deref())).unwrap();
+        db_service::create_kdbx(new_db(
+            &db_key,
+            created_cipher,
+            created_kdf,
+            key_file.as_deref(),
+        ))
+        .unwrap();
     }
 
     let tree = db_service::groups_summary_data(&db_key).unwrap();
@@ -202,6 +229,17 @@ fn build_db(
             .unwrap();
     }
 
+    // Шифр и вариант Argon2 — через настройки, как их меняет экран «Безопасность» (Step 68); параметры
+    // Argon2 остаются от создания
+    if created_as.is_some() {
+        let mut settings =
+            serde_json::to_value(db_service::get_db_settings(&db_key).unwrap()).unwrap();
+        settings["cipher_id"] = serde_json::json!(cipher_id);
+        settings["kdf"]["algorithm"] = serde_json::json!(kdf);
+        db_service::set_db_settings(&db_key, serde_json::from_value(settings).unwrap(), None)
+            .unwrap();
+    }
+
     db_service::save_kdbx_with_backup(&db_key, None, true).unwrap();
     db_service::close_kdbx(&db_key).unwrap();
 
@@ -230,8 +268,7 @@ fn main() {
         "Aes256",
         "Argon2d",
         KeyFile::None,
-        Compression::GZip,
-        DEFAULT_PROTECTED,
+        DEFAULT_SETTINGS,
     );
     build_db(
         &out_dir,
@@ -239,8 +276,7 @@ fn main() {
         "ChaCha20",
         "Argon2id",
         KeyFile::None,
-        Compression::GZip,
-        DEFAULT_PROTECTED,
+        DEFAULT_SETTINGS,
     );
     build_db(
         &out_dir,
@@ -248,8 +284,7 @@ fn main() {
         "Aes256",
         "Argon2d",
         KeyFile::Path,
-        Compression::GZip,
-        DEFAULT_PROTECTED,
+        DEFAULT_SETTINGS,
     );
     build_db(
         &out_dir,
@@ -257,8 +292,7 @@ fn main() {
         "Aes256",
         "Argon2id",
         KeyFile::Bytes,
-        Compression::GZip,
-        DEFAULT_PROTECTED,
+        DEFAULT_SETTINGS,
     );
     build_db(
         &out_dir,
@@ -266,7 +300,21 @@ fn main() {
         "ChaCha20",
         "Argon2id",
         KeyFile::None,
-        Compression::None,
-        &["Title", "URL", "Notes"],
+        Settings {
+            compression: Compression::None,
+            protected: &["Title", "URL", "Notes"],
+            created_as: None,
+        },
+    );
+    build_db(
+        &out_dir,
+        "written_aes256_argon2d_changed_to_chacha20_argon2id.kdbx",
+        "ChaCha20",
+        "Argon2id",
+        KeyFile::None,
+        Settings {
+            created_as: Some(("Aes256", "Argon2d")),
+            ..DEFAULT_SETTINGS
+        },
     );
 }

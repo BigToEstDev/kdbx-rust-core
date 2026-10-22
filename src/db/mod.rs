@@ -12,6 +12,7 @@ use std::fs::{File, OpenOptions};
 use std::hash::Hasher;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use log::{debug, error};
 // Used only by the dev-only XML dump below.
@@ -102,6 +103,11 @@ impl KdfAlgorithm {
     pub(crate) fn transform_key(&self, composite_key: &[u8]) -> Result<Vec<u8>> {
         let (variant, kdf) = self.argon2()?;
         kdf.transform_key(variant, composite_key)
+    }
+
+    pub(crate) fn measure_pass(&self) -> Result<Duration> {
+        let (variant, kdf) = self.argon2()?;
+        kdf.measure_pass(variant)
     }
 
     pub(crate) fn reset_salt(&mut self) -> Result<()> {
