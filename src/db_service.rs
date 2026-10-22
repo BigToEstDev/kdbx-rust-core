@@ -706,9 +706,11 @@ pub fn set_db_settings(
         ctx.kdbx_file.set_compression(db_settings.compression);
 
         // Like KeePass after its settings dialog: new history limits apply to all entries now, not
-        // only to entries edited later. Done last, after every validation above has passed
+        // only to entries edited later. Done last, after every validation above has passed - as the
+        // recycle bin switched off, which removes the bin with all it holds
         if let Some(kp) = ctx.kdbx_file.keepass_main_content.as_mut() {
             kp.maintain_all_histories();
+            kp.set_recycle_bin_enabled(db_settings.meta.recycle_bin_enabled)?;
         }
         Ok(())
     })
@@ -1040,9 +1042,11 @@ pub fn sort_sub_groups(
     })
 }
 
-pub fn move_group_to_recycle_bin(db_key: &str, group_uuid: Uuid) -> Result<()> {
+/// Deletes a group with its subtree: the entries go to the recycle bin flat, the groups are removed for good.
+/// With the bin off (`RecycleBinEnabled`) everything is removed for good. Groups never go to the bin (Step 69)
+pub fn delete_group(db_key: &str, group_uuid: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.move_group_to_recycle_bin(group_uuid)
+        k.delete_group(group_uuid)
     })
 }
 
@@ -1052,27 +1056,16 @@ pub fn move_group(db_key: &str, group_uuid: Uuid, new_parent_id: Uuid) -> Result
     })
 }
 
-pub fn remove_group_permanently(db_key: &str, group_uuid: Uuid) -> Result<()> {
+/// Deletes an entry: into the recycle bin, or for good with the bin off (`RecycleBinEnabled`)
+pub fn delete_entry(db_key: &str, entry_uuid: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.remove_group_permanently(group_uuid)
-    })
-}
-
-pub fn move_entry_to_recycle_bin(db_key: &str, entry_uuid: Uuid) -> Result<()> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.move_entry_to_recycle_bin(entry_uuid)
+        k.delete_entry(entry_uuid)
     })
 }
 
 pub fn move_entry(db_key: &str, entry_uuid: Uuid, new_parent_id: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
         k.root.move_entry(entry_uuid, new_parent_id)
-    })
-}
-
-pub fn remove_entry_permanently(db_key: &str, entry_uuid: Uuid) -> Result<()> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.remove_entry_permanently(entry_uuid)
     })
 }
 

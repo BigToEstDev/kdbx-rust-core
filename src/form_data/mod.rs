@@ -35,6 +35,8 @@ pub struct MetaFormData {
     // Which standard fields of an entry are private - `Meta/MemoryProtection`. The core does not apply it, the
     // app does (Step 66)
     pub(crate) memory_protection: MemoryProtection,
+    // `Meta/RecycleBinEnabled`: off - a delete is for good, and switching it off removes the bin (Step 69)
+    pub(crate) recycle_bin_enabled: bool,
 }
 
 impl From<&Meta> for MetaFormData {
@@ -45,6 +47,7 @@ impl From<&Meta> for MetaFormData {
             history_max_items: meta.meta_share.history_max_items(),
             history_max_size: meta.meta_share.history_max_size(),
             memory_protection: meta.memory_protection.clone(),
+            recycle_bin_enabled: meta.recycle_bin_enabled,
         }
     }
 }
@@ -61,6 +64,7 @@ impl From<&MetaFormData> for Meta {
         meta.meta_share
             .set_history_max_size(form_data.history_max_size);
         meta.memory_protection = form_data.memory_protection.clone();
+        meta.recycle_bin_enabled = form_data.recycle_bin_enabled;
 
         meta
     }

@@ -549,14 +549,89 @@ impl Root {
         Ok(())
     }
 
-    /// Moves a group to the recycle bin group when user deletes a group
-    pub fn move_group_to_recycle_bin(&mut self, group_uuid: Uuid) -> Result<()> {
+    // A group in the recycle bin, as KeePass files have it - our delete never puts a group there (delete_group)
+    #[cfg(test)]
+    pub(crate) fn move_group_to_recycle_bin(&mut self, group_uuid: Uuid) -> Result<()> {
         move_to_recycle_bin!(self, move_group, group_uuid)
+    }
 
-        // // First we need to find the recycle group and it will be the new parent for this group
-        // let parent_id = self.recycle_bin_group().ok_or("No recycle bin group")?.uuid;
-        // self.move_group(group_uuid,parent_id)?;
-        // Ok(())
+    /// Deletes an entry not in the recycle bin: into the bin, or for good when `to_bin` is false
+    pub(crate) fn delete_entry(&mut self, entry_uuid: Uuid, to_bin: bool) -> Result<()> {
+        verify_uuid!(self, entry_uuid, all_entries);
+        if self.deleted_entry_uuids().contains(&entry_uuid) {
+            return Err(Error::DataError("The entry is in the recycle bin already"));
+        }
+        if to_bin {
+            self.move_entry_to_recycle_bin(entry_uuid)
+        } else {
+            self.remove_entry(entry_uuid)
+        }
+    }
+
+    /// Deletes a group with its whole subtree. The entries of the subtree go to the recycle bin flat, or for good
+    /// when `to_bin` is false; the groups are removed for good either way. The root, the bin and the groups in the
+    /// bin are not deleted here
+    pub(crate) fn delete_group(&mut self, group_uuid: Uuid, to_bin: bool) -> Result<()> {
+        verify_uuid!(self, group_uuid, all_groups);
+        if group_uuid == self.root_uuid
+            || group_uuid == self.recycle_bin_uuid
+            || self.deleted_group_uuids().contains(&group_uuid)
+        {
+            return Err(Error::DataError(
+                "The root, the recycle bin and the groups in it can not be deleted",
+            ));
+        }
+
+        // Found before anything moves: a bin uuid without its group fails here, with the database untouched
+        let bin_uuid = if to_bin {
+            Some(self.recycle_bin_group().ok_or("No recycle bin group")?.uuid)
+        } else {
+            None
+        };
+
+        for eid in self.children_entry_uuids(&group_uuid) {
+            match bin_uuid {
+                Some(bin_uuid) => self.move_entry(eid, bin_uuid)?,
+                None => self.remove_entry(eid)?,
+            }
+        }
+
+        // The groups hold no entries now
+        for gid in self.children_groups_uuids(&group_uuid) {
+            self.all_groups.remove(&gid);
+            self.add_deleted_object_by_id(gid);
+        }
+        let group = self
+            .all_groups
+            .remove(&group_uuid)
+            .ok_or("The group is not found in All groups")?;
+        if let Some(parent) = self.all_groups.get_mut(&group.parent_group_uuid) {
+            parent.group_uuids.retain(|&id| id != group_uuid);
+        }
+        self.add_deleted_object_by_id(group_uuid);
+        Ok(())
+    }
+
+    /// Removes the recycle bin group with all it holds, for good. Nothing to do without a bin
+    pub(crate) fn remove_recycle_bin(&mut self) -> Result<()> {
+        let bin_uuid = self.recycle_bin_uuid;
+        if bin_uuid == Uuid::default() {
+            return Ok(());
+        }
+        // A bin uuid from the file may name no group; then there is nothing to remove but the uuid
+        if self.all_groups.contains_key(&bin_uuid) {
+            self.empty_trash(bin_uuid)?;
+            let bin = self
+                .all_groups
+                .remove(&bin_uuid)
+                .ok_or("The recycle group is not found in All Groups map")?;
+            if let Some(parent) = self.all_groups.get_mut(&bin.parent_group_uuid) {
+                parent.group_uuids.retain(|&id| id != bin_uuid);
+            }
+            self.add_deleted_object_by_id(bin_uuid);
+        }
+        self.recycle_bin_uuid = Uuid::default();
+        Ok(())
     }
 
     /// Deletes all entries and groups permanently
@@ -601,7 +676,9 @@ impl Root {
         Ok(())
     }
 
-    pub fn remove_group_permanently(&mut self, group_uuid: Uuid) -> Result<()> {
+    // Groups get into the recycle bin only from KeePass files - see move_group_to_recycle_bin
+    #[cfg(test)]
+    pub(crate) fn remove_group_permanently(&mut self, group_uuid: Uuid) -> Result<()> {
         verify_uuid!(self, group_uuid, all_groups);
 
         // verify that group_uuid is in the recycle group before removing permanently
@@ -681,7 +758,9 @@ impl Root {
         Ok(())
     }
 
-    pub fn remove_entry_permanently(&mut self, entry_uuid: Uuid) -> Result<()> {
+    // Used by the tests only till the trash screen removes entries (Step 69 p.3)
+    #[cfg(test)]
+    pub(crate) fn remove_entry_permanently(&mut self, entry_uuid: Uuid) -> Result<()> {
         verify_uuid!(self, entry_uuid, all_entries);
 
         // verify that entry_uuid is in the recycle group before removing permanently
@@ -690,14 +769,16 @@ impl Root {
                 "The entry is not found in recycle bin".into(),
             ));
         }
-        // Remove the entry from all_groups map
+        self.remove_entry(entry_uuid)
+    }
+
+    // Removes an entry for good, wherever it is, and marks it in DeletedObjects (merge, other apps)
+    fn remove_entry(&mut self, entry_uuid: Uuid) -> Result<()> {
         let e = self
             .all_entries
             .remove(&entry_uuid)
             .ok_or("The entry is not found in All entries")?;
 
-        // Remove this entry id from entry_uuids of its parent group.
-        // The parent should be a recycle bin group  or group that is in recycle bin
         if let Some(old_parent) = self.all_groups.get_mut(&e.parent_group_uuid) {
             old_parent.entry_uuids.retain(|&id| id != e.uuid);
         }
@@ -746,6 +827,8 @@ impl Root {
                 return Err(Error::DataError("The new parent is the same as the old parent for this group and move is not done"));
             }
             grp.parent_group_uuid = new_parent_id;
+            // KDBX 4.1, as KeePass sets it on every move: where the group was before
+            grp.previous_parent_group = old_parent_id;
             // At this time we are changing only 'location_changed' time.
             grp.times.location_changed = util::now_utc();
         }
@@ -781,7 +864,7 @@ impl Root {
     }
 
     /// Moves an entry to the recycle bin group when user deletes an entry
-    pub fn move_entry_to_recycle_bin(&mut self, entry_uuid: Uuid) -> Result<()> {
+    pub(crate) fn move_entry_to_recycle_bin(&mut self, entry_uuid: Uuid) -> Result<()> {
         move_to_recycle_bin!(self, move_entry, entry_uuid)
     }
 
@@ -806,6 +889,9 @@ impl Root {
         }
 
         entry.parent_group_uuid = new_parent_id;
+        // KDBX 4.1, as KeePass sets it on every move: where the entry was before - the recycle bin
+        // shows it as the group to restore to
+        entry.previous_parent_group = old_parent_id;
         entry.times.location_changed = util::now_utc();
 
         // Add this entry id to the new parent entry uuids. For now it is added to the end
