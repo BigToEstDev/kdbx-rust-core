@@ -1,5 +1,8 @@
+use std::time::{Duration, Instant};
+
 use argon2::{Algorithm, Argon2, Params, Version};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::{
     constants,
@@ -123,6 +126,22 @@ impl Argon2Kdf {
             .hash_password_into(composite_key, &self.salt, &mut key)
             .map_err(|e| Error::Argon2Error(e.to_string()))?;
         Ok(key)
+    }
+
+    // How long one pass takes on this device with the memory, lanes and version of this KDF (Step 68):
+    // the settings screen shows the open time as one pass times the iterations. The input and the salt
+    // are random - nothing of the database goes in, and the KDF itself is not changed
+    pub(crate) fn measure_pass(&self, variant: Argon2Variant) -> Result<Duration> {
+        let mut one_pass = Self {
+            iterations: 1,
+            ..self.clone()
+        };
+        one_pass.reset_salt()?;
+        let input = Zeroizing::new(super::get_random_bytes::<KEY_LEN>()?);
+
+        let started = Instant::now();
+        let _key = Zeroizing::new(one_pass.transform_key(variant, &input)?);
+        Ok(started.elapsed())
     }
 }
 
@@ -248,6 +267,25 @@ mod tests {
         let previous = kdf.salt.clone();
         kdf.reset_salt().unwrap();
         assert_ne!(kdf.salt, previous);
+    }
+
+    // Замер — один проход на копии: у самого KDF не меняются ни проходы, ни соль
+    #[test]
+    fn verify_measure_pass_leaves_kdf_as_is() {
+        let kdf = kdf_with_fixed_salt();
+        kdf.measure_pass(Argon2Variant::Id).unwrap();
+        assert_eq!(kdf.iterations, ITERATIONS);
+        assert_eq!(kdf.salt, SALT.to_vec());
+    }
+
+    // Параметры чужого файла, которые KDF не принимает, — ошибка замера, как и открытия
+    #[test]
+    fn verify_measure_pass_rejects_what_transform_rejects() {
+        let kdf = Argon2Kdf {
+            version: 0x12,
+            ..kdf_with_fixed_salt()
+        };
+        assert!(kdf.measure_pass(Argon2Variant::D).is_err());
     }
 
     // Клиент может прислать устаревшее поле variant — оно игнорируется, а соль в JSON

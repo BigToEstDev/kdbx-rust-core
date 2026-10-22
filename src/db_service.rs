@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use chrono::NaiveDateTime;
@@ -532,6 +533,16 @@ pub fn credentials_used(db_key: &str) -> Result<CredentialsUsed> {
         let (password, key_file) = ctx.kdbx_file.credentials_used_state();
         Ok(CredentialsUsed { password, key_file })
     })
+}
+
+// How long one KDF pass of the open database takes on this device (Step 68): the open time is one pass
+// times the iterations. Only the parameters are copied under the store lock - the pass itself runs
+// outside, other calls do not wait for it. Locked or not, the database is not changed
+pub fn measure_kdf_pass(db_key: &str) -> Result<Duration> {
+    let kdf = call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        Ok(ctx.kdbx_file.get_kdf_algorithm())
+    })?;
+    kdf.measure_pass()
 }
 
 // Returns the human-readable name of the database identified by `db_key`.
