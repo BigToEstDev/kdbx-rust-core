@@ -1108,6 +1108,21 @@ pub fn move_entry(db_key: &str, entry_uuid: Uuid, new_parent_id: Uuid) -> Result
     })
 }
 
+/// Moves entries from the recycle bin to a group - the one they were deleted from or any other one living
+/// (not the bin, not in it). Everything is checked first: a refusal leaves the database as it was (Step 69)
+pub fn restore_entries(db_key: &str, entry_uuids: Vec<Uuid>, group_uuid: Uuid) -> Result<()> {
+    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
+        k.root.restore_entries(&entry_uuids, group_uuid)
+    })
+}
+
+/// Removes entries of the recycle bin for good (`DeletedObjects`). An entry outside the bin refuses them all
+pub fn remove_entries_permanently(db_key: &str, entry_uuids: Vec<Uuid>) -> Result<()> {
+    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
+        k.root.remove_entries_permanently(&entry_uuids)
+    })
+}
+
 pub fn empty_trash(db_key: &str) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| { k.empty_trash() })
 }

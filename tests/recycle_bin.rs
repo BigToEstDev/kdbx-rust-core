@@ -6,7 +6,8 @@
 //! `PreviousParentGroup` (KDBX 4.1) — прежняя группа для восстановления.
 //!
 //! Экран корзины: `trash_entries` — записи корзины с любой глубины, с прежней группой, пока она жива, и временем
-//! удаления; `search_trash` — поиск по ним, как `search_term`.
+//! удаления; `search_trash` — поиск по ним, как `search_term`. `restore_entries` — в выбранную группу,
+//! `remove_entries_permanently` — насовсем; оба проверяют всё до правок.
 
 mod common;
 
@@ -452,4 +453,103 @@ fn the_trash_search_finds_deleted_entries_by_title_and_user_name() {
     let v = serde_json::to_value(db_service::search_trash(&db.0, "mail").unwrap()).unwrap();
     assert_eq!(v["term"], "mail");
     assert_eq!(v["entry_items"][0]["entry"]["uuid"], other.to_string());
+}
+
+#[test]
+fn restored_entries_go_to_the_chosen_group() {
+    let db = create_db("restore");
+    let root = root(&db);
+    let work = add_group(&db, root, "Work");
+    let home = add_group(&db, root, "Home");
+    let mail = add_entry(&db, work, "Mail");
+    let jira = add_entry(&db, work, "Jira");
+    let kept = add_entry(&db, work, "Kept");
+    db_service::delete_entry(&db.0, mail).unwrap();
+    db_service::delete_entry(&db.0, jira).unwrap();
+    db_service::delete_entry(&db.0, kept).unwrap();
+
+    // Повтор в списке — не ошибка
+    db_service::restore_entries(&db.0, vec![mail, jira, mail], home).unwrap();
+
+    assert_eq!(parent_of(&db, mail), Some(home));
+    assert_eq!(parent_of(&db, jira), Some(home));
+    assert_eq!(parent_of(&db, kept), Some(bin(&db)));
+    save_and_reopen(&db);
+    assert_eq!(parent_of(&db, mail), Some(home));
+    let titles: Vec<String> = trash(&db)
+        .iter()
+        .map(|t| t["entry"]["title"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(titles, vec!["Kept"]);
+}
+
+// Одна неверная запись или группа — ничего не двигается
+#[test]
+fn a_restore_with_anything_wrong_moves_nothing() {
+    let db = create_db("restore_refused");
+    let root = root(&db);
+    let binned = add_entry(&db, root, "Binned");
+    let active = add_entry(&db, root, "Active");
+    db_service::delete_entry(&db.0, binned).unwrap();
+    let bin = bin(&db);
+
+    assert!(matches!(
+        db_service::restore_entries(&db.0, vec![binned, active], root),
+        Err(Error::DataError(_))
+    ));
+    assert!(matches!(
+        db_service::restore_entries(&db.0, vec![binned, Uuid::new_v4()], root),
+        Err(Error::NotFound(_))
+    ));
+    assert!(matches!(
+        db_service::restore_entries(&db.0, vec![binned], Uuid::new_v4()),
+        Err(Error::NotFound(_))
+    ));
+    assert!(matches!(
+        db_service::restore_entries(&db.0, vec![binned], bin),
+        Err(Error::DataError(_))
+    ));
+
+    assert_eq!(parent_of(&db, binned), Some(bin));
+    assert_eq!(parent_of(&db, active), Some(root));
+}
+
+#[test]
+fn removed_entries_are_gone_for_good() {
+    let db = create_db("remove");
+    let root = root(&db);
+    let mail = add_entry(&db, root, "Mail");
+    let jira = add_entry(&db, root, "Jira");
+    let kept = add_entry(&db, root, "Kept");
+    for entry in [mail, jira, kept] {
+        db_service::delete_entry(&db.0, entry).unwrap();
+    }
+
+    db_service::remove_entries_permanently(&db.0, vec![mail, jira]).unwrap();
+
+    assert_eq!(parent_of(&db, mail), None);
+    assert_eq!(parent_of(&db, jira), None);
+    assert_eq!(parent_of(&db, kept), Some(bin(&db)));
+    save_and_reopen(&db);
+    let xml = export_xml(&db);
+    assert_deleted_for_good(&xml, &mail, "записи");
+    assert_deleted_for_good(&xml, &jira, "записи");
+    assert!(!deleted_objects(&xml).contains(&base64_uuid(&kept)));
+}
+
+#[test]
+fn a_remove_with_an_entry_outside_the_bin_removes_nothing() {
+    let db = create_db("remove_refused");
+    let root = root(&db);
+    let binned = add_entry(&db, root, "Binned");
+    let active = add_entry(&db, root, "Active");
+    db_service::delete_entry(&db.0, binned).unwrap();
+
+    assert!(matches!(
+        db_service::remove_entries_permanently(&db.0, vec![binned, active]),
+        Err(Error::DataError(_))
+    ));
+
+    assert_eq!(parent_of(&db, binned), Some(bin(&db)));
+    assert_eq!(parent_of(&db, active), Some(root));
 }

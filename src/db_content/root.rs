@@ -765,7 +765,7 @@ impl Root {
         Ok(())
     }
 
-    // Used by the tests only till the trash screen removes entries (Step 69 p.3)
+    // Groups in the bin and their entries are removed by remove_group_permanently in the tests
     #[cfg(test)]
     pub(crate) fn remove_entry_permanently(&mut self, entry_uuid: Uuid) -> Result<()> {
         verify_uuid!(self, entry_uuid, all_entries);
@@ -777,6 +777,45 @@ impl Root {
             ));
         }
         self.remove_entry(entry_uuid)
+    }
+
+    /// Moves entries from the recycle bin to a group, from any depth of the bin. All the entries and the group are
+    /// checked before anything moves: a refusal leaves the database as it was
+    pub(crate) fn restore_entries(&mut self, entry_uuids: &[Uuid], group_uuid: Uuid) -> Result<()> {
+        verify_uuid!(self, group_uuid, all_groups);
+        if !self.is_active_group(&group_uuid) {
+            return Err(Error::DataError(
+                "Entries can not be restored to the recycle bin or a group in it",
+            ));
+        }
+        for entry_uuid in self.binned_entries(entry_uuids)? {
+            self.move_entry(entry_uuid, group_uuid)?;
+        }
+        Ok(())
+    }
+
+    /// Removes entries of the recycle bin for good. All are checked before anything is removed
+    pub(crate) fn remove_entries_permanently(&mut self, entry_uuids: &[Uuid]) -> Result<()> {
+        for entry_uuid in self.binned_entries(entry_uuids)? {
+            self.remove_entry(entry_uuid)?;
+        }
+        Ok(())
+    }
+
+    // The entries, each once, after checking every one of them is in the recycle bin
+    fn binned_entries(&self, entry_uuids: &[Uuid]) -> Result<Vec<Uuid>> {
+        let binned: HashSet<Uuid> = self.deleted_entry_uuids().into_iter().collect();
+        let mut unique = Vec::with_capacity(entry_uuids.len());
+        for &entry_uuid in entry_uuids {
+            verify_uuid!(self, entry_uuid, all_entries);
+            if !binned.contains(&entry_uuid) {
+                return Err(Error::DataError("The entry is not in the recycle bin"));
+            }
+            if !unique.contains(&entry_uuid) {
+                unique.push(entry_uuid);
+            }
+        }
+        Ok(unique)
     }
 
     // Removes an entry for good, wherever it is, and marks it in DeletedObjects (merge, other apps)
