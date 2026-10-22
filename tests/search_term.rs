@@ -182,8 +182,8 @@ fn the_recycle_bin_and_the_groups_inside_it_are_not_looked_at() {
     let binned = add_entry(&db, root, &[("Title", "Bank binned")], &[]);
     add_entry(&db, inner, &[("Title", "Bank in a binned group")], &[]);
 
-    db_service::move_entry_to_recycle_bin(&db.0, binned).unwrap();
-    db_service::move_group_to_recycle_bin(&db.0, gone).unwrap();
+    db_service::delete_entry(&db.0, binned).unwrap();
+    db_service::delete_group(&db.0, gone).unwrap();
 
     assert_eq!(found_titles(&db, "bank"), vec!["Bank kept"]);
 }

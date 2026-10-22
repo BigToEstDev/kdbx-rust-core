@@ -124,7 +124,8 @@ impl Meta {
             default_user_name: String::default(),
             maintenance_history_days: 365, //365
 
-            recycle_bin_enabled: false,
+            // On, as in KeePass - also for a file that has no RecycleBinEnabled
+            recycle_bin_enabled: true,
             recycle_bin_uuid: Uuid::default(),
             recycle_bin_changed: current_time,
             last_selected_group: Uuid::default(),
@@ -158,9 +159,10 @@ impl Meta {
     }
 
     // The incoming Meta instance 'other' is partially filled from db_service::MetaFormData and passed it here.
-    // Only the fields the settings form carries are copied: name, description and the two history limits.
-    // Everything else in 'other' is a Meta::new() default, and copying it would reset values read from the
-    // file (e.g. RecycleBinEnabled, MaintenanceHistoryDays set in KeePass)
+    // Only the fields the settings form carries are copied: name, description, the two history limits and the
+    // memory protection. Everything else in 'other' is a Meta::new() default, and copying it would reset values
+    // read from the file (e.g. MaintenanceHistoryDays set in KeePass). RecycleBinEnabled is in the form, but
+    // switching it changes the groups too - KeepassFile::set_recycle_bin_enabled does it
     pub fn update(&mut self, other: Meta) -> Result<()> {
         let current_time = util::now_utc();
 

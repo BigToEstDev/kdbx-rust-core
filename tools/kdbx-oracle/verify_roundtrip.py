@@ -13,6 +13,7 @@
     .venv/Scripts/python.exe tools/kdbx-oracle/verify_roundtrip.py
 """
 
+import base64
 import shutil
 import subprocess
 import sys
@@ -35,10 +36,10 @@ ATTACHMENT_NAME = "notes.txt"
 ATTACHMENT_DATA = b"example doc\n2 lines\n"
 TOTP_URL = "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30"
 
-EXPECTED_TITLES = ["Email", "GitHub", "Server"]
+EXPECTED_TITLES = ["Email", "GitHub", "Server", "Trashed"]
 # Наше ядро называет корневую группу по имени базы (database_name в NewDatabase),
 # а не фиксированным "Root", как шаблон pykeepass. Это поведение нашего кода, не формата.
-EXPECTED_GROUPS = ["RoundTripDb", "Work"]
+EXPECTED_GROUPS = ["Recycle Bin", "RoundTripDb", "Work"]
 # Имена из вывода write_roundtrip_dbs (как в serde нашего ядра) -> значения в заголовке по pykeepass.
 # Сверяем заголовок, а не только факт открытия: файл, записанный не тем KDF/шифром, но
 # внутренне согласованный, откроется без ошибок (так и пропустили баг Argon2Kdf.variant).
@@ -54,6 +55,7 @@ EXPECTED_PASSWORDS = {
     "GitHub": "gh-secret-1",
     "Email": "mail-secret-2",
     "Server": "srv-secret-3",
+    "Trashed": "old-secret-4",
 }
 
 
@@ -128,11 +130,30 @@ def verify_protection(kp, protected):
         )
 
 
+def verify_recycle_bin(kp):
+    """Удалённая запись лежит в корзине из `Meta`, прежняя группа — в `PreviousParentGroup` (Step 69)."""
+    enabled = kp.tree.find("Meta/RecycleBinEnabled")
+    assert enabled is not None and enabled.text == "True", "RecycleBinEnabled: %r" % (
+        enabled is not None and enabled.text,
+    )
+    recycle_bin = kp.recyclebin_group
+    assert recycle_bin is not None, "корзины нет в Meta/RecycleBinUUID"
+
+    trashed = kp.find_entries(title="Trashed", first=True)
+    assert trashed.parentgroup.uuid == recycle_bin.uuid, "Trashed не в корзине"
+
+    work = kp.find_groups(name="Work", first=True)
+    previous = trashed._element.find("PreviousParentGroup")
+    assert previous is not None, "у Trashed нет PreviousParentGroup"
+    assert previous.text == base64.b64encode(work.uuid.bytes).decode(), "PreviousParentGroup: %r" % previous.text
+
+
 def verify(path, cipher, kdf, key_file, compression, protected):
     """Открывает базу сторонней реализацией и сверяет заголовок и содержимое."""
     kp = PyKeePass(path, password=PASSWORD, keyfile=key_file)
     verify_header(kp, cipher, kdf, compression)
     verify_protection(kp, protected)
+    verify_recycle_bin(kp)
 
     titles = sorted(entry.title for entry in kp.entries)
     assert titles == EXPECTED_TITLES, "записи: %s" % titles

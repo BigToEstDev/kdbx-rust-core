@@ -337,6 +337,29 @@ pub struct EntrySummary {
     pub created_time: Option<i64>,
 }
 
+// An entry of the recycle bin as the trash screen shows it (Step 69)
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TrashEntry {
+    pub entry: EntrySummary,
+    // The group the entry was deleted from (`PreviousParentGroup`) while it is still there - not removed, not in
+    // the bin. None - the screen asks for a group to restore to
+    pub previous_group_uuid: Option<Uuid>,
+    // When the entry went to the bin (`LocationChanged`), seconds
+    pub deleted_time: i64,
+}
+
+impl TrashEntry {
+    pub(crate) fn of(kp: &KeepassFile, e: &Entry) -> TrashEntry {
+        let previous = e.previous_parent_group;
+        Self {
+            entry: EntrySummary::of(kp, e),
+            previous_group_uuid: kp.root.is_active_group(&previous).then_some(previous),
+            #[allow(deprecated)]
+            deleted_time: e.times.location_changed.timestamp(),
+        }
+    }
+}
+
 impl EntrySummary {
     pub fn history_entries_summary(entry: &Entry) -> Vec<EntrySummary> {
         let mut summary_list: Vec<EntrySummary> = vec![];
@@ -624,5 +647,66 @@ mod tests {
         ] {
             assert!(field.get(gone).is_none(), "{} ушло из поля", gone);
         }
+    }
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::TrashEntry;
+    use crate::constants::entry_keyvalue_key::TITLE;
+    use crate::db_content::{Entry, Group, KeepassFile};
+    use uuid::Uuid;
+
+    fn add_group(kp: &mut KeepassFile, parent: &Uuid) -> Uuid {
+        let group = Group::with_parent(parent);
+        let uuid = group.get_uuid();
+        kp.root.insert_group(group).unwrap();
+        uuid
+    }
+
+    fn add_entry(kp: &mut KeepassFile, group: &Uuid, title: &str) -> Uuid {
+        let mut entry = Entry::new_blank_entry(Some(group));
+        entry.entry_field.update_value(TITLE, title);
+        let uuid = entry.uuid;
+        kp.root.insert_entry(entry).unwrap();
+        uuid
+    }
+
+    fn trash_entry(kp: &KeepassFile, uuid: &Uuid) -> TrashEntry {
+        TrashEntry::of(kp, kp.root.entry_by_id(uuid).unwrap())
+    }
+
+    // A KeePass file may hold a group in the bin: its entries are in the list, and their previous group - the
+    // group in the bin - is no group to restore to
+    #[test]
+    fn entries_of_a_group_in_the_bin_are_listed_without_a_previous_group() {
+        let mut kp = KeepassFile::new();
+        let root_group = Group::new_with_id();
+        let root = root_group.get_uuid();
+        kp.root.set_root_uuid(root);
+        kp.root.insert_to_all_groups(root_group);
+        let kp = &mut kp;
+        let work = add_group(kp, &root);
+        let foreign = add_group(kp, &root);
+        let mail = add_entry(kp, &work, "Mail");
+        let nested = add_entry(kp, &foreign, "Nested");
+
+        // As KeePass leaves it after moving the entry there
+        kp.root
+            .entry_by_id_mut(&nested)
+            .unwrap()
+            .previous_parent_group = foreign;
+
+        kp.delete_entry(mail).unwrap();
+        kp.root.move_group_to_recycle_bin(foreign).unwrap();
+
+        let mut listed: Vec<Uuid> = kp.root.deleted_entries().iter().map(|e| e.uuid).collect();
+        listed.sort();
+        let mut expected = vec![mail, nested];
+        expected.sort();
+        assert_eq!(listed, expected);
+
+        assert_eq!(trash_entry(kp, &mail).previous_group_uuid, Some(work));
+        assert_eq!(trash_entry(kp, &nested).previous_group_uuid, None);
     }
 }

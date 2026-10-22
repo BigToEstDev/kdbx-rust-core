@@ -32,6 +32,33 @@ impl KeepassFile {
         }
     }
 
+    // Deletes an entry the way the database says: into the recycle bin, or for good when the bin is off
+    pub(crate) fn delete_entry(&mut self, entry_uuid: Uuid) -> Result<()> {
+        self.root
+            .delete_entry(entry_uuid, self.meta.recycle_bin_enabled)
+    }
+
+    // Deletes a group with its subtree. Groups never go to the recycle bin: their entries do, when it is on
+    pub(crate) fn delete_group(&mut self, group_uuid: Uuid) -> Result<()> {
+        self.root
+            .delete_group(group_uuid, self.meta.recycle_bin_enabled)
+    }
+
+    // Switching the bin off removes it with all it holds - nothing uses it any more. Switched on again, the bin is
+    // created by the first delete
+    pub(crate) fn set_recycle_bin_enabled(&mut self, enabled: bool) -> Result<()> {
+        if self.meta.recycle_bin_enabled == enabled {
+            return Ok(());
+        }
+        if !enabled {
+            self.root.remove_recycle_bin()?;
+            self.meta.recycle_bin_uuid = Uuid::default();
+        }
+        self.meta.recycle_bin_enabled = enabled;
+        self.meta.recycle_bin_changed = util::now_utc();
+        Ok(())
+    }
+
     pub(crate) fn empty_trash(&mut self) -> Result<()> {
         // The recycle_bin_uuid from the root itself used for now till we move the root 'recycle_bin_uuid'
         // to meta 'recycle_bin_uuid' instead of using share_meta_to_root and share_root_to_meta

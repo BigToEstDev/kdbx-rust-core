@@ -72,7 +72,7 @@ pub use crate::db_content::{
 
 pub use crate::form_data::{
     CredentialsUsed, CurrentOtpTokenData, DbSettings, EntryCategory, EntryFormData,
-    EntryListOtpToken, EntrySummary, GroupSummary, GroupTree, KdbxLoaded, KdbxSaved,
+    EntryListOtpToken, EntrySummary, GroupSummary, GroupTree, KdbxLoaded, KdbxSaved, TrashEntry,
 };
 
 pub use crate::constants::entry_keyvalue_key;
@@ -706,9 +706,11 @@ pub fn set_db_settings(
         ctx.kdbx_file.set_compression(db_settings.compression);
 
         // Like KeePass after its settings dialog: new history limits apply to all entries now, not
-        // only to entries edited later. Done last, after every validation above has passed
+        // only to entries edited later. Done last, after every validation above has passed - as the
+        // recycle bin switched off, which removes the bin with all it holds
         if let Some(kp) = ctx.kdbx_file.keepass_main_content.as_mut() {
             kp.maintain_all_histories();
+            kp.set_recycle_bin_enabled(db_settings.meta.recycle_bin_enabled)?;
         }
         Ok(())
     })
@@ -740,6 +742,45 @@ pub fn search_term(db_key: &str, term: &str) -> Result<EntrySearchResult> {
                 .collect(),
         };
         Ok(EntrySearchResult {
+            term: term.into(),
+            entry_items,
+        })
+    })
+}
+
+/// The entries of the recycle bin, from any depth of it: groups get there only from other apps (KeePass,
+/// KeePassXC) and are not shown (Step 69). The entries come in no particular order: the caller sorts them.
+pub fn trash_entries(db_key: &str) -> Result<Vec<TrashEntry>> {
+    main_content_action!(db_key, |k: &KeepassFile| {
+        Ok(k.root
+            .deleted_entries()
+            .into_iter()
+            .map(|e| TrashEntry::of(k, e))
+            .collect())
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TrashSearchResult {
+    pub term: String,
+    pub entry_items: Vec<TrashEntry>,
+}
+
+/// The entries of the recycle bin found by a term - the same match as `search_term`, over `trash_entries`.
+pub fn search_trash(db_key: &str, term: &str) -> Result<TrashSearchResult> {
+    main_content_action!(db_key, |k: &KeepassFile| {
+        let entry_items = match searcher::normalized_term(term) {
+            None => vec![],
+            Some(needle) => k
+                .root
+                .deleted_entries()
+                .into_iter()
+                .map(|e| (e, TrashEntry::of(k, e)))
+                .filter(|(e, item)| searcher::matches(&needle, e, &item.entry))
+                .map(|(_, item)| item)
+                .collect(),
+        };
+        Ok(TrashSearchResult {
             term: term.into(),
             entry_items,
         })
@@ -1040,9 +1081,11 @@ pub fn sort_sub_groups(
     })
 }
 
-pub fn move_group_to_recycle_bin(db_key: &str, group_uuid: Uuid) -> Result<()> {
+/// Deletes a group with its subtree: the entries go to the recycle bin flat, the groups are removed for good.
+/// With the bin off (`RecycleBinEnabled`) everything is removed for good. Groups never go to the bin (Step 69)
+pub fn delete_group(db_key: &str, group_uuid: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.move_group_to_recycle_bin(group_uuid)
+        k.delete_group(group_uuid)
     })
 }
 
@@ -1052,15 +1095,10 @@ pub fn move_group(db_key: &str, group_uuid: Uuid, new_parent_id: Uuid) -> Result
     })
 }
 
-pub fn remove_group_permanently(db_key: &str, group_uuid: Uuid) -> Result<()> {
+/// Deletes an entry: into the recycle bin, or for good with the bin off (`RecycleBinEnabled`)
+pub fn delete_entry(db_key: &str, entry_uuid: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.remove_group_permanently(group_uuid)
-    })
-}
-
-pub fn move_entry_to_recycle_bin(db_key: &str, entry_uuid: Uuid) -> Result<()> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.move_entry_to_recycle_bin(entry_uuid)
+        k.delete_entry(entry_uuid)
     })
 }
 
@@ -1070,9 +1108,18 @@ pub fn move_entry(db_key: &str, entry_uuid: Uuid, new_parent_id: Uuid) -> Result
     })
 }
 
-pub fn remove_entry_permanently(db_key: &str, entry_uuid: Uuid) -> Result<()> {
+/// Moves entries from the recycle bin to a group - the one they were deleted from or any other one living
+/// (not the bin, not in it). Everything is checked first: a refusal leaves the database as it was (Step 69)
+pub fn restore_entries(db_key: &str, entry_uuids: Vec<Uuid>, group_uuid: Uuid) -> Result<()> {
     main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.remove_entry_permanently(entry_uuid)
+        k.root.restore_entries(&entry_uuids, group_uuid)
+    })
+}
+
+/// Removes entries of the recycle bin for good (`DeletedObjects`). An entry outside the bin refuses them all
+pub fn remove_entries_permanently(db_key: &str, entry_uuids: Vec<Uuid>) -> Result<()> {
+    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
+        k.root.remove_entries_permanently(&entry_uuids)
     })
 }
 

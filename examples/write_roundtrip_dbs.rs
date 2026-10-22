@@ -210,6 +210,10 @@ fn build_db(
     std::fs::write(&attachment_source, ATTACHMENT_DATA).unwrap();
     add_totp_and_attachment(&db_key, &server_uuid, &attachment_source);
 
+    // Удалённая запись: корзина и PreviousParentGroup (Step 69) должны читаться чужим кодом
+    let trashed_uuid = add_entry(&db_key, &work_uuid, "Trashed", "old", "old-secret-4");
+    db_service::delete_entry(&db_key, trashed_uuid).unwrap();
+
     // Новая база — GZip; другое сжатие — через настройки, как его задаёт приложение (Step 64)
     if compression != Compression::GZip {
         let mut settings = db_service::get_db_settings(&db_key).unwrap();
