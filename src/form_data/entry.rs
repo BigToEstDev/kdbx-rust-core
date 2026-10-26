@@ -10,6 +10,7 @@ use crate::password_generator::PasswordScore;
 
 use crate::error::{Error, Result};
 
+use crate::db_content::field_types::{self, FieldTypes};
 use crate::db_content::{
     join_tags, split_tags, AutoType, BinaryKeyValue, Entry, EntryField, FieldDataType, KeepassFile,
     KeyValue, OtpData, Root,
@@ -26,6 +27,10 @@ pub struct KeyValueData {
     protected: bool,
     // Text unless the value is a one-time password the core can generate tokens from
     data_type: FieldDataType,
+    // The type our app gives the field - a phone, ...; None - text. The core does not read it: kept in
+    // the entry's CustomData as it comes (db_content/field_types.rs, Step 76)
+    #[serde(default)]
+    field_type: Option<String>,
 
     // Only relevant for PASSWORD field and in other cases it is None
     // We get the PasswordScore based on the String value of password
@@ -46,6 +51,7 @@ impl std::fmt::Debug for KeyValueData {
             .field("value", &crate::redacted::redacted_opt(&self.value))
             .field("protected", &self.protected)
             .field("data_type", &self.data_type)
+            .field("field_type", &self.field_type)
             .field("current_opt_token", &self.current_opt_token)
             .finish_non_exhaustive()
     }
@@ -63,6 +69,7 @@ impl From<&KeyValue> for KeyValueData {
             value: Some(kv.value.clone()),
             protected: kv.protected,
             data_type: FieldDataType::default(),
+            field_type: None,
             password_score,
             current_opt_token: None,
         }
@@ -149,6 +156,7 @@ pub struct EntryFormData {
 impl EntryFormData {
     // Creates the EntryFormData from the given entry and is ready to be used by UI layer
     fn from_entry(entry: &Entry) -> Self {
+        let types = field_types::read(&entry.custom_data);
         // All fields read from the xml content, in the order of the file
         let fields = entry
             .entry_field
@@ -156,6 +164,7 @@ impl EntryFormData {
             .iter()
             .map(|kv| {
                 let mut kvd: KeyValueData = kv.into();
+                kvd.field_type = types.get(&kv.key).cloned();
                 // Any field may hold a totp: an otp url, or the TimeOtp-* fields of KeePass
                 kvd.generate_otp_on_check(&entry.parsed_otp_values);
                 kvd
@@ -185,14 +194,19 @@ impl EntryFormData {
     }
 
     // Fails on a repeated key: the app checks the names before saving, this is the guard behind it.
-    // Fields are written in the order of the form
+    // Fields are written in the order of the form. The types of the fields go to the CustomData, the
+    // only key of it the entry built here has: an update takes just that key (Entry::update)
     fn into_entry(entry_form_data: &EntryFormData) -> Result<Entry> {
         let mut entry_field = EntryField::default();
+        let mut types = FieldTypes::new();
         for kvd in entry_form_data.fields.iter() {
             if entry_field.find_key_value(&kvd.key).is_some() {
                 return Err(Error::DuplicateFieldKey);
             }
             entry_field.push_key_value(kvd.into());
+            if let Some(field_type) = kvd.field_type.as_ref().filter(|t| !t.is_empty()) {
+                types.insert(kvd.key.clone(), field_type.clone());
+            }
         }
 
         let mut entry = Entry::new();
@@ -200,6 +214,7 @@ impl EntryFormData {
         entry.parent_group_uuid = entry_form_data.group_uuid;
 
         entry.entry_field = entry_field;
+        field_types::write(&mut entry.custom_data, &types);
         entry.icon_id = entry_form_data.icon_id;
         entry.custom_icon_uuid = entry_form_data
             .custom_icon_uuid
@@ -647,6 +662,55 @@ mod tests {
         ] {
             assert!(field.get(gone).is_none(), "{} ушло из поля", gone);
         }
+    }
+
+    fn type_of<'a>(fields: &'a [KeyValueData], key: &str) -> Option<&'a str> {
+        fields
+            .iter()
+            .find(|f| f.key == key)
+            .and_then(|f| f.field_type.as_deref())
+    }
+
+    // The types of the fields - from the CustomData of the entry, a name with no field is not shown (Step 76)
+    #[test]
+    fn the_form_has_the_types_of_the_fields() {
+        use crate::constants::custom_data_key::PASSHOLDER_FIELD_TYPES;
+
+        let mut entry = foreign_entry();
+        entry.entry_field.push_key_value(kv("Phone", "+7", false));
+        entry.custom_data.insert_item(Item::from_kv(
+            PASSHOLDER_FIELD_TYPES,
+            r#"{"Phone":"phone","Gone":"card"}"#,
+        ));
+        let form: EntryFormData = (&entry).into();
+
+        assert_eq!(type_of(&form.fields, "Phone"), Some("phone"));
+        assert_eq!(type_of(&form.fields, TITLE), None);
+        assert!(form.fields.iter().all(|f| f.key != "Gone"));
+    }
+
+    // A type the core does not know goes back as it came; text fields leave no key
+    #[test]
+    fn the_entry_of_a_form_keeps_the_types_it_has() {
+        use crate::constants::custom_data_key::PASSHOLDER_FIELD_TYPES;
+
+        let mut form = EntryFormData::new_form_entry(None);
+        form.fields.push((&kv("Phone", "+7", false)).into());
+        form.fields.push((&kv("Card", "4111", false)).into());
+        form.fields.push((&kv("Empty", "", false)).into());
+        let last = form.fields.len();
+        form.fields[last - 3].field_type = Some("phone".into());
+        form.fields[last - 2].field_type = Some("from-a-newer-client".into());
+        form.fields[last - 1].field_type = Some("".into());
+
+        let entry = Entry::try_from(&form).unwrap();
+        assert_eq!(
+            entry.custom_data.get_item_value(PASSHOLDER_FIELD_TYPES),
+            Some(r#"{"Card":"from-a-newer-client","Phone":"phone"}"#)
+        );
+
+        let text_only = Entry::try_from(&EntryFormData::new_form_entry(None)).unwrap();
+        assert!(text_only.custom_data.get_items().is_empty());
     }
 }
 

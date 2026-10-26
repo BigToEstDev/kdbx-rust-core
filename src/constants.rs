@@ -52,6 +52,9 @@ pub mod custom_data_key {
     // OKP_K3 - OKP_K7 held the entry types of OneKeePass (an entry's type, the types of its history,
     // the custom types of a database). The core no longer reads or writes them: they are kept as read,
     // like any foreign CustomData. How they worked - pass-docs plan/todo/core/okp-entry-types-history.md
+
+    // The types of the fields of an entry our app gives them - db_content/field_types.rs (Step 76)
+    pub const PASSHOLDER_FIELD_TYPES: &str = "PassHolder.FieldTypes";
 }
 
 pub mod general_category_names {

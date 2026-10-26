@@ -14,6 +14,7 @@
 """
 
 import base64
+import json
 import shutil
 import subprocess
 import sys
@@ -173,6 +174,15 @@ def verify(path, cipher, kdf, key_file, compression, protected):
 
     # TOTP — тоже protected-значение
     assert server.otp == TOTP_URL, "otp: %r" % server.otp
+
+    # Тип своего поля (Step 76): поле — обычная строка, тип — в CustomData записи под нашим ключом
+    assert server.get_custom_property("Phone") == "+7 900 000-00-00", "поле Phone"
+    types = [
+        item.findtext("Value")
+        for item in server._element.findall("CustomData/Item")
+        if item.findtext("Key") == "PassHolder.FieldTypes"
+    ]
+    assert [json.loads(t) for t in types] == [{"Phone": "phone"}], "типы полей: %s" % types
 
     # Аттачмент проверяет inner header (binaries) и ссылку из записи
     attachments = [(a.filename, a.data) for a in server.attachments]

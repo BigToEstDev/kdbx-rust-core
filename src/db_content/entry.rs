@@ -11,6 +11,7 @@ use crate::db_content::{AttachmentHashValue, CustomData, Times, UnknownElements}
 use crate::error::{Error, Result};
 use crate::util;
 
+use super::field_types;
 use super::meta::MetaShare;
 use super::otp::{CurrentOtpTokenData, OtpData, OtpSettings};
 use super::time_otp;
@@ -314,6 +315,11 @@ impl Entry {
         self.auto_type.data_transfer_obfuscation = data_transfer_obfuscation;
 
         self.entry_field = updated_entry.entry_field;
+
+        // Of the CustomData the form changes only the types of the fields - the rest stays as read
+        // (Step 43); the copy put into history keeps the types it had (Step 76)
+        let types = field_types::read(&updated_entry.custom_data);
+        field_types::write(&mut self.custom_data, &types);
 
         self.parse_all_otp_fields();
     }
@@ -1496,6 +1502,53 @@ mod history_limit_tests {
         assert_eq!(entry.custom_data, before);
         assert_eq!(entry.history.entries.len(), 1);
         assert_eq!(entry.history.entries[0].custom_data, before);
+    }
+
+    // The types of the fields are the one key of the CustomData an update changes (Step 76)
+    #[test]
+    fn an_update_changes_only_the_field_types_of_custom_data() {
+        use crate::constants::custom_data_key::PASSHOLDER_FIELD_TYPES;
+
+        let mut entry = version(1, 0);
+        entry.history.entries.clear();
+        entry
+            .custom_data
+            .insert_item(Item::from_kv("KPXC_X", "foreign"));
+        entry
+            .custom_data
+            .insert_item(Item::from_kv(PASSHOLDER_FIELD_TYPES, r#"{"PIN":"phone"}"#));
+        let before = entry.custom_data.clone();
+
+        // The entry the form builds has just the types
+        let mut updated = entry.clone();
+        updated.custom_data = CustomData::default();
+        updated
+            .custom_data
+            .insert_item(Item::from_kv(PASSHOLDER_FIELD_TYPES, r#"{"PIN":"card"}"#));
+        entry.update(updated);
+
+        assert_eq!(
+            entry.custom_data.get_item_value(PASSHOLDER_FIELD_TYPES),
+            Some(r#"{"PIN":"card"}"#)
+        );
+        assert_eq!(entry.custom_data.get_item_value("KPXC_X"), Some("foreign"));
+        assert_eq!(entry.history.entries[0].custom_data, before);
+    }
+
+    #[test]
+    fn an_update_with_text_fields_only_removes_the_field_types() {
+        use crate::constants::custom_data_key::PASSHOLDER_FIELD_TYPES;
+
+        let mut entry = version(1, 0);
+        entry
+            .custom_data
+            .insert_item(Item::from_kv(PASSHOLDER_FIELD_TYPES, r#"{"PIN":"phone"}"#));
+
+        let mut updated = entry.clone();
+        updated.custom_data = CustomData::default();
+        entry.update(updated);
+
+        assert!(entry.custom_data.get_items().is_empty());
     }
 
     #[test]

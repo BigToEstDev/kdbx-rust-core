@@ -1,6 +1,7 @@
 mod custom_data;
 mod entry;
 mod field_data_type;
+pub(crate) mod field_types;
 mod group;
 mod keepass;
 mod meta;
