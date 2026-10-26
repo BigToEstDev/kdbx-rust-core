@@ -71,6 +71,9 @@ fn add_entry(
     Uuid::parse_str(&entry_uuid).unwrap()
 }
 
+const PHONE_FIELD: &str = "Phone";
+const PHONE_VALUE: &str = "+7 900 000-00-00";
+
 // TOTP в KeePass — обычное строковое поле otp с protected-значением.
 fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &str) {
     let info = db_service::upload_entry_attachment(db_key, attachment_source).unwrap();
@@ -84,6 +87,12 @@ fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &
     );
     common::form::set_field(&mut value, "otp", TOTP_URL);
     common::form::protect(&mut value, "otp");
+
+    // Тип своего поля — в CustomData записи, ключ PassHolder.FieldTypes (Step 76)
+    common::form::set_field(&mut value, PHONE_FIELD, PHONE_VALUE);
+    let fields = value["fields"].as_array_mut().unwrap();
+    let phone = fields.iter_mut().find(|f| f["key"] == PHONE_FIELD).unwrap();
+    phone["field_type"] = serde_json::json!("phone");
 
     // index_ref пересчитывается при записи по data_hash, поэтому здесь 0
     value["binary_key_values"] = serde_json::json!([{
