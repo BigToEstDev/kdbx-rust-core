@@ -1,0 +1,17 @@
+[
+  {
+    "deleted_time": "number",
+    "entry": {
+      "created_time": "number",
+      "custom_icon_uuid": "null-in-this-sample",
+      "history_index": "null-in-this-sample",
+      "icon_id": "number",
+      "modified_time": "number",
+      "parent_group_uuid": "string",
+      "secondary_title": "string",
+      "title": "string",
+      "uuid": "string"
+    },
+    "previous_group_uuid": "string"
+  }
+]

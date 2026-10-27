@@ -1,0 +1,32 @@
+{
+  "auto_type": {
+    "associations": [],
+    "data_transfer_obfuscation": "number",
+    "default_sequence": "null-in-this-sample",
+    "enabled": "bool"
+  },
+  "binary_key_values": [],
+  "creation_time": "string",
+  "custom_icon_uuid": "null-in-this-sample",
+  "expires": "bool",
+  "expiry_time": "string",
+  "fields": [
+    {
+      "current_opt_token": "null-in-this-sample",
+      "data_type": "string",
+      "field_type": "null-in-this-sample",
+      "key": "string",
+      "password_score": "null-in-this-sample",
+      "protected": "bool",
+      "value": "string"
+    }
+  ],
+  "group_uuid": "string",
+  "history_count": "number",
+  "icon_id": "number",
+  "last_access_time": "string",
+  "last_modification_time": "string",
+  "parsed_fields": {},
+  "tags": [],
+  "uuid": "string"
+}

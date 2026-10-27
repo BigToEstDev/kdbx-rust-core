@@ -1,0 +1,9 @@
+[
+  {
+    "entry_uuid": "string",
+    "otp_field_name": "string",
+    "period": "number",
+    "token": "string",
+    "ttl": "number"
+  }
+]

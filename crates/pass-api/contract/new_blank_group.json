@@ -1,0 +1,25 @@
+{
+  "custom_icon_uuid": "null-in-this-sample",
+  "default_auto_type_sequence": "null-in-this-sample",
+  "enable_auto_type": "null-in-this-sample",
+  "enable_searching": "null-in-this-sample",
+  "entry_uuids": [],
+  "group_uuids": [],
+  "icon_id": "number",
+  "is_expanded": "bool",
+  "marked_category": "bool",
+  "name": "string",
+  "notes": "string",
+  "parent_group_uuid": "string",
+  "tags": "string",
+  "times": {
+    "creation_time": "string",
+    "expires": "bool",
+    "expiry_time": "string",
+    "last_access_time": "string",
+    "last_modification_time": "string",
+    "location_changed": "string",
+    "usage_count": "number"
+  },
+  "uuid": "string"
+}

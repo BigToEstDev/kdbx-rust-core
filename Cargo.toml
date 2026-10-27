@@ -1,97 +1,25 @@
-[package]
-name = "kdbx-rust-core"
-version = "0.25.0"
+## The workspace of the core: the kdbx engine and the api the apps call. Only workspace settings live
+## here - members, shared dependency versions and profiles. The crates are in crates/.
+[workspace]
+resolver = "2"
+members = ["crates/kdbx-rust-core", "crates/pass-api"]
+
+[workspace.package]
 authors = ["BigToEstDev"]
 edition = "2021"
-## Originally onekeepass-core by jeyasankar (GPL-3.0). This is now an independent project: the api
-## and the internals have diverged far enough that upstream is no longer merged, but the code
-## descends from it and stays under the same licence -- see README.md and LICENSE.
-license = "GPL-3.0-only"
-## Не попадает в архив при `cargo package` / публикации крейта. На `cargo build` и на
-## сборку под Android не влияет — dev-инструменты и тестовые данные и так вне `src/`.
-exclude = ["tools/", "tests/resources/", ".venv/"]
 
-[dependencies]
-# Volatile, non-elidable zeroing of in-memory secrets. Used by the  
-# memory-security lock to wipe the decrypted content (transient serialization
-# buffers + the dropped entry object graph) when a database is locked.
+## Versions the crates of the workspace share, declared once so they cannot drift apart. A crate takes
+## one with `<name>.workspace = true` and adds its own features on top.
+[workspace.dependencies]
 zeroize = "1"
-
-data-encoding = "2.9.0"
 base64 = "0.22.1"
-url = "2.5.7"
-urlencoding = "2.1.3"
-
-uuid = { version = "1.18.1", features = ["serde", "v4","macro-diagnostics"] }
-chrono =  {version = "0.4.42", features = ["serde"]}
-
-## Без фичи "zlib": бэкенд miniz_oxide (чистый Rust). Фича тянула libz-sys, последнюю C-зависимость.
-flate2 = "1.1"
-
+uuid = { version = "1.18.1", features = ["serde"] }
 log = "0.4.28"
-hex = "0.4.3"
-once_cell = "1"
-thiserror = "2.0.17"
-regex = "1.12.2"
-lazy_static = "1.5.0"
-
-tokio = { version = "1", features = [ "time" ,"rt", "rt-multi-thread","sync"] }
-
-serde = { version = "1", features = [ "derive" ]}
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-cfg-if = "1.0"
 
-
-quick-xml = "0.41.0"
-
-nom = "7.1.3"
-
-
-## rusqlite = { version = "0.32.0", features = ["bundled"] }
-
-######## KDBX crypto (pure Rust) ########
-## RustCrypto generation digest 0.11 / cipher 0.5.
-aes      = "0.9"
-cbc      = { version = "0.2", features = ["alloc"] }
-aes-gcm  = "0.11"
-chacha20 = "0.10"
-hmac     = "0.13"
-sha1     = "0.11"
-sha2     = "0.11"
-## `parallel` computes Argon2 lanes on rayon threads — keeps the `parallelism` KDF parameter
-## as fast as the former C implementation.
-argon2    = { version = "0.6", features = ["parallel"] }
-getrandom = "0.4"
-######## END KDBX crypto ########
-
-# Passkey / WebAuthn cryptography (shared across desktop and mobile)
-
-
-[dependencies.passwords]
-version = "3.1"
-features = ["common-password"]
-
-[features]
-## Dev-only: re-adds db_service::export_as_xml, which dumps the whole decrypted database
-## (all passwords in plain text) to a file. Off by default -- not part of the public API.
-## Enabled for the test build through the self dev-dependency below.
-xml-dump = []
-
-[dev-dependencies]
-## Cyclic dev-dependency on purpose: it turns on `xml-dump` for the test build only, so the
-## data-preservation tests can dump the database as xml, while normal and Android builds
-## (and the FFI surface) have no such export.
-kdbx-rust-core = { path = ".", features = ["xml-dump"] }
-
-env_logger = "0.11.8"
-test-context = "=0.4.1"
-## Used only by db_merge/merge_tests/common.rs
-secstr = "0.5.1"
-## Used only by one test in util.rs (chrono_tz::US::Pacific). Kept at 0.10+ on purpose:
-## chrono-tz-build 0.3 pulled phf_generator 0.11 -> rand 0.8.5 (RUSTSEC-2026-0097, unsound).
-## From chrono-tz 0.10 the chain is chrono-tz-build 0.5 -> phf_codegen 0.12 -> fastrand.
-chrono-tz = "0.10.4"
-
+## Profiles apply only from the workspace root: the same sections in a member's Cargo.toml are ignored.
+##
 ## Argon2 is memory-hard: unoptimized Rust (dev/test profile) makes every database open/save
 ## several times slower (db_file_reading_writing tests 9 s -> 37 s, debug Android builds suffer
 ## the same). Optimize only the KDF crates; our own code stays debuggable. `test` inherits `dev`,

@@ -1,0 +1,23 @@
+[package]
+name = "pass-api"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+kdbx-rust-core = { path = "../kdbx-rust-core" }
+
+## Wiping buffers that held a password.
+zeroize.workspace = true
+
+## The content of a key file travels base64 inside the json arguments (see src/key_file.rs).
+base64.workspace = true
+
+## The uuids of groups and entries travel as strings and are parsed by serde before any database is
+## touched. The workspace version, so the types are the ones the core's signatures ask for.
+uuid.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
