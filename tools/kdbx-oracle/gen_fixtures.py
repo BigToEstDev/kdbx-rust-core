@@ -5,7 +5,7 @@
 файл не открывается ни в одном настоящем KeePass. Эти фикстуры собраны чужим
 кодом, поэтому служат внешним эталоном формата KDBX4.
 
-Фикстуры коммитятся в git (tests/resources), Rust-тесты читают готовые файлы —
+Фикстуры коммитятся в git (crates/kdbx-rust-core/tests/resources), Rust-тесты читают готовые файлы —
 Python не нужен для `cargo test`. Запускать только при осознанной перегенерации.
 
 Использование (из корня pass-rust-core):
@@ -30,7 +30,7 @@ from pykeepass import PyKeePass, create_database
 from pykeepass.kdbx_parsing.kdbx4 import kdf_uuids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OUT_DIR = REPO_ROOT / "tests" / "resources"
+OUT_DIR = REPO_ROOT / "crates" / "kdbx-rust-core" / "tests" / "resources"
 
 # Пароль фейковый и одинаковый для всех фикстур: файлы лежат в git, секретов в них нет.
 PASSWORD = "test-pass-1234"
@@ -1228,7 +1228,7 @@ def main():
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 
-    print("\nДальше: python tools/kdbx-oracle/dump_header.py tests/resources/*.kdbx")
+    print("\nДальше: python tools/kdbx-oracle/dump_header.py crates/kdbx-rust-core/tests/resources/*.kdbx")
     return 0
 
 

@@ -24,7 +24,7 @@ resave_db`), затем pykeepass расшифровывает оба файла
 
 Использование (из корня pass-rust-core):
     .venv/Scripts/python.exe tools/kdbx-oracle/compare_roundtrip.py [фикстура.kdbx ...] [--all]
-По умолчанию — tests/resources/all_fields_41.kdbx и okp_entry_types.kdbx.
+По умолчанию — crates/kdbx-rust-core/tests/resources/all_fields_41.kdbx и okp_entry_types.kdbx.
 --all печатает и сохранённые элементы.
 """
 
@@ -47,7 +47,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from pykeepass import PyKeePass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RESOURCES = REPO_ROOT / "tests" / "resources"
+RESOURCES = REPO_ROOT / "crates" / "kdbx-rust-core" / "tests" / "resources"
 PASSWORD = "test-pass-1234"
 DEFAULT_FIXTURES = ["all_fields_41.kdbx", "okp_entry_types.kdbx"]
 
@@ -233,7 +233,7 @@ def open_db(path, key_file=None):
 
 
 def resave_with_core(source, target, key_file=None):
-    command = ["cargo", "run", "--quiet", "--example", "resave_db", "--",
+    command = ["cargo", "run", "--quiet", "-p", "kdbx-rust-core", "--example", "resave_db", "--",
                str(source), str(target), PASSWORD]
     if key_file:
         command.append(str(key_file))

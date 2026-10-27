@@ -29,18 +29,18 @@ python -m venv .venv
 | Скрипт | Зависимости | Что делает |
 |---|---|---|
 | `dump_header.py` | нет (stdlib) | Печатает outer header `.kdbx`: версию формата, шифр, KDF и его параметры. Первое, чем стоит проверять «почему core не читает этот файл». |
-| `gen_fixtures.py` | pykeepass | Генерирует фикстуры в `tests/resources/`. Запускать только при осознанной перегенерации. |
+| `gen_fixtures.py` | pykeepass | Генерирует фикстуры в `crates/kdbx-rust-core/tests/resources/`. Запускать только при осознанной перегенерации. |
 | `verify_roundtrip.py` | pykeepass | Проверяет, что база, записанная нашим core, читается сторонней реализацией. Отдельная CI-job после `cargo test`. |
 
 ```bash
-.venv/Scripts/python.exe tools/kdbx-oracle/dump_header.py tests/resources/aes256_argon2d.kdbx
+.venv/Scripts/python.exe tools/kdbx-oracle/dump_header.py crates/kdbx-rust-core/tests/resources/aes256_argon2d.kdbx
 .venv/Scripts/python.exe tools/kdbx-oracle/gen_fixtures.py
 .venv/Scripts/python.exe tools/kdbx-oracle/verify_roundtrip.py
 ```
 
 ## Правило: Python не в пути `cargo test`
 
-Фикстуры генерируются один раз и **коммитятся** в `tests/resources/`. Rust-тесты читают готовые файлы,
+Фикстуры генерируются один раз и **коммитятся** в `crates/kdbx-rust-core/tests/resources/`. Rust-тесты читают готовые файлы,
 поэтому `cargo test` работает без Python, офлайн и в CI. Обратная проверка (`verify_roundtrip.py`) —
 отдельный шаг, а не `#[ignore]`-тест: от `#[ignore]` в проекте избавились осознанно.
 
