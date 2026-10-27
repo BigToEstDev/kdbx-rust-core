@@ -1,0 +1,16 @@
+{
+  "deleted_group_uuids": [],
+  "groups": {
+    "<uuid>": {
+      "custom_icon_uuid": "null-in-this-sample",
+      "entry_uuids": [],
+      "group_uuids": [],
+      "icon_id": "number",
+      "name": "string",
+      "parent_group_uuid": "string",
+      "uuid": "string"
+    }
+  },
+  "recycle_bin_uuid": "string",
+  "root_uuid": "string"
+}

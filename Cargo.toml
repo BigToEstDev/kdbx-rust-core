@@ -2,7 +2,7 @@
 ## here - members, shared dependency versions and profiles. The crates are in crates/.
 [workspace]
 resolver = "2"
-members = ["crates/kdbx-rust-core"]
+members = ["crates/kdbx-rust-core", "crates/pass-api"]
 
 [workspace.package]
 authors = ["BigToEstDev"]
