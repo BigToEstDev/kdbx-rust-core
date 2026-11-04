@@ -3,7 +3,7 @@
 
 mod common;
 
-use kdbx_rust_core::db_service::{self, NewDatabase};
+use kdbx_rust_core::db_service::{self, EntryCategory, NewDatabase};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -194,4 +194,63 @@ fn the_attachments_survive_a_lock_after_the_binaries_change_order() {
         attachments_of(&db, &second),
         vec![("b.txt".to_string(), b"bbb".to_vec())]
     );
+}
+
+// Фикстура oracle (pykeepass): одинаковые байты двумя блоками inner header и третье вложение за ними. До Step 102
+// индекс Ref считался по числу разных вложений - вложение третьей записи съезжало на чужой блок
+const FIXTURE_PASSWORD: &str = "test-pass-1234";
+const DUPLICATE_BINARIES: [(&str, &str, &[u8]); 3] = [
+    ("First", "same.txt", b"the same bytes"),
+    ("Second", "same-again.txt", b"the same bytes"),
+    (
+        "Third",
+        "other.bin",
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    ),
+];
+
+fn open_fixture(name: &str) -> Db {
+    common::init();
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/resources")
+        .join(name);
+    let mut p = std::env::temp_dir();
+    p.push(format!("okp_attachments_{}_{}", std::process::id(), name));
+    std::fs::copy(source, &p).unwrap();
+    let db = Db(p.to_str().unwrap().to_string());
+    db_service::load_kdbx(&db.0, Some(FIXTURE_PASSWORD), None).unwrap();
+    db
+}
+
+fn entry_by_title(db: &Db, title: &str) -> Uuid {
+    db_service::entry_summary_data(&db.0, EntryCategory::AllEntries)
+        .unwrap()
+        .iter()
+        .find(|e| e.title.as_deref() == Some(title))
+        .map(|e| Uuid::parse_str(&e.uuid).unwrap())
+        .unwrap()
+}
+
+fn assert_duplicate_binaries(db: &Db) {
+    for (title, name, data) in DUPLICATE_BINARIES {
+        let entry = entry_by_title(db, title);
+        assert_eq!(
+            attachments_of(db, &entry),
+            vec![(name.to_string(), data.to_vec())],
+            "вложение записи {}",
+            title
+        );
+    }
+}
+
+#[test]
+fn the_same_bytes_in_two_binaries_keep_the_attachments_of_the_next_entries() {
+    let db = open_fixture("duplicate_binaries_41.kdbx");
+    assert_duplicate_binaries(&db);
+
+    // Written by the core - the same bytes once - and read again
+    db_service::save_kdbx_with_backup(&db.0, None, false).unwrap();
+    db_service::close_kdbx(&db.0).unwrap();
+    db_service::load_kdbx(&db.0, Some(FIXTURE_PASSWORD), None).unwrap();
+    assert_duplicate_binaries(&db);
 }
