@@ -263,6 +263,23 @@ impl AttachmentSet {
         &self.hash_index_ref
     }
 
+    // Memory-security lock: the Ref indexes the entries are written with while the db is locked, numbered afresh
+    // over the bytes held now, and the same numbers kept to link the entries again on unlock (pass-docs, Step 102).
+    // The indexes of the file read are stale by then: after a write of the file the order of the binaries is
+    // another, and bytes uploaded since have none
+    pub(crate) fn reindex_for_lock(&mut self) -> &HashMap<AttachmentHashValue, i32> {
+        self.hash_index_ref.clear();
+        self.index_ref_hash.clear();
+        for (index, (key, data)) in self.attachments.iter().enumerate() {
+            let index = index as i32;
+            self.hash_index_ref.insert(*key, index);
+            // The first byte is the flag of protection, not the content
+            self.index_ref_hash
+                .insert(index, (*key, data.len().saturating_sub(1)));
+        }
+        &self.hash_index_ref
+    }
+
     // Memory-security lock: move the attachment byte blobs out (leaving the
     // index lookup maps intact so entry links can still be restored) so the bytes
     // can be encrypted while the db is locked.

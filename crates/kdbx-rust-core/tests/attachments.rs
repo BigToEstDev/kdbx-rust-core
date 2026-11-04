@@ -150,3 +150,48 @@ fn an_attachment_removed_stays_while_a_version_links_it() {
     assert!(attachments_of(&db, &entry).is_empty());
     assert_eq!(bytes(&db, hash_of(&removed)), b"in the version");
 }
+
+// Step 102 п. 3a: до правки вложение после блокировки не читалось - ядро связывало записи по номерам Ref времени
+// чтения файла
+#[test]
+fn a_new_attachment_survives_a_lock() {
+    let db = create_db("lock_new");
+    let a = upload(&db, "a.txt", b"new one");
+    let entry = new_entry(&db, vec![a]);
+
+    db_service::lock_kdbx(&db.0).unwrap();
+    db_service::unlock_kdbx(&db.0, Some(PASSWORD), None).unwrap();
+
+    assert_eq!(
+        attachments_of(&db, &entry),
+        vec![("a.txt".to_string(), b"new one".to_vec())]
+    );
+}
+
+#[test]
+fn the_attachments_survive_a_lock_after_the_binaries_change_order() {
+    let db = create_db("lock_saved");
+    let a = upload(&db, "a.txt", b"aaa");
+    let b = upload(&db, "b.txt", b"bbb");
+    let first = new_entry(&db, vec![a]);
+    let second = new_entry(&db, vec![b]);
+    save_and_reopen(&db);
+    // The first attachment gone for good - entry and versions: the binary of the second is another one now
+    set_attachments(&db, &first, vec![]);
+    db_service::delete_history_entries(&db.0, &first).unwrap();
+    db_service::save_kdbx_with_backup(&db.0, None, false).unwrap();
+
+    db_service::lock_kdbx(&db.0).unwrap();
+    db_service::unlock_kdbx(&db.0, Some(PASSWORD), None).unwrap();
+
+    assert_eq!(
+        attachments_of(&db, &second),
+        vec![("b.txt".to_string(), b"bbb".to_vec())]
+    );
+    // And the file written after the unlock reads them as well
+    save_and_reopen(&db);
+    assert_eq!(
+        attachments_of(&db, &second),
+        vec![("b.txt".to_string(), b"bbb".to_vec())]
+    );
+}

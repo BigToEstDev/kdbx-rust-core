@@ -269,9 +269,13 @@ impl KdbxFile {
         use zeroize::Zeroize;
 
         if let Some(mut kp) = self.keepass_main_content.take() {
+            // The Binary Refs of the entries - numbered afresh over the bytes held now, the same numbers kept for
+            // the unlock: those of the file read are stale after a write or an upload (pass-docs, Step 102)
+            let index_refs = self.inner_header.entry_attachments.reindex_for_lock();
+            kp.root.set_attachment_index_refs(index_refs);
+
             // None cipher: protected values are serialized as plaintext *inside* the
-            // blob, which is then AES-GCM encrypted as a whole. Entries keep the
-            // `index_ref` set at load, so write_xml emits correct Binary Refs.
+            // blob, which is then AES-GCM encrypted as a whole.
             let mut xml_bytes = crate::xml_parse::write_xml(&kp, None)?;
 
             // Move attachment byte blobs out (index maps stay for relink on unlock).
