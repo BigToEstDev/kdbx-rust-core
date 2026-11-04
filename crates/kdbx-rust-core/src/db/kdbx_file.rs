@@ -740,6 +740,9 @@ impl InnerHeader {
             // }
         }
 
+        // The bytes no entry links any more are not in the file - nor kept in memory
+        self.entry_attachments.drop_unlinked();
+
         // End of header - 0 size data
         writer.write_all(&[inner_header_type::END_OF_HEADER])?;
 

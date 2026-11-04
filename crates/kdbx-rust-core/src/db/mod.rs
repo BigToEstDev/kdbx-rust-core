@@ -141,7 +141,33 @@ impl std::fmt::Debug for AttachmentSet {
     }
 }
 
+// The bytes of the attachments are wiped when the set goes - the database closed (pass-docs, Step 102): Rust does not
+// zero on drop
+impl Drop for AttachmentSet {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        for data in self.attachments.values_mut() {
+            data.zeroize();
+        }
+    }
+}
+
 impl AttachmentSet {
+    // After the binaries are written: the bytes written to none of them - linked with no entry and no version any
+    // more, an attachment removed - go from memory too, wiped (pass-docs, Step 102). Bytes uploaded are to be linked
+    // with their entry before the next write
+    pub(crate) fn drop_unlinked(&mut self) {
+        use zeroize::Zeroize;
+        let linked = &self.hash_index_ref;
+        self.attachments.retain(|key, data| {
+            let keep = linked.contains_key(key);
+            if !keep {
+                data.zeroize();
+            }
+            keep
+        });
+    }
+
     // Called to add the bytes data while reading the db content - in the order of the binaries of the inner header
     fn add(&mut self, data: Vec<u8>) -> Result<()> {
         // The first byte is a flag to indicate whether the data needs protection or not.
@@ -1043,5 +1069,19 @@ mod tests {
         assert_eq!(first, again);
         assert_eq!(set.get_bytes_content(&next), Some(vec![2, 2, 2]));
         assert_eq!(size, 3);
+    }
+
+    // Step 102: после записи в памяти только байты, записанные в файл
+    #[test]
+    fn the_bytes_written_to_no_binary_are_dropped() {
+        let mut set = AttachmentSet::default();
+        let linked = set.insert(vec![1, 1]).unwrap();
+        let unlinked = set.insert(vec![2, 2]).unwrap();
+        set.hash_index_ref.insert(linked, 0);
+
+        set.drop_unlinked();
+
+        assert_eq!(set.get_bytes_content(&linked), Some(vec![1, 1]));
+        assert_eq!(set.get_bytes_content(&unlinked), None);
     }
 }
