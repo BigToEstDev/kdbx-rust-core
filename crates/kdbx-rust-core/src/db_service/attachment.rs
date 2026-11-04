@@ -33,7 +33,7 @@ pub fn upload_entry_attachment(
     call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
         let data = data.take().unwrap_or_default();
         let size = data.len();
-        let data_hash = ctx.kdbx_file.upload_entry_attachment(data);
+        let data_hash = ctx.kdbx_file.upload_entry_attachment(data)?;
         Ok(AttachmentUploadInfo {
             name: file_name.into(), // Just the file name
             data_hash,

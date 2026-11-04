@@ -6,10 +6,8 @@ mod key_secure;
 mod new_db;
 mod reader_writer;
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::hash::Hasher;
 use std::io::{BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::Duration;
@@ -144,8 +142,8 @@ impl std::fmt::Debug for AttachmentSet {
 }
 
 impl AttachmentSet {
-    // Called to add the bytes data while reading the db content
-    fn add(&mut self, data: Vec<u8>) {
+    // Called to add the bytes data while reading the db content - in the order of the binaries of the inner header
+    fn add(&mut self, data: Vec<u8>) -> Result<()> {
         // The first byte is a flag to indicate whether the data needs protection or not.
         // A binary with no bytes at all happens only in a damaged inner header: read it as an
         // empty unprotected attachment instead of panicking on "len() - 1", and keep it in the
@@ -157,16 +155,30 @@ impl AttachmentSet {
             data
         };
 
-        let key = AttachmentSet::to_hash(&data);
+        let key = AttachmentSet::to_hash(&data)?;
         let size = data.len() - 1;
 
-        self.attachments.insert(key, data);
+        // Index is the value used in Ref attribute: the place of the binary among those read, not the count of the
+        // different ones - the same bytes twice in the file are one attachment, but two Ref indexes (pass-docs,
+        // Step 102)
+        let index = self.index_ref_hash.len() as i32;
 
-        // Index is the value used in Ref attribute
-        let index = self.attachments.len() as i32;
+        match self.attachments.get(&key) {
+            None => {
+                self.attachments.insert(key, data);
+            }
+            // Never another attachment's bytes in their place: the one read first stays
+            Some(kept) if *kept != data => {
+                log::error!(
+                    "Two binaries of the inner header have the same hash, keeping the first"
+                );
+            }
+            Some(_) => {}
+        }
 
         // The index look up
-        self.index_ref_hash.insert(index - 1, (key, size));
+        self.index_ref_hash.insert(index, (key, size));
+        Ok(())
     }
 
     // Gets the bytes content of attachment for view or saving
@@ -179,17 +191,24 @@ impl AttachmentSet {
     }
 
     // Called when a new document is uploaded
-    fn insert(&mut self, mut data: Vec<u8>) -> AttachmentHashValue {
+    fn insert(&mut self, mut data: Vec<u8>) -> Result<AttachmentHashValue> {
         // Nothing is done to index_ref_hash or hash_index_ref
 
         // 1 byte with value 1 added as prefix to data.
         // The first byte is a flag to indicate whether the data needs protection or not
         let mut prefixed_data = vec![1u8; 1];
         prefixed_data.append(&mut data);
-        let key = AttachmentSet::to_hash(&prefixed_data);
-        // If the uploaded attachment content is same as any previously loaded one, only single content is kept
-        self.attachments.insert(key, prefixed_data);
-        key
+        let key = AttachmentSet::to_hash(&prefixed_data)?;
+        match self.attachments.get(&key) {
+            // If the uploaded attachment content is same as any previously loaded one, only single content is kept
+            Some(kept) if *kept == prefixed_data => {}
+            // Another attachment's bytes are never replaced (pass-docs, Step 102)
+            Some(_) => return Err(Error::DataError("Another attachment has the same hash")),
+            None => {
+                self.attachments.insert(key, prefixed_data);
+            }
+        }
+        Ok(key)
     }
 
     fn insert_or_update_with_attachmentset(&mut self, other: &AttachmentSet) {
@@ -198,11 +217,14 @@ impl AttachmentSet {
         });
     }
 
-    // Generates a hash key based on the attachment bytes data
-    fn to_hash(data: &[u8]) -> AttachmentHashValue {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(data);
-        hasher.finish()
+    // The key of the attachment bytes: the first 8 bytes of their SHA-256 - not the hasher of the std, whose
+    // collisions can be made at will and whose output may change between versions of Rust (pass-docs, Step 102).
+    // It stays in memory only: the file links the attachments by their Ref indexes
+    fn to_hash(data: &[u8]) -> Result<AttachmentHashValue> {
+        let digest = crypto::sha256_hash_from_slice(data)?;
+        let mut key = [0u8; 8];
+        key.copy_from_slice(&digest[..8]);
+        Ok(AttachmentHashValue::from_le_bytes(key))
     }
 
     // Provides the the Ref to Hash (of attachment) value for all attachments and it is used
@@ -878,7 +900,10 @@ mod tests {
             inner_stream_key: vec![201, 202, 203],
             ..Default::default()
         };
-        header.entry_attachments.insert(vec![211, 212, 213]);
+        header
+            .entry_attachments
+            .insert(vec![211, 212, 213])
+            .unwrap();
 
         let debug = format!("{:?}", header);
         crate::redacted::tests::assert_hides(&debug, "201, 202, 203");
@@ -933,7 +958,7 @@ mod tests {
     #[test]
     fn an_empty_binary_of_the_inner_header_does_not_panic() {
         let mut set = AttachmentSet::default();
-        set.add(vec![]);
+        set.add(vec![]).unwrap();
 
         let hashes: Vec<_> = set.attachments.keys().copied().collect();
         assert_eq!(hashes.len(), 1, "пустое вложение должно остаться в наборе");
@@ -949,11 +974,74 @@ mod tests {
     #[test]
     fn an_empty_binary_keeps_the_ref_indexes_of_the_next_ones() {
         let mut set = AttachmentSet::default();
-        set.add(vec![]);
-        set.add(vec![0u8, 1, 2, 3]);
+        set.add(vec![]).unwrap();
+        set.add(vec![0u8, 1, 2, 3]).unwrap();
 
         assert_eq!(set.index_ref_hash.len(), 2);
         let (_, size) = set.index_ref_hash.get(&1).expect("второй блок");
         assert_eq!(*size, 3, "размер второго вложения");
+    }
+
+    // Step 102: два разных вложения - два ключа, байты обоих на месте
+    #[test]
+    fn two_different_attachments_keep_their_bytes() {
+        let mut set = AttachmentSet::default();
+        let first = set.insert(vec![1, 2, 3]).unwrap();
+        let second = set.insert(vec![4, 5, 6]).unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(set.get_bytes_content(&first), Some(vec![1, 2, 3]));
+        assert_eq!(set.get_bytes_content(&second), Some(vec![4, 5, 6]));
+    }
+
+    // Те же байты второй раз - то же вложение, одна копия
+    #[test]
+    fn the_same_bytes_uploaded_twice_are_one_attachment() {
+        let mut set = AttachmentSet::default();
+        let first = set.insert(vec![7, 8]).unwrap();
+        let second = set.insert(vec![7, 8]).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(set.attachments.len(), 1);
+    }
+
+    // Совпал ключ при других байтах - отказ, чужие байты не заменены
+    #[test]
+    fn an_upload_never_replaces_the_bytes_of_another_attachment() {
+        let mut set = AttachmentSet::default();
+        let key = AttachmentSet::to_hash(&[1u8, 9, 9]).unwrap();
+        set.attachments.insert(key, vec![1u8, 5, 5]);
+
+        assert!(set.insert(vec![9, 9]).is_err());
+        assert_eq!(set.get_bytes_content(&key), Some(vec![5, 5]));
+    }
+
+    // Совпал ключ при чтении файла - остаётся прочитанное первым
+    #[test]
+    fn a_binary_read_never_replaces_the_bytes_of_another() {
+        let mut set = AttachmentSet::default();
+        let key = AttachmentSet::to_hash(&[0u8, 9, 9]).unwrap();
+        set.attachments.insert(key, vec![0u8, 5, 5]);
+
+        set.add(vec![0, 9, 9]).unwrap();
+        assert_eq!(set.get_bytes_content(&key), Some(vec![5, 5]));
+    }
+
+    // Одинаковые блоки в файле - одно вложение, но индексы Ref считаются по блокам: следующее вложение не
+    // съезжает на чужой индекс (до Step 102 индекс считался по числу разных вложений)
+    #[test]
+    fn the_same_binary_twice_keeps_the_ref_indexes_of_the_next_ones() {
+        let mut set = AttachmentSet::default();
+        set.add(vec![0u8, 1, 1]).unwrap();
+        set.add(vec![0u8, 1, 1]).unwrap();
+        set.add(vec![0u8, 2, 2, 2]).unwrap();
+
+        assert_eq!(set.attachments.len(), 2);
+        let (first, _) = set.index_ref_hash[&0];
+        let (again, _) = set.index_ref_hash[&1];
+        let (next, size) = set.index_ref_hash[&2];
+        assert_eq!(first, again);
+        assert_eq!(set.get_bytes_content(&next), Some(vec![2, 2, 2]));
+        assert_eq!(size, 3);
     }
 }

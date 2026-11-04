@@ -185,7 +185,7 @@ impl KdbxFile {
 
     /// Called when user uploads an attachment in UI
     /// Returns the attachment content's hash for later reference
-    pub fn upload_entry_attachment(&mut self, data: Vec<u8>) -> AttachmentHashValue {
+    pub fn upload_entry_attachment(&mut self, data: Vec<u8>) -> Result<AttachmentHashValue> {
         self.inner_header.entry_attachments.insert(data)
     }
 
@@ -689,8 +689,8 @@ impl std::fmt::Debug for InnerHeader {
 
 impl InnerHeader {
     // Called to keep the attachment bytes data for later use
-    pub(crate) fn add_binary_data(&mut self, data: Vec<u8>) {
-        self.entry_attachments.add(data);
+    pub(crate) fn add_binary_data(&mut self, data: Vec<u8>) -> Result<()> {
+        self.entry_attachments.add(data)
     }
 
     // Provides the stored attachment bytes data for viewing or saving by user
