@@ -34,11 +34,7 @@ use uuid::Uuid;
 
 //    ========  Re-exports to use in all api users ============
 
-pub use attachment::{
-    read_entry_attachment, remove_app_temp_dir_content, save_attachment_as,
-    save_attachment_as_temp_file, save_attachment_to_writter, upload_entry_attachment,
-    AttachmentUploadInfo,
-};
+pub use attachment::{save_attachment_to_writer, upload_entry_attachment, AttachmentUploadInfo};
 
 // For now, as some fns are used only in desktop, need to include
 // all fns from this module so that desktop and mobile compilation

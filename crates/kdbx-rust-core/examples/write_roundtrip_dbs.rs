@@ -76,7 +76,12 @@ const PHONE_VALUE: &str = "+7 900 000-00-00";
 
 // TOTP в KeePass — обычное строковое поле otp с protected-значением.
 fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &str) {
-    let info = db_service::upload_entry_attachment(db_key, attachment_source).unwrap();
+    let name = std::path::Path::new(attachment_source)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap();
+    let data = std::fs::read(attachment_source).unwrap();
+    let info = db_service::upload_entry_attachment(db_key, name, data).unwrap();
 
     let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
     let mut value = serde_json::to_value(&form).unwrap();
