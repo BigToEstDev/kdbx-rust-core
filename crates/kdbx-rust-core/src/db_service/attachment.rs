@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::io::Write;
 
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::{
     db_content::{AttachmentHashValue, BinaryKeyValue, Entry},
@@ -87,25 +87,30 @@ pub fn upload_entry_attachment(
     })
 }
 
+/// The bytes of the attachment `data_hash` of the database `db_key` - a copy, the caller's to wipe once handed over
+/// ("Download" of the app, pass-docs, Step 102). No such bytes - `NotFound`; a locked database has none to give.
+pub fn entry_attachment_bytes(
+    db_key: &str,
+    data_hash: &AttachmentHashValue,
+) -> Result<Zeroizing<Vec<u8>>> {
+    call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        ctx.kdbx_file
+            .get_bytes_content(data_hash)
+            .map(Zeroizing::new)
+            .ok_or_else(|| Error::NotFound("No attachment found for the hash".into()))
+    })
+}
+
 /// Writes the bytes of the attachment `data_hash` of the database `db_key` to `writer`.
 pub fn save_attachment_to_writer<W: Write>(
     db_key: &str,
     data_hash: &AttachmentHashValue,
     writer: &mut W,
 ) -> Result<()> {
-    let data = call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
-        Ok(ctx.kdbx_file.get_bytes_content(data_hash))
-    })?;
-
-    if let Some(mut v) = data {
-        let written = writer.write_all(&v);
-        // The copy taken out of the database is wiped once handed over (pass-docs, Step 102)
-        v.zeroize();
-        written?;
-        Ok(())
-    } else {
-        Err(Error::UnexpectedError("No valid data found".into()))
-    }
+    // The copy taken out of the database is wiped once handed over (pass-docs, Step 102)
+    let data = entry_attachment_bytes(db_key, data_hash)?;
+    writer.write_all(&data)?;
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

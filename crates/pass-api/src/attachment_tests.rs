@@ -196,3 +196,111 @@ fn form_of_missing(db_key: &str, entry_uuid: &Value) -> bool {
     );
     !envelope.starts_with(r#"{"ok":"#)
 }
+
+// ---- "Download": the bytes of one attachment in the slot of the answer (Step 102 п. 7) ----
+
+/// An entry with the files, and the hashes of its attachments in the order of the form.
+fn entry_with(db_key: &str, files: &[(&str, &[u8])]) -> (Value, Vec<String>) {
+    let form = blank_form(db_key, "Download");
+    let uuid = form["uuid"].clone();
+    let (args, bytes) = with_files(db_key, &form, files);
+    call("insert_entry_from_form_data", args, bytes);
+    (uuid.clone(), hashes(&form_of(db_key, &uuid)))
+}
+
+fn hashes(form: &Value) -> Vec<String> {
+    form["binary_key_values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["data_hash"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn download(db_key: &str, hash: &str) -> Vec<u8> {
+    let answer = run_with_bytes(
+        "entry_attachment_bytes",
+        &json!({"db_key": db_key, "data_hash": hash}).to_string(),
+        None,
+    );
+    assert_shape("entry_attachment_bytes", &answer.envelope);
+    let bytes = answer.payload.expect("the bytes come in the slot");
+    assert_eq!(ok_payload(&answer.envelope)["size"], json!(bytes.len()));
+    bytes
+}
+
+#[test]
+fn an_attachment_downloads_as_it_was_added() {
+    let db_key = key_of("attachments-download");
+    open_database(&db_key);
+    let (_, hashes) = entry_with(&db_key, &[("a.txt", b"first"), ("empty", b"")]);
+
+    assert_eq!(download(&db_key, &hashes[0]), b"first");
+    assert_eq!(download(&db_key, &hashes[1]), b"");
+    close_database(&db_key);
+}
+
+#[test]
+fn an_attachment_downloads_after_the_file_and_a_lock() {
+    let db_key = key_of("attachments-download-file");
+    open_database(&db_key);
+    let (uuid, _) = entry_with(&db_key, &[("b.bin", &[0, 1, 255])]);
+
+    let saved = run_with_bytes("save_kdbx_to_writer", &db_key_args(&db_key), None);
+    close_database(&db_key);
+    run_with_bytes(
+        "read_kdbx",
+        &read_args(&db_key, TEST_PASSWORD),
+        saved.payload,
+    );
+    run_with_bytes("lock_kdbx", &db_key_args(&db_key), None);
+    run_with_bytes(
+        "unlock_kdbx",
+        &json!({"db_key": db_key, "password": TEST_PASSWORD}).to_string(),
+        None,
+    );
+
+    let hash = hashes(&form_of(&db_key, &uuid)).remove(0);
+    assert_eq!(download(&db_key, &hash), vec![0, 1, 255]);
+    close_database(&db_key);
+}
+
+#[test]
+fn an_unknown_attachment_is_not_found() {
+    let db_key = key_of("attachments-download-unknown");
+    open_database(&db_key);
+    let (_, hashes) = entry_with(&db_key, &[("a.txt", b"first")]);
+    let other = (hashes[0].parse::<u64>().unwrap().wrapping_add(1)).to_string();
+
+    let answer = run_with_bytes(
+        "entry_attachment_bytes",
+        &json!({"db_key": db_key, "data_hash": other}).to_string(),
+        None,
+    );
+
+    assert_eq!(kind_of(&answer.envelope), "NotFound");
+    assert!(answer.payload.is_none());
+    close_database(&db_key);
+}
+
+#[test]
+fn a_download_takes_no_bytes_and_a_hash_that_is_a_number() {
+    let db_key = key_of("attachments-download-args");
+    open_database(&db_key);
+    let (_, hashes) = entry_with(&db_key, &[("a.txt", b"first")]);
+
+    let with_bytes = call(
+        "entry_attachment_bytes",
+        json!({"db_key": db_key, "data_hash": hashes[0]}),
+        Some(vec![1]),
+    );
+    let not_a_number = call(
+        "entry_attachment_bytes",
+        json!({"db_key": db_key, "data_hash": "a.txt"}),
+        None,
+    );
+
+    assert_eq!(kind_of(&with_bytes), "InvalidArguments");
+    assert_eq!(kind_of(&not_a_number), "InvalidArguments");
+    close_database(&db_key);
+}

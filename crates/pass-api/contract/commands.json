@@ -14,6 +14,7 @@
   "delete_history_entries",
   "delete_history_entry_by_index",
   "empty_trash",
+  "entry_attachment_bytes",
   "entry_key_value_fields",
   "entry_list_current_otps",
   "entry_summary_data",

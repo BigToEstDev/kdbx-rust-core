@@ -35,9 +35,9 @@ use uuid::Uuid;
 //    ========  Re-exports to use in all api users ============
 
 pub use attachment::{
-    insert_entry_from_form_data_with_attachments, save_attachment_to_writer,
-    update_entry_from_form_data_with_attachments, upload_entry_attachment, AttachmentUploadInfo,
-    NewAttachment,
+    entry_attachment_bytes, insert_entry_from_form_data_with_attachments,
+    save_attachment_to_writer, update_entry_from_form_data_with_attachments,
+    upload_entry_attachment, AttachmentUploadInfo, NewAttachment,
 };
 
 // For now, as some fns are used only in desktop, need to include
