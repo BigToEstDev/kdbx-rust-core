@@ -35,6 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PASSWORD = "test-pass-1234"
 ATTACHMENT_NAME = "notes.txt"
 ATTACHMENT_DATA = b"example doc\n2 lines\n"
+OLD_ATTACHMENT_NAME = "old.txt"
+OLD_ATTACHMENT_DATA = b"removed by the second edit\n"
+PHOTO_ATTACHMENT_NAME = "photo.bin"
+PHOTO_ATTACHMENT_DATA = bytes(range(256))
 TOTP_URL = "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30"
 
 EXPECTED_TITLES = ["Email", "GitHub", "Server", "Trashed"]
@@ -186,11 +190,26 @@ def verify(path, cipher, kdf, key_file, compression, protected):
     ]
     assert [json.loads(t) for t in types] == [{"Phone": "phone"}], "типы полей: %s" % types
 
-    # Аттачмент проверяет inner header (binaries) и ссылку из записи
-    attachments = [(a.filename, a.data) for a in server.attachments]
-    assert attachments == [(ATTACHMENT_NAME, ATTACHMENT_DATA)], "аттачменты: %s" % (
-        [(name, len(data)) for name, data in attachments],
-    )
+    # Вложения проверяют inner header (binaries) и ссылки из записи и версии (Step 102): добавлены с формой,
+    # old.txt второй правкой убран из записи, но остаётся у последней версии
+    def attachments_of(entry):
+        return [(a.filename, a.data) for a in entry.attachments]
+
+    def sizes(attachments):
+        return [(name, len(data)) for name, data in attachments]
+
+    attachments = attachments_of(server)
+    expected = [(ATTACHMENT_NAME, ATTACHMENT_DATA), (PHOTO_ATTACHMENT_NAME, PHOTO_ATTACHMENT_DATA)]
+    assert attachments == expected, "вложения: %s" % sizes(attachments)
+
+    # У записей истории pykeepass вложений не отдаёт (`attachments` пуст) — по XML версии: Binary/Key и Ref в
+    # бинарники inner header
+    version = [
+        (b.findtext("Key"), kp.binaries[int(b.find("Value").get("Ref"))])
+        for b in server.history[-1]._element.findall("Binary")
+    ]
+    expected = [(ATTACHMENT_NAME, ATTACHMENT_DATA), (OLD_ATTACHMENT_NAME, OLD_ATTACHMENT_DATA)]
+    assert version == expected, "вложения версии: %s" % sizes(version)
 
 
 def main():
