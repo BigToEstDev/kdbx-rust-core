@@ -304,3 +304,86 @@ fn a_download_takes_no_bytes_and_a_hash_that_is_a_number() {
     assert_eq!(kind_of(&not_a_number), "InvalidArguments");
     close_database(&db_key);
 }
+
+// ---- Removal and the history (Step 102 п. 8) ----
+
+fn version_of(db_key: &str, entry_uuid: &Value, index: i32) -> Value {
+    call_ok(
+        "history_entry_by_index",
+        json!({"db_key": db_key, "entry_uuid": entry_uuid, "index": index}),
+    )
+}
+
+fn update(db_key: &str, form: &Value) {
+    let envelope = call(
+        "update_entry_from_form_data",
+        json!({"db_key": db_key, "form_data": form}),
+        None,
+    );
+    assert!(envelope.starts_with(r#"{"ok":"#), "{}", envelope);
+}
+
+fn without_attachments(mut form: Value) -> Value {
+    form["binary_key_values"] = json!([]);
+    form
+}
+
+fn is_not_found(db_key: &str, hash: &str) -> bool {
+    let answer = run_with_bytes(
+        "entry_attachment_bytes",
+        &json!({"db_key": db_key, "data_hash": hash}).to_string(),
+        None,
+    );
+    kind_of(&answer.envelope) == "NotFound"
+}
+
+#[test]
+fn an_attachment_left_out_of_the_form_is_gone_after_the_write() {
+    let db_key = key_of("attachments-removed");
+    open_database(&db_key);
+    let (uuid, hashes) = entry_with(&db_key, &[("a.txt", b"first")]);
+
+    update(&db_key, &without_attachments(form_of(&db_key, &uuid)));
+    // The version keeps it until the history goes too
+    call_ok(
+        "delete_history_entries",
+        json!({"db_key": db_key, "entry_uuid": uuid}),
+    );
+    run_with_bytes("save_kdbx_to_writer", &db_key_args(&db_key), None);
+
+    assert!(listed(&form_of(&db_key, &uuid)).is_empty());
+    assert!(is_not_found(&db_key, &hashes[0]));
+    close_database(&db_key);
+}
+
+#[test]
+fn a_version_keeps_its_attachment_and_it_downloads() {
+    let db_key = key_of("attachments-version");
+    open_database(&db_key);
+    let (uuid, _) = entry_with(&db_key, &[("a.txt", b"first")]);
+    update(&db_key, &without_attachments(form_of(&db_key, &uuid)));
+    run_with_bytes("save_kdbx_to_writer", &db_key_args(&db_key), None);
+
+    let version = version_of(&db_key, &uuid, 0);
+
+    assert_eq!(listed(&version), vec![("a.txt".to_string(), 5)]);
+    assert_eq!(download(&db_key, &hashes(&version)[0]), b"first");
+    close_database(&db_key);
+}
+
+#[test]
+fn going_back_to_a_version_brings_its_attachment_back() {
+    let db_key = key_of("attachments-revert");
+    open_database(&db_key);
+    let (uuid, _) = entry_with(&db_key, &[("a.txt", b"first")]);
+    update(&db_key, &without_attachments(form_of(&db_key, &uuid)));
+
+    // "Back to this version": the form of the version, saved as the entry
+    update(&db_key, &version_of(&db_key, &uuid, 0));
+    run_with_bytes("save_kdbx_to_writer", &db_key_args(&db_key), None);
+
+    let form = form_of(&db_key, &uuid);
+    assert_eq!(listed(&form), vec![("a.txt".to_string(), 5)]);
+    assert_eq!(download(&db_key, &hashes(&form)[0]), b"first");
+    close_database(&db_key);
+}
