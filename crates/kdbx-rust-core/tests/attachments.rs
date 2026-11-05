@@ -3,7 +3,7 @@
 
 mod common;
 
-use kdbx_rust_core::db_service::{self, EntryCategory, NewDatabase};
+use kdbx_rust_core::db_service::{self, EntryCategory, NewAttachment, NewDatabase};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -253,4 +253,229 @@ fn the_same_bytes_in_two_binaries_keep_the_attachments_of_the_next_entries() {
     db_service::close_kdbx(&db.0).unwrap();
     db_service::load_kdbx(&db.0, Some(FIXTURE_PASSWORD), None).unwrap();
     assert_duplicate_binaries(&db);
+}
+
+// ---- New attachments with the form (Step 102 п. 5): the bytes of all of them in one buffer, cut by the sizes ----
+
+fn new_attachments(files: &[(&str, &[u8])]) -> (Vec<NewAttachment>, Vec<u8>) {
+    let list = files
+        .iter()
+        .map(|(name, data)| NewAttachment {
+            name: name.to_string(),
+            size: data.len(),
+        })
+        .collect();
+    (
+        list,
+        files.iter().flat_map(|(_, data)| data.to_vec()).collect(),
+    )
+}
+
+fn new_entry_form(db: &Db, title: &str) -> (Uuid, Value) {
+    let root_uuid = db_service::groups_summary_data(&db.0).unwrap().root_uuid;
+    let form = db_service::new_entry_form_data(Some(&root_uuid));
+    let mut v = serde_json::to_value(&form).unwrap();
+    let uuid = Uuid::parse_str(v["uuid"].as_str().unwrap()).unwrap();
+    common::form::set_field(&mut v, "Title", title);
+    (uuid, v)
+}
+
+fn entry_form(db: &Db, entry: &Uuid) -> Value {
+    serde_json::to_value(db_service::get_entry_form_data_by_id(&db.0, entry).unwrap()).unwrap()
+}
+
+fn insert_with(
+    db: &Db,
+    form: &Value,
+    files: &[(&str, &[u8])],
+) -> kdbx_rust_core::error::Result<()> {
+    let (list, data) = new_attachments(files);
+    db_service::insert_entry_from_form_data_with_attachments(
+        &db.0,
+        serde_json::from_value(form.clone()).unwrap(),
+        &list,
+        data,
+    )
+}
+
+fn update_with(
+    db: &Db,
+    form: &Value,
+    files: &[(&str, &[u8])],
+) -> kdbx_rust_core::error::Result<()> {
+    let (list, data) = new_attachments(files);
+    db_service::update_entry_from_form_data_with_attachments(
+        &db.0,
+        serde_json::from_value(form.clone()).unwrap(),
+        &list,
+        data,
+    )
+}
+
+fn named(files: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
+    files
+        .iter()
+        .map(|(name, data)| (name.to_string(), data.to_vec()))
+        .collect()
+}
+
+fn is_data_error<T: std::fmt::Debug>(result: kdbx_rust_core::error::Result<T>) -> bool {
+    matches!(result, Err(kdbx_rust_core::error::Error::DataError(_)))
+}
+
+#[test]
+fn new_attachments_come_with_the_form_of_a_new_entry() {
+    let db = create_db("with_form_insert");
+    let (entry, form) = new_entry_form(&db, "New");
+    let files: &[(&str, &[u8])] = &[("a.txt", b"first"), ("empty", b""), ("b.bin", &[0, 1, 255])];
+
+    insert_with(&db, &form, files).unwrap();
+    assert_eq!(attachments_of(&db, &entry), named(files));
+
+    save_and_reopen(&db);
+    assert_eq!(attachments_of(&db, &entry), named(files));
+}
+
+#[test]
+fn new_attachments_join_those_of_the_entry_and_the_version_keeps_the_old() {
+    let db = create_db("with_form_update");
+    let (entry, form) = new_entry_form(&db, "Edited");
+    insert_with(&db, &form, &[("a.txt", b"first")]).unwrap();
+
+    update_with(&db, &entry_form(&db, &entry), &[("b.txt", b"second")]).unwrap();
+    save_and_reopen(&db);
+
+    assert_eq!(
+        attachments_of(&db, &entry),
+        named(&[("a.txt", b"first"), ("b.txt", b"second")])
+    );
+    let version = db_service::history_entry_by_index(&db.0, &entry, 0).unwrap();
+    let version = serde_json::to_value(&version).unwrap();
+    let names: Vec<&str> = version["binary_key_values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["a.txt"]);
+}
+
+#[test]
+fn sizes_that_do_not_cover_the_bytes_refuse_the_form() {
+    let db = create_db("with_form_sizes");
+    let (entry, form) = new_entry_form(&db, "Refused");
+    let mut list = vec![NewAttachment {
+        name: "a.txt".into(),
+        size: 3,
+    }];
+
+    let short = db_service::insert_entry_from_form_data_with_attachments(
+        &db.0,
+        serde_json::from_value(form.clone()).unwrap(),
+        &list,
+        b"four".to_vec(),
+    );
+    assert!(is_data_error(short));
+    list[0].size = 5;
+    let long = db_service::insert_entry_from_form_data_with_attachments(
+        &db.0,
+        serde_json::from_value(form).unwrap(),
+        &list,
+        b"four".to_vec(),
+    );
+    assert!(is_data_error(long));
+
+    // Nothing put in
+    assert!(db_service::get_entry_form_data_by_id(&db.0, &entry).is_err());
+}
+
+#[test]
+fn a_repeated_name_refuses_the_form() {
+    let db = create_db("with_form_names");
+    let (entry, form) = new_entry_form(&db, "Names");
+
+    // Among the new ones
+    assert!(is_data_error(insert_with(
+        &db,
+        &form,
+        &[("a.txt", b"one"), ("a.txt", b"two")]
+    )));
+    // An empty name
+    assert!(is_data_error(insert_with(&db, &form, &[("", b"one")])));
+
+    // A new one with the name of one the entry has: the entry stays as it was
+    insert_with(&db, &form, &[("a.txt", b"one")]).unwrap();
+    assert!(is_data_error(update_with(
+        &db,
+        &entry_form(&db, &entry),
+        &[("a.txt", b"two")]
+    )));
+    assert_eq!(attachments_of(&db, &entry), named(&[("a.txt", b"one")]));
+}
+
+#[test]
+fn an_attachment_of_the_form_not_in_the_database_refuses_it() {
+    let db = create_db("with_form_unknown");
+    let (entry, form) = new_entry_form(&db, "Unknown");
+    insert_with(&db, &form, &[("a.txt", b"one")]).unwrap();
+
+    let mut edited = entry_form(&db, &entry);
+    let hash = hash_of(&edited["binary_key_values"][0]);
+    edited["binary_key_values"][0]["data_hash"] = json!(hash.wrapping_add(1).to_string());
+
+    assert!(is_data_error(update_with(&db, &edited, &[])));
+    assert_eq!(attachments_of(&db, &entry), named(&[("a.txt", b"one")]));
+}
+
+#[test]
+fn the_size_of_an_attachment_of_the_form_is_that_of_its_bytes() {
+    let db = create_db("with_form_size");
+    let (entry, form) = new_entry_form(&db, "Size");
+    insert_with(&db, &form, &[("a.txt", b"12345")]).unwrap();
+
+    let mut edited = entry_form(&db, &entry);
+    edited["binary_key_values"][0]["data_size"] = json!(999);
+    update_with(&db, &edited, &[]).unwrap();
+
+    assert_eq!(
+        entry_form(&db, &entry)["binary_key_values"][0]["data_size"],
+        json!(5)
+    );
+}
+
+#[test]
+fn an_attachment_left_out_of_the_form_is_gone_with_the_next_write() {
+    let db = create_db("with_form_removed");
+    let (entry, form) = new_entry_form(&db, "Removed");
+    insert_with(&db, &form, &[("a.txt", b"one"), ("b.txt", b"two")]).unwrap();
+    let mut edited = entry_form(&db, &entry);
+    let removed = hash_of(&edited["binary_key_values"][1]);
+    edited["binary_key_values"]
+        .as_array_mut()
+        .unwrap()
+        .remove(1);
+    update_with(&db, &edited, &[]).unwrap();
+    // The version still links it: gone once the history is too
+    db_service::delete_history_entries(&db.0, &entry).unwrap();
+
+    db_service::save_kdbx_with_backup(&db.0, None, false).unwrap();
+
+    assert_eq!(attachments_of(&db, &entry), named(&[("a.txt", b"one")]));
+    let mut out = vec![];
+    assert!(db_service::save_attachment_to_writer(&db.0, &removed, &mut out).is_err());
+}
+
+#[test]
+fn new_attachments_with_the_form_survive_a_lock() {
+    let db = create_db("with_form_lock");
+    let (entry, form) = new_entry_form(&db, "Locked");
+    insert_with(&db, &form, &[("a.txt", b"one"), ("b.txt", b"two")]).unwrap();
+
+    db_service::lock_kdbx(&db.0).unwrap();
+    db_service::unlock_kdbx(&db.0, Some(PASSWORD), None).unwrap();
+
+    assert_eq!(
+        attachments_of(&db, &entry),
+        named(&[("a.txt", b"one"), ("b.txt", b"two")])
+    );
 }

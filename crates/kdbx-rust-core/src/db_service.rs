@@ -14,7 +14,7 @@ mod io;
 // pub mod storage;
 
 use crate::db::{self, KdbxFile};
-use crate::db_content::{Entry, KeepassFile, OtpData};
+use crate::db_content::{KeepassFile, OtpData};
 use crate::db_merge;
 use crate::searcher;
 use crate::util;
@@ -34,7 +34,11 @@ use uuid::Uuid;
 
 //    ========  Re-exports to use in all api users ============
 
-pub use attachment::{save_attachment_to_writer, upload_entry_attachment, AttachmentUploadInfo};
+pub use attachment::{
+    insert_entry_from_form_data_with_attachments, save_attachment_to_writer,
+    update_entry_from_form_data_with_attachments, upload_entry_attachment, AttachmentUploadInfo,
+    NewAttachment,
+};
 
 // For now, as some fns are used only in desktop, need to include
 // all fns from this module so that desktop and mobile compilation
@@ -1020,19 +1024,16 @@ pub fn history_entries_summary(db_key: &str, entry_uuid: &Uuid) -> Result<Vec<En
     })
 }
 
+/// Writes an edited form back, no new attachments: the checks of the attachments of the form are those of
+/// `update_entry_from_form_data_with_attachments`.
 pub fn update_entry_from_form_data(db_key: &str, form_data: EntryFormData) -> Result<()> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        k.root.update_entry(Entry::try_from(&form_data)?)
-    })
+    update_entry_from_form_data_with_attachments(db_key, form_data, &[], Vec::new())
 }
 
+/// Puts a filled in form into the database as a new entry, no new attachments. The meta share of the entry is set by
+/// the insert of KeepassFile.
 pub fn insert_entry_from_form_data(db_key: &str, form_data: EntryFormData) -> Result<()> {
-    main_content_mut_action!(db_key, move |k: &mut KeepassFile| {
-        // entry.meta_share is not yet set when EntryFormData is converted to
-        // an Entry. It is set in Keepass's insert_entry which in turn
-        // calls k.root.insert_entry
-        k.insert_entry(Entry::try_from(&form_data)?)
-    })
+    insert_entry_from_form_data_with_attachments(db_key, form_data, &[], Vec::new())
 }
 
 pub fn clone_entry(

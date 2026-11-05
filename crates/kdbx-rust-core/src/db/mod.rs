@@ -216,20 +216,36 @@ impl AttachmentSet {
             .map(|data| data.get(1..).unwrap_or_default().to_vec())
     }
 
+    // The length of the content of the attachment, without the flag of protection; None - no such bytes
+    pub(crate) fn content_size(&self, data_hash: &AttachmentHashValue) -> Option<usize> {
+        self.attachments
+            .get(data_hash)
+            .map(|data| data.len().saturating_sub(1))
+    }
+
     // Called when a new document is uploaded
-    fn insert(&mut self, mut data: Vec<u8>) -> Result<AttachmentHashValue> {
+    fn insert(&mut self, data: Vec<u8>) -> Result<AttachmentHashValue> {
+        use zeroize::{Zeroize, Zeroizing};
         // Nothing is done to index_ref_hash or hash_index_ref
+
+        // Every copy of the bytes not kept is wiped (pass-docs, Step 102): the one handed in and the prefixed one
+        // when the same bytes are there already or the hash is another's
+        let data = Zeroizing::new(data);
 
         // 1 byte with value 1 added as prefix to data.
         // The first byte is a flag to indicate whether the data needs protection or not
-        let mut prefixed_data = vec![1u8; 1];
-        prefixed_data.append(&mut data);
+        let mut prefixed_data = Vec::with_capacity(data.len() + 1);
+        prefixed_data.push(1u8);
+        prefixed_data.extend_from_slice(&data);
         let key = AttachmentSet::to_hash(&prefixed_data)?;
         match self.attachments.get(&key) {
             // If the uploaded attachment content is same as any previously loaded one, only single content is kept
-            Some(kept) if *kept == prefixed_data => {}
+            Some(kept) if *kept == prefixed_data => prefixed_data.zeroize(),
             // Another attachment's bytes are never replaced (pass-docs, Step 102)
-            Some(_) => return Err(Error::DataError("Another attachment has the same hash")),
+            Some(_) => {
+                prefixed_data.zeroize();
+                return Err(Error::DataError("Another attachment has the same hash"));
+            }
             None => {
                 self.attachments.insert(key, prefixed_data);
             }
