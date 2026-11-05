@@ -10,6 +10,7 @@
 //! carries a database) and returning an `Answer`. Nothing else - no locking, no state of its own. The
 //! core owns the open databases.
 
+pub(crate) mod attachments;
 pub(crate) mod entries;
 pub(crate) mod generator;
 pub(crate) mod groups;

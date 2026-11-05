@@ -12,12 +12,16 @@
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
-use kdbx_rust_core::db_service::{self, EntryCategory, EntryCloneOption, EntryFormData};
+use kdbx_rust_core::db_service::{
+    self, EntryCategory, EntryCloneOption, EntryFormData, NewAttachment,
+};
 
 use crate::commands::Command;
 use crate::dispatch::Answer;
 use crate::errors::ErrorPayload;
+use crate::handlers::attachments::new_attachment_bytes;
 use crate::handlers::{args, json_answer, reject_bytes, Done};
 
 /// Arguments naming one entry of an open database.
@@ -32,6 +36,9 @@ struct EntryIdArgs {
 struct EntryFormArgs {
     db_key: String,
     form_data: EntryFormData,
+    /// The files added with the form, their bytes in the slot of the call; absent - none
+    #[serde(default)]
+    new_attachments: Vec<NewAttachment>,
 }
 
 #[derive(Deserialize)]
@@ -162,30 +169,52 @@ pub(crate) fn new_entry_form_data(
     json_answer(&form)
 }
 
-/// Puts a filled in form into the database as a new entry.
+/// Puts a filled in form into the database as a new entry, with its new attachments - see `attachments`.
 pub(crate) fn insert_entry_from_form_data(
     args_json: &str,
     input: Option<Vec<u8>>,
 ) -> Result<Answer, ErrorPayload> {
-    reject_bytes(Command::InsertEntryFromFormData, input)?;
+    // The new attachments are plaintext: wiped whatever is refused below
+    let input = input.map(Zeroizing::new);
     let args: EntryFormArgs = args(args_json)?;
+    let bytes = new_attachment_bytes(
+        Command::InsertEntryFromFormData,
+        &args.new_attachments,
+        input,
+    )?;
 
-    db_service::insert_entry_from_form_data(&args.db_key, args.form_data)
-        .map_err(|e| ErrorPayload::of(&e))?;
+    db_service::insert_entry_from_form_data_with_attachments(
+        &args.db_key,
+        args.form_data,
+        &args.new_attachments,
+        bytes,
+    )
+    .map_err(|e| ErrorPayload::of(&e))?;
 
     Done::answer()
 }
 
-/// Writes an edited form back. The core keeps the previous version in the history of the entry.
+/// Writes an edited form back, with its new attachments - see `attachments`. The core keeps the previous version in
+/// the history of the entry.
 pub(crate) fn update_entry_from_form_data(
     args_json: &str,
     input: Option<Vec<u8>>,
 ) -> Result<Answer, ErrorPayload> {
-    reject_bytes(Command::UpdateEntryFromFormData, input)?;
+    let input = input.map(Zeroizing::new);
     let args: EntryFormArgs = args(args_json)?;
+    let bytes = new_attachment_bytes(
+        Command::UpdateEntryFromFormData,
+        &args.new_attachments,
+        input,
+    )?;
 
-    db_service::update_entry_from_form_data(&args.db_key, args.form_data)
-        .map_err(|e| ErrorPayload::of(&e))?;
+    db_service::update_entry_from_form_data_with_attachments(
+        &args.db_key,
+        args.form_data,
+        &args.new_attachments,
+        bytes,
+    )
+    .map_err(|e| ErrorPayload::of(&e))?;
 
     Done::answer()
 }
