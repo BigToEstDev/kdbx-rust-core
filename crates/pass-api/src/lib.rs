@@ -14,6 +14,8 @@
 
 use std::sync::Once;
 
+#[cfg(test)]
+mod attachment_tests;
 mod commands;
 #[cfg(test)]
 mod contract;

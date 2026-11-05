@@ -13,13 +13,18 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use kdbx_rust_core::db_service::{self, Compression, NewDatabase};
+use kdbx_rust_core::db_service::{self, Compression, NewAttachment, NewDatabase};
 use uuid::Uuid;
 
 // Значения должны совпадать с verify_roundtrip.py — он их проверяет
 const PASSWORD: &str = "test-pass-1234";
+// Вложения записи Server (Step 102): notes.txt и old.txt — с первой правкой, вторая убирает old.txt и добавляет
+// photo.bin (все 256 значений байта); у записи — notes.txt и photo.bin, у последней версии — notes.txt и old.txt
 const ATTACHMENT_NAME: &str = "notes.txt";
 const ATTACHMENT_DATA: &[u8] = b"example doc\n2 lines\n";
+const OLD_ATTACHMENT_NAME: &str = "old.txt";
+const OLD_ATTACHMENT_DATA: &[u8] = b"removed by the second edit\n";
+const PHOTO_ATTACHMENT_NAME: &str = "photo.bin";
 const TOTP_URL: &str =
     "otpauth://totp/server?secret=JBSWY3DPEHPK3PXP&issuer=demo&algorithm=SHA1&digits=6&period=30";
 
@@ -74,10 +79,23 @@ fn add_entry(
 const PHONE_FIELD: &str = "Phone";
 const PHONE_VALUE: &str = "+7 900 000-00-00";
 
-// TOTP в KeePass — обычное строковое поле otp с protected-значением.
-fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &str) {
-    let info = db_service::upload_entry_attachment(db_key, attachment_source).unwrap();
+// Новые вложения — с формой, как их передаёт приложение через pass-api (Step 102): имена и размеры списком, байты
+// подряд одним буфером
+fn update_with_attachments(db_key: &str, value: serde_json::Value, files: &[(&str, &[u8])]) {
+    let list: Vec<NewAttachment> = files
+        .iter()
+        .map(|(name, data)| NewAttachment {
+            name: name.to_string(),
+            size: data.len(),
+        })
+        .collect();
+    let data = files.iter().flat_map(|(_, data)| data.to_vec()).collect();
+    let form = serde_json::from_value(value).unwrap();
+    db_service::update_entry_from_form_data_with_attachments(db_key, form, &list, data).unwrap();
+}
 
+// TOTP в KeePass — обычное строковое поле otp с protected-значением.
+fn add_totp_and_attachments(db_key: &str, entry_uuid: &Uuid) {
     let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
     let mut value = serde_json::to_value(&form).unwrap();
     common::form::set_field(
@@ -94,17 +112,24 @@ fn add_totp_and_attachment(db_key: &str, entry_uuid: &Uuid, attachment_source: &
     let phone = fields.iter_mut().find(|f| f["key"] == PHONE_FIELD).unwrap();
     phone["field_type"] = serde_json::json!("phone");
 
-    // index_ref пересчитывается при записи по data_hash, поэтому здесь 0
-    value["binary_key_values"] = serde_json::json!([{
-        "key": ATTACHMENT_NAME,
-        "value": "",
-        "index_ref": 0,
-        "data_hash": info.data_hash.to_string(),
-        "data_size": info.data_size,
-    }]);
+    update_with_attachments(
+        db_key,
+        value,
+        &[
+            (ATTACHMENT_NAME, ATTACHMENT_DATA),
+            (OLD_ATTACHMENT_NAME, OLD_ATTACHMENT_DATA),
+        ],
+    );
 
-    let form = serde_json::from_value(value).unwrap();
-    db_service::update_entry_from_form_data(db_key, form).unwrap();
+    // Вторая правка: old.txt убран из формы (остаётся в версии), photo.bin добавлен
+    let form = db_service::get_entry_form_data_by_id(db_key, entry_uuid).unwrap();
+    let mut value = serde_json::to_value(&form).unwrap();
+    value["binary_key_values"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|b| b["key"] != OLD_ATTACHMENT_NAME);
+    let photo: Vec<u8> = (0..=255u8).collect();
+    update_with_attachments(db_key, value, &[(PHOTO_ATTACHMENT_NAME, &photo)]);
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -215,9 +240,7 @@ fn build_db(
 
     let server_uuid = add_entry(&db_key, &work_uuid, "Server", "admin", "srv-secret-3");
 
-    let attachment_source = format!("{}/{}", out_dir, ATTACHMENT_NAME);
-    std::fs::write(&attachment_source, ATTACHMENT_DATA).unwrap();
-    add_totp_and_attachment(&db_key, &server_uuid, &attachment_source);
+    add_totp_and_attachments(&db_key, &server_uuid);
 
     // Удалённая запись: корзина и PreviousParentGroup (Step 69) должны читаться чужим кодом
     let trashed_uuid = add_entry(&db_key, &work_uuid, "Trashed", "old", "old-secret-4");

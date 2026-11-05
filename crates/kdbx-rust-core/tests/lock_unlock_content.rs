@@ -1,7 +1,5 @@
 mod common;
 
-use std::io::Read;
-
 use kdbx_rust_core::db_service::{self, *};
 
 fn temp_path(name: &str) -> String {
@@ -35,10 +33,10 @@ fn lock_unlock_content_round_trip() {
     assert!(created.is_ok(), "create_kdbx failed: {:?}", created);
 
     // Add an attachment with known bytes.
-    let attach_src = temp_path("okp_attach_src.bin");
     let attach_bytes: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
-    std::fs::write(&attach_src, &attach_bytes).unwrap();
-    let info = db_service::upload_entry_attachment(&db_key, &attach_src).unwrap();
+    let info =
+        db_service::upload_entry_attachment(&db_key, "okp_attach_src.bin", attach_bytes.clone())
+            .unwrap();
     let data_hash = info.data_hash;
 
     // Baseline: content is present and readable.
@@ -113,16 +111,11 @@ fn lock_unlock_content_round_trip() {
     // Cleanup
     let _ = db_service::close_kdbx(&db_key);
     let _ = std::fs::remove_file(&db_key);
-    let _ = std::fs::remove_file(&attach_src);
 }
 
-// Reads an attachment's bytes back by writing it to a temp file (the public path).
+// Reads an attachment's bytes back through the public API - written to a buffer.
 fn read_attachment(db_key: &str, data_hash: &u64) -> Vec<u8> {
-    let out =
-        db_service::save_attachment_as_temp_file(db_key, "okp_attach_out.bin", data_hash).unwrap();
-    let mut f = std::fs::File::open(&out).unwrap();
     let mut buf = vec![];
-    f.read_to_end(&mut buf).unwrap();
-    let _ = std::fs::remove_file(&out);
+    db_service::save_attachment_to_writer(db_key, data_hash, &mut buf).unwrap();
     buf
 }

@@ -185,7 +185,7 @@ impl KdbxFile {
 
     /// Called when user uploads an attachment in UI
     /// Returns the attachment content's hash for later reference
-    pub fn upload_entry_attachment(&mut self, data: Vec<u8>) -> AttachmentHashValue {
+    pub fn upload_entry_attachment(&mut self, data: Vec<u8>) -> Result<AttachmentHashValue> {
         self.inner_header.entry_attachments.insert(data)
     }
 
@@ -269,9 +269,13 @@ impl KdbxFile {
         use zeroize::Zeroize;
 
         if let Some(mut kp) = self.keepass_main_content.take() {
+            // The Binary Refs of the entries - numbered afresh over the bytes held now, the same numbers kept for
+            // the unlock: those of the file read are stale after a write or an upload (pass-docs, Step 102)
+            let index_refs = self.inner_header.entry_attachments.reindex_for_lock();
+            kp.root.set_attachment_index_refs(index_refs);
+
             // None cipher: protected values are serialized as plaintext *inside* the
-            // blob, which is then AES-GCM encrypted as a whole. Entries keep the
-            // `index_ref` set at load, so write_xml emits correct Binary Refs.
+            // blob, which is then AES-GCM encrypted as a whole.
             let mut xml_bytes = crate::xml_parse::write_xml(&kp, None)?;
 
             // Move attachment byte blobs out (index maps stay for relink on unlock).
@@ -689,8 +693,8 @@ impl std::fmt::Debug for InnerHeader {
 
 impl InnerHeader {
     // Called to keep the attachment bytes data for later use
-    pub(crate) fn add_binary_data(&mut self, data: Vec<u8>) {
-        self.entry_attachments.add(data);
+    pub(crate) fn add_binary_data(&mut self, data: Vec<u8>) -> Result<()> {
+        self.entry_attachments.add(data)
     }
 
     // Provides the stored attachment bytes data for viewing or saving by user
@@ -739,6 +743,9 @@ impl InnerHeader {
             //     println!("Hash {} is already found at index {:?} and skipping writing to binary data", &h, hidx);
             // }
         }
+
+        // The bytes no entry links any more are not in the file - nor kept in memory
+        self.entry_attachments.drop_unlinked();
 
         // End of header - 0 size data
         writer.write_all(&[inner_header_type::END_OF_HEADER])?;

@@ -335,7 +335,7 @@ impl<'a, T: Read + Seek> KdbxFileReader<'a, T> {
                 }
                 inner_header_type::BINARY => {
                     // All entries attachments are stored as BINARY data
-                    self.kdbx_file.inner_header.add_binary_data(bytes_buf);
+                    self.kdbx_file.inner_header.add_binary_data(bytes_buf)?;
                 }
                 // Should not come here?
                 _ => {

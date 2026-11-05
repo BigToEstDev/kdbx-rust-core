@@ -1066,6 +1066,51 @@ def build_duplicate_keys_fixture():
     return db_path
 
 
+# Одинаковые байты двумя блоками inner header и ещё вложение за ними (Step 102 п. 2): KeePass и KeePassXC
+# одинаковые склеивают, pykeepass - нет, такой файл может прийти от другого клиента. До Step 102 ядро считало
+# индекс Ref по числу разных вложений, и вложение третьей записи съезжало на чужой блок
+DUPLICATE_BINARIES_FIXTURE = "duplicate_binaries_41.kdbx"
+DUPLICATE_BINARIES = [
+    # (запись, имя вложения, байты) - по блоку на запись, в этом порядке
+    ("First", "same.txt", b"the same bytes"),
+    ("Second", "same-again.txt", b"the same bytes"),
+    ("Third", "other.bin", bytes(range(16))),
+]
+
+
+def verify_duplicate_binaries_fixture(db_path):
+    kp = PyKeePass(str(db_path), password=PASSWORD)
+    binaries = kp.kdbx.body.payload.inner_header.binary
+    assert len(binaries) == len(DUPLICATE_BINARIES), len(binaries)
+    for title, name, data in DUPLICATE_BINARIES:
+        entry = kp.find_entries(title=title, first=True)
+        got = [(a.filename, a.data) for a in entry.attachments]
+        assert got == [(name, data)], (title, got)
+
+
+def build_duplicate_binaries_fixture():
+    db_path = OUT_DIR / DUPLICATE_BINARIES_FIXTURE
+    if db_path.exists():
+        db_path.unlink()
+
+    kp = create_database(str(db_path), password=PASSWORD)
+    kp.kdbx.header.value.minor_version = 1
+    header = kp.kdbx.header.value.dynamic_header
+    params = header.kdf_parameters.data.dict
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+    for title, name, data in DUPLICATE_BINARIES:
+        entry = kp.add_entry(kp.root_group, title, "user-" + title.lower(), "pass-" + title.lower())
+        # Свой блок на каждую запись: add_binary одинаковые байты не склеивает
+        entry.add_attachment(kp.add_binary(data), name)
+
+    kp.save()
+    verify_duplicate_binaries_fixture(db_path)
+    return db_path
+
+
 def write_xml_key_file(path):
     """XML KeyFile v2 — формат, который понимает наш core (src/db/file_key.rs).
 
@@ -1225,6 +1270,12 @@ def main():
     print(
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (две строки записи с одним ключом)"
         % (DUPLICATE_KEYS_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
+           FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_duplicate_binaries_fixture()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (одинаковые байты двумя блоками)"
+        % (DUPLICATE_BINARIES_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 

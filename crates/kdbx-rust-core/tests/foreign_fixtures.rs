@@ -10,7 +10,6 @@
 
 mod common;
 
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -137,21 +136,8 @@ fn verify_content(db_key: &str) {
 
     // data_hash сериализуется как строка (см. util::from_or_to::string)
     let data_hash: u64 = binary["data_hash"].as_str().unwrap().parse().unwrap();
-    let out_path = db_service::save_attachment_as_temp_file(
-        db_key,
-        &format!(
-            "okp_fixture_attach_{}.bin",
-            COPY_SEQ.fetch_add(1, Ordering::Relaxed)
-        ),
-        &data_hash,
-    )
-    .unwrap();
     let mut bytes = vec![];
-    std::fs::File::open(&out_path)
-        .unwrap()
-        .read_to_end(&mut bytes)
-        .unwrap();
-    let _ = std::fs::remove_file(&out_path);
+    db_service::save_attachment_to_writer(db_key, &data_hash, &mut bytes).unwrap();
     assert_eq!(bytes, ATTACHMENT_DATA, "байты аттачмента не совпали");
 }
 

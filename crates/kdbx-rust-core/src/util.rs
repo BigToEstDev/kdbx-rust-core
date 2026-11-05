@@ -1,5 +1,4 @@
 use std::collections::hash_map::DefaultHasher;
-use std::fs;
 use std::hash::Hasher;
 use std::io::Write;
 use std::path::Path;
@@ -266,22 +265,6 @@ pub fn to_i32(d: &[u8]) -> std::result::Result<i32, &'static str> {
 pub fn to_u32(d: &[u8]) -> std::result::Result<u32, &'static str> {
     let n: [u8; 4] = d.try_into().map_err(|_| "Conversion to u32 failed")?;
     Ok(u32::from_le_bytes(n))
-}
-
-// Removes all contents of a dir including sub dirs
-pub fn remove_dir_contents<P: AsRef<Path>>(path: P) -> Result<()> {
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if entry.file_type()?.is_dir() {
-            remove_dir_contents(&path)?;
-            fs::remove_dir(path)?;
-        } else {
-            fs::remove_file(path)?;
-        }
-    }
-    Ok(())
 }
 
 #[inline]

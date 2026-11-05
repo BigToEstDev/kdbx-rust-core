@@ -12,7 +12,8 @@
 use crate::commands::Command;
 use crate::errors::{err_envelope, ErrorPayload};
 use crate::handlers::{
-    entries, generator, groups, history, integrity, lifecycle, otp, search, settings, trash,
+    attachments, entries, generator, groups, history, integrity, lifecycle, otp, search, settings,
+    trash,
 };
 
 /// What a command answers: the envelope always, and raw bytes when the command produces a file - the
@@ -90,6 +91,7 @@ fn dispatch(
         Command::MoveEntry => entries::move_entry(args_json, input),
         Command::CloneEntry => entries::clone_entry(args_json, input),
         Command::DeleteEntry => entries::delete_entry(args_json, input),
+        Command::EntryAttachmentBytes => attachments::entry_attachment_bytes(args_json, input),
 
         Command::HistoryEntriesSummary => history::history_entries_summary(args_json, input),
         Command::HistoryEntryByIndex => history::history_entry_by_index(args_json, input),

@@ -87,6 +87,8 @@ commands! {
     CloneEntry => "clone_entry",
     // Into the recycle bin, or for good when the database does not use one
     DeleteEntry => "delete_entry",
+    // The bytes of one attachment, for "Download": new ones come with the form, the rest live in it
+    EntryAttachmentBytes => "entry_attachment_bytes",
 
     // The history of an entry: kdbx keeps old versions inside the entry, addressed by index
     HistoryEntriesSummary => "history_entries_summary",
