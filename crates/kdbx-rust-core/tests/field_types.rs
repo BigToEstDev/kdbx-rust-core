@@ -265,7 +265,8 @@ fn a_newer_entry_brings_its_types_into_a_merge() {
     update(&source, v);
     db_service::save_kdbx_with_backup(&source.0, None, false).unwrap();
 
-    db_service::merge_databases(&target.0, &source.0, Some(PASSWORD), None).unwrap();
+    let mut bytes = std::io::Cursor::new(std::fs::read(&source.0).unwrap());
+    db_service::merge_kdbx_from_bytes(&target.0, &mut bytes, Some(PASSWORD), None).unwrap();
     let saved = Db(temp_path("merged.kdbx"));
     db_service::save_to_db_file(&target.0, &saved.0).unwrap();
     open(&saved);

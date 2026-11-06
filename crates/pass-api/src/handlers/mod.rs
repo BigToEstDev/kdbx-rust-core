@@ -17,6 +17,7 @@ pub(crate) mod groups;
 pub(crate) mod history;
 pub(crate) mod integrity;
 pub(crate) mod lifecycle;
+pub(crate) mod merge;
 pub(crate) mod otp;
 pub(crate) mod search;
 pub(crate) mod settings;

@@ -22,6 +22,18 @@ pub enum Error {
     #[error("MergeFailedCredentialsChanged")]
     MergeFailedCredentialsChanged,
 
+    // The names of the two below are a contract like the ones further down: the ui answers each with its own
+    // message - merge and import are two buttons (pass-docs, Step 106)
+    /// A merge was asked with a different database - a different root group. Nothing is changed: that is an
+    /// import.
+    #[error("The database is not a copy of the open one")]
+    NotSameDatabase,
+
+    /// An import was asked with a copy of the open database - the same root group. Nothing is changed: that is
+    /// a merge.
+    #[error("The database is a copy of the open one")]
+    SameDatabase,
+
     #[error("{0}")]
     NotFound(String),
 

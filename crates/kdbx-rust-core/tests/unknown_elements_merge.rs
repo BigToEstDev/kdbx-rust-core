@@ -92,11 +92,10 @@ fn merged_xml() -> Node {
     let source = copy_fixture("source.kdbx");
 
     open(&target);
-    open(&source);
-
-    db_service::merge_databases(&target, &source, Some(PASSWORD), None)
+    let mut bytes = std::io::Cursor::new(std::fs::read(&source).unwrap());
+    db_service::merge_kdbx_from_bytes(&target, &mut bytes, Some(PASSWORD), None)
         .expect("слияние не удалось");
-    close(&source);
+    let _ = std::fs::remove_file(&source);
 
     let saved = temp_path("merged.kdbx");
     db_service::save_to_db_file(&target, &saved).expect("сохранение результата не удалось");

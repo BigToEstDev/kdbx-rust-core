@@ -168,11 +168,14 @@ fn verify_db_merge() {
         "merged-pass",
     );
 
+    // Two new databases - two root groups: bringing one into the other is an import
+    db_service::save_kdbx_with_backup(&source_db_key, None, false).unwrap();
+    let mut source_bytes = std::io::Cursor::new(std::fs::read(&source_db_key).unwrap());
     let merge_result =
-        db_service::merge_databases(&target_db_key, &source_db_key, Some(password), None);
+        db_service::import_kdbx_from_bytes(&target_db_key, &mut source_bytes, Some(password), None);
     assert!(
         merge_result.is_ok(),
-        "merge_databases failed: {:?}",
+        "import_kdbx_from_bytes failed: {:?}",
         merge_result
     );
 
