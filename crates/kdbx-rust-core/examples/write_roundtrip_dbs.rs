@@ -290,6 +290,42 @@ fn build_db(
     );
 }
 
+// Слияние копии и импорт другой базы (Step 106): фикстуры pykeepass `merge_*.kdbx`, исходная — копией в
+// выходной директории; результат — тем же паролем, что у исходной. Строка вывода `merged|путь` — для
+// verify_roundtrip.py
+const MERGE_COPY_PASSWORD: &str = "copy-pass-5678";
+const MERGE_OTHER_PASSWORD: &str = "other-pass-9012";
+
+fn build_merged_db(out_dir: &str) {
+    let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("resources");
+    let path = std::path::Path::new(out_dir).join("written_merged.kdbx");
+    let db_key = path.to_str().unwrap();
+    std::fs::copy(resources.join("merge_base.kdbx"), &path).unwrap();
+    db_service::load_kdbx(db_key, Some(PASSWORD), None).unwrap();
+
+    let bytes = |name: &str| std::io::Cursor::new(std::fs::read(resources.join(name)).unwrap());
+    db_service::merge_kdbx_from_bytes(
+        db_key,
+        &mut bytes("merge_copy.kdbx"),
+        Some(MERGE_COPY_PASSWORD),
+        None,
+    )
+    .unwrap();
+    db_service::import_kdbx_from_bytes(
+        db_key,
+        &mut bytes("merge_other.kdbx"),
+        Some(MERGE_OTHER_PASSWORD),
+        None,
+    )
+    .unwrap();
+    db_service::save_kdbx_with_backup(db_key, None, false).unwrap();
+    db_service::close_kdbx(db_key).unwrap();
+
+    println!("merged|{}", db_key);
+}
+
 fn main() {
     let out_dir = std::env::args()
         .nth(1)
@@ -353,4 +389,5 @@ fn main() {
             ..DEFAULT_SETTINGS
         },
     );
+    build_merged_db(&out_dir);
 }

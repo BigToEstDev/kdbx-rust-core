@@ -331,6 +331,26 @@ pub(crate) struct SecuredDatabaseKeys {
     encrypted: bool,
 }
 
+// The hashes and the derived keys are wiped when the value goes: an open database keeps them encrypted, but
+// a database read only to be merged keeps them in plain until it drops (pass-docs, Step 106)
+impl Drop for SecuredDatabaseKeys {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+
+        if let Some(h) = self.password_hash.as_mut() {
+            h.zeroize();
+        }
+        if let Some(h) = self.key_file_data_hash.as_mut() {
+            h.zeroize();
+        }
+        self.composite_key.zeroize();
+        self.transformed_key.zeroize();
+        self.hmac_part_key.zeroize();
+        self.hmac_key.zeroize();
+        self.master_key.zeroize();
+    }
+}
+
 impl SecuredDatabaseKeys {
     // Hashes all incoming credentials data and creates an instance of SecuredDatabaseKeys
     fn from_keys(password: Option<&str>, file_key: &Option<FileKey>) -> Result<Self> {
@@ -702,6 +722,37 @@ pub fn read_db_from_reader<R: Read + Seek>(
     password: Option<&str>,
     file_key: Option<FileKey>,
 ) -> Result<KdbxFile> {
+    let mut updated_kdbx = read_with_credentials(reader, db_file_name, password, file_key)?;
+
+    // Need to get the checksum to track db file content changes outside the application if any
+    let cs = calculate_db_file_checksum(reader)?;
+    updated_kdbx.checksum_hash = cs;
+
+    updated_kdbx
+        .secured_database_keys
+        .secure_keys(db_file_name)?;
+
+    Ok(updated_kdbx)
+}
+
+/// Reads a second database only to merge it into an open one, with its own credentials.
+///
+/// It never becomes an open database: no name, no checksum, and its keys are not put into the key store -
+/// they stay in this value and are wiped when it drops, right after the merge (pass-docs, Step 106).
+pub(crate) fn read_db_to_merge<R: Read + Seek>(
+    reader: &mut R,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+) -> Result<KdbxFile> {
+    read_with_credentials(reader, EMPTY_STR, password, file_key)
+}
+
+fn read_with_credentials<R: Read + Seek>(
+    reader: &mut R,
+    db_file_name: &str,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+) -> Result<KdbxFile> {
     let secured_database_keys = SecuredDatabaseKeys::from_keys(password, &file_key)?;
     //let kb = file_key.map(|k| k.content); //converts Option<FileKey> to Option<Vec<u8>>
     let kdbx = KdbxFile {
@@ -718,17 +769,7 @@ pub fn read_db_from_reader<R: Read + Seek>(
         checksum_hash: vec![],
     };
 
-    // Need to get the checksum to track db file content changes outside the application if any
-    let mut updated_kdbx = read_db(reader, kdbx)?;
-    let cs = calculate_db_file_checksum(reader)?;
-
-    updated_kdbx.checksum_hash = cs;
-
-    updated_kdbx
-        .secured_database_keys
-        .secure_keys(db_file_name)?;
-
-    Ok(updated_kdbx)
+    read_db(reader, kdbx)
 }
 
 pub fn reload<R: Read + Seek>(reader: &mut R, kdbx_file: &KdbxFile) -> Result<KdbxFile> {

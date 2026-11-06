@@ -1153,156 +1153,120 @@ pub fn new_blank_group_with_parent(
     Ok(group)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub fn merge_databases(
-    target_db_key: &str,
-    source_db_key: &str,
-    password: Option<&str>,
-    key_file_name: Option<&str>,
-) -> Result<MergeResult> {
-    if target_db_key == source_db_key {
-        return Err(error::Error::UnexpectedError("Both source and target are the same databases. Please select a different database to merge".to_string()));
-    }
-
-    // IMPORTANT:
-    // We need to call all the calls 'main_store().lock()' to access the shared cache in a {} block
-    // so that the Mutex guard is unlocked while leaving the block and can then called again in another block or fn
-    // If not done this way, the deadlock will happen when we make calls to 'main_store().lock()' before unlocking the previous call
-
-    let source_already_opened = {
-        let store = main_store().lock().unwrap();
-        store.contains_key(source_db_key)
-    };
-
-    log::debug!("source_already_openned is {}", source_already_opened);
-
-    let source_loaded = if !source_already_opened {
-        load_kdbx(source_db_key, password, key_file_name)?;
-        log::debug!("source is opened");
-        true
-    } else {
-        false
-    };
-
-    let merge_result = {
-        let mut store = main_store().lock().unwrap();
-        let [target, source] = store.get_disjoint_mut([target_db_key, source_db_key]);
-        log::debug!("Got refs for source and target");
-
-        let target_kdbx = &mut target.ok_or("Target database key is not found")?.kdbx_file;
-        let source_kdbx = &source
-            .as_ref()
-            .ok_or("Source database key is not found")?
-            .kdbx_file;
-        let merge_result = db_merge::Merger::from_kdbx_file(source_kdbx, target_kdbx).merge()?;
-        log::debug!("Dbs are merged");
-
-        merge_result
-    };
-
-    if source_loaded {
-        close_kdbx(source_db_key)?;
-        log::debug!("source_db_key closed as it was opened only for merging");
-    }
-
-    Ok(merge_result)
+/// What the second database is meant to be to the open one - the user picks it on its own button
+/// (pass-docs, Step 105, 106).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MergeKind {
+    /// Another copy of this very database: the same root group
+    Copy,
+    /// A different database brought in as a whole
+    Import,
 }
 
-// Merges a kdbx loaded from an arbitrary reader into the in-memory version.
-// Same shape as merge_kdbx_with_disk_version but reads bytes from the
-// caller-supplied reader (used by the remote-storage path on both desktop and
-// mobile, where the "other side" lives on SFTP/WebDAV rather than disk).
+/// Merges another copy of the open database, sent as bytes with its own credentials.
+///
+/// Its password or key file may differ from the open one's - the copy is opened with what was given. A
+/// different database is refused with [Error::NotSameDatabase] before anything changes: that is an import.
+/// The checksum of the open file is kept - the bytes are another file, not a newer version of this one.
+pub fn merge_kdbx_from_bytes<R: std::io::Read + std::io::Seek>(
+    db_key: &str,
+    reader: &mut R,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+) -> Result<MergeResult> {
+    merge_from_bytes(db_key, reader, password, file_key, MergeKind::Copy)
+}
+
+/// Brings a different database into the open one, sent as bytes with its own credentials.
+///
+/// A copy of the open database is refused with [Error::SameDatabase] before anything changes: that is a
+/// merge. Otherwise the same as [merge_kdbx_from_bytes].
+pub fn import_kdbx_from_bytes<R: std::io::Read + std::io::Seek>(
+    db_key: &str,
+    reader: &mut R,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+) -> Result<MergeResult> {
+    merge_from_bytes(db_key, reader, password, file_key, MergeKind::Import)
+}
+
+fn merge_from_bytes<R: std::io::Read + std::io::Seek>(
+    db_key: &str,
+    reader: &mut R,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+    kind: MergeKind,
+) -> Result<MergeResult> {
+    // The open database is checked first: no key derivation for a database that cannot take the merge
+    call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        ctx.kdbx_file
+            .keepass_main_content
+            .as_ref()
+            .map(|_| ())
+            .ok_or(Error::DbLocked)
+    })?;
+
+    // Outside the store lock - the key derivation takes seconds, every other command would wait on it
+    let mut source = db::read_db_to_merge(reader, password, file_key)?;
+
+    let merged = call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
+        let source_content = source
+            .keepass_main_content
+            .as_ref()
+            .ok_or("The database to merge has no content")?;
+        let target_content = ctx
+            .kdbx_file
+            .keepass_main_content
+            .as_ref()
+            .ok_or(Error::DbLocked)?;
+
+        let same = source_content.root.root_uuid() == target_content.root.root_uuid();
+        match (kind, same) {
+            (MergeKind::Copy, false) => return Err(Error::NotSameDatabase),
+            (MergeKind::Import, true) => return Err(Error::SameDatabase),
+            _ => {}
+        }
+
+        let merge_result = db_merge::Merger::from_kdbx_file(&source, &mut ctx.kdbx_file).merge()?;
+        ctx.save_pending = true;
+        Ok(merge_result)
+    });
+
+    // What was decrypted for the merge does not outlive it; the keys wipe themselves on drop
+    if let Some(content) = source.keepass_main_content.as_mut() {
+        content.zeroize_sensitive_content();
+    }
+
+    merged
+}
+
+// Merges a newer version of the open file, read from an arbitrary reader, into the in-memory version:
+// the file was saved by someone else since it was read (Step 107). Decrypted with the open database's own
+// key - a file re-encrypted elsewhere is `MergeFailedCredentialsChanged`. The checksum becomes the one of
+// these bytes, as they are the file now.
 pub fn merge_kdbx_with_reader<R: std::io::Read + std::io::Seek>(
     db_key: &str,
     reader: &mut R,
 ) -> Result<MergeResult> {
     call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
-        let other_kdbx = db::reload(reader, &ctx.kdbx_file).map_err(|e| match e {
+        if ctx.kdbx_file.keepass_main_content.is_none() {
+            return Err(Error::DbLocked);
+        }
+
+        let mut other_kdbx = db::reload(reader, &ctx.kdbx_file).map_err(|e| match e {
             Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
             other => other,
         })?;
 
-        let merge_result =
-            db_merge::Merger::from_kdbx_file(&other_kdbx, &mut ctx.kdbx_file).merge()?;
+        let merged = db_merge::Merger::from_kdbx_file(&other_kdbx, &mut ctx.kdbx_file).merge();
+        if let Some(content) = other_kdbx.keepass_main_content.as_mut() {
+            content.zeroize_sensitive_content();
+        }
+        let merge_result = merged?;
 
         ctx.kdbx_file.checksum_hash = db::calculate_db_file_checksum(reader)?;
         ctx.save_pending = true;
 
         Ok(merge_result)
     })
-}
-
-// Desktop-only: merges the on-disk version of the DB into the in-memory version.
-// Uses the stored composite key — no credential re-entry needed.
-// Sets save_pending = true on success so the UI knows unsaved changes exist.
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub fn merge_kdbx_with_disk_version(db_key: &str) -> Result<MergeResult> {
-    call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
-        // Load the on-disk version which will decrypted using the stored composite key.
-        let mut reader = db::open_db_file(db_key)?;
-
-        debug!("The db file {} is loaded to merge", db_key);
-
-        // if let Some(kc) = ctx.kdbx_file.keepass_main_content.as_ref() {
-        //     debug!("before merging Ctx all entries count{} ", kc.root.all_entries().len());
-        // }
-
-        // debug!(ctx.kdbx_file.all_entries);
-        // db::reload() clones ctx.kdbx_file (including encrypted composite key) and decrypts.
-        // If the on-disk file was re-encrypted with different credentials, reload returns
-        // InvalidCredentials — remap it to a specific error so the frontend can
-        // show a targeted message instead of a generic "invalid credentials" prompt.
-        let disk_kdbx = db::reload(&mut reader, &ctx.kdbx_file).map_err(|e| match e {
-            Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
-            other => other,
-        })?;
-
-        debug!("Db is reloaded from file system");
-
-        // if let Some(kc) = disk_kdbx.keepass_main_content.as_ref() {
-        //     debug!("Disk all entries count {} ", kc.root.all_entries().len());
-        // }
-
-        // Merge: disk version = source, in-memory version = target
-        let merge_result =
-            db_merge::Merger::from_kdbx_file(&disk_kdbx, &mut ctx.kdbx_file).merge()?;
-
-        // Update checksum to the on-disk state so the watcher won't re-fire for this change.
-        // calculate_db_file_checksum rewinds reader internally before reading.
-        ctx.kdbx_file.checksum_hash = db::calculate_db_file_checksum(&mut reader)?;
-        ctx.save_pending = true;
-
-        // if let Some(kc) = ctx.kdbx_file.keepass_main_content.as_ref() {
-        //     debug!("After merging Ctx all entries count{} ", kc.root.all_entries().len());
-        // }
-
-        Ok(merge_result)
-    })
-}
-
-#[cfg(any(target_os = "ios", target_os = "android"))]
-pub fn merge_databases(target_db_key: &str, source_db_key: &str) -> Result<MergeResult> {
-    if target_db_key == source_db_key {
-        return Err(error::Error::UnexpectedError(format!("Both source and target are the same databases. Please select a different database to merge")));
-    }
-
-    let merge_result = {
-        let mut store = main_store().lock().unwrap();
-        let [target, source] = store.get_disjoint_mut([target_db_key, source_db_key]);
-        log::debug!("Got refs for source and target");
-
-        let target_kdbx = &mut target
-            .ok_or_else(|| "Target database key is not found")?
-            .kdbx_file;
-        let source_kdbx = &source
-            .as_ref()
-            .ok_or_else(|| "Source database key is not found")?
-            .kdbx_file;
-        let merge_result = db_merge::Merger::from_kdbx_file(source_kdbx, target_kdbx).merge()?;
-        log::debug!("Dbs are merged");
-
-        merge_result
-    };
-
-    Ok(merge_result)
 }

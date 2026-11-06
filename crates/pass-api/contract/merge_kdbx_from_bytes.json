@@ -1,0 +1,20 @@
+{
+  "added_entries": [
+    {
+      "name": "string",
+      "parent_group_uuid": "null-in-this-sample",
+      "previous_parent_group_uuid": "null-in-this-sample",
+      "uuid": "string"
+    }
+  ],
+  "added_groups": [],
+  "different_databases": "bool",
+  "merge_done": "bool",
+  "meta_data_changed": "bool",
+  "parent_changed_entries": [],
+  "parent_changed_groups": [],
+  "permanently_deleted_entries": [],
+  "permanently_deleted_groups": [],
+  "updated_entries": [],
+  "updated_groups": []
+}

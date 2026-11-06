@@ -121,6 +121,11 @@ commands! {
     DbChecksumHash => "db_checksum_hash",
     MergeKdbxWithReader => "merge_kdbx_with_reader",
 
+    // Another database file brought into the open one, with its own credentials: a copy of it merged, a
+    // different database imported - two buttons, the core refuses the wrong one (Step 106)
+    MergeKdbxFromBytes => "merge_kdbx_from_bytes",
+    ImportKdbxFromBytes => "import_kdbx_from_bytes",
+
     // The recycle bin holds entries only (Step 69): its list and search, restoring to a group, and the
     // irreversible steps - removing picked entries and emptying it
     TrashEntries => "trash_entries",

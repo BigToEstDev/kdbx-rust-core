@@ -12,8 +12,8 @@
 use crate::commands::Command;
 use crate::errors::{err_envelope, ErrorPayload};
 use crate::handlers::{
-    attachments, entries, generator, groups, history, integrity, lifecycle, otp, search, settings,
-    trash,
+    attachments, entries, generator, groups, history, integrity, lifecycle, merge, otp, search,
+    settings, trash,
 };
 
 /// What a command answers: the envelope always, and raw bytes when the command produces a file - the
@@ -120,6 +120,8 @@ fn dispatch(
         }
         Command::DbChecksumHash => integrity::db_checksum_hash(args_json, input),
         Command::MergeKdbxWithReader => integrity::merge_kdbx_with_reader(args_json, input),
+        Command::MergeKdbxFromBytes => merge::merge_kdbx_from_bytes(args_json, input),
+        Command::ImportKdbxFromBytes => merge::import_kdbx_from_bytes(args_json, input),
 
         Command::TrashEntries => trash::trash_entries(args_json, input),
         Command::SearchTrash => trash::search_trash(args_json, input),

@@ -37,6 +37,8 @@ mod key_store;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
+mod merge_tests;
+#[cfg(test)]
 mod otp_tests;
 #[cfg(test)]
 mod search_tests;

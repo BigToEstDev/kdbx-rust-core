@@ -855,6 +855,112 @@ def build_edge_fixture():
     return db_path
 
 
+# --- Фикстуры слияния копии и импорта (Step 106) -----------------------------
+#
+# Три базы, собранные чужим кодом: исходная, её копия «с другого устройства» с другим паролем и другая база.
+# Копия — тот же файл, открытый pykeepass и изменённый: правка записи (с версией), удаление записи (с
+# `DeletedObject`, как делает KeePass), новая запись. Времена заданы явно: правка и удаление в копии позже
+# всего в исходной — по правилам KeePass побеждают они.
+MERGE_BASE_FIXTURE = "merge_base.kdbx"
+MERGE_COPY_FIXTURE = "merge_copy.kdbx"
+MERGE_OTHER_FIXTURE = "merge_other.kdbx"
+MERGE_COPY_PASSWORD = "copy-pass-5678"
+MERGE_OTHER_PASSWORD = "other-pass-9012"
+
+MERGE_UUIDS = {
+    "kept": "6c3d9a10-0000-4000-8000-000000000001",
+    "edited": "6c3d9a10-0000-4000-8000-000000000002",
+    "deleted": "6c3d9a10-0000-4000-8000-000000000003",
+    "added": "6c3d9a10-0000-4000-8000-000000000004",
+    "foreign": "6c3d9a10-0000-4000-8000-000000000005",
+    # Шаблон pykeepass даёт всем новым базам один UUID корня - другой базе задаём свой
+    "other_root": "6c3d9a10-0000-4000-8000-000000000010",
+}
+MERGE_BASE_TIME = datetime(2026, 1, 10, 9, 0, 0, tzinfo=timezone.utc)
+MERGE_COPY_TIME = datetime(2026, 2, 20, 18, 30, 0, tzinfo=timezone.utc)
+
+
+def fast_header(kp):
+    header = kp.kdbx.header.value.dynamic_header
+    header.cipher_id.data = "aes256"
+    header.encryption_iv.data = os.urandom(IV_LENGTHS["aes256"])
+    params = header.kdf_parameters.data.dict
+    params["$UUID"].value = kdf_uuids["argon2id"]
+    params["M"].value = FAST_ARGON2["memory_mb"] * 1024 * 1024
+    params["I"].value = FAST_ARGON2["iterations"]
+    params["P"].value = FAST_ARGON2["parallelism"]
+
+
+def merge_entry(kp, key, title, password, when):
+    entry = kp.add_entry(kp.root_group, title, "user-" + key, password)
+    entry.uuid = uuid_mod.UUID(MERGE_UUIDS[key])
+    entry.ctime = when
+    entry.mtime = when
+    return entry
+
+
+def build_merge_fixtures():
+    paths = [OUT_DIR / name for name in (MERGE_BASE_FIXTURE, MERGE_COPY_FIXTURE, MERGE_OTHER_FIXTURE)]
+    for path in paths:
+        if path.exists():
+            path.unlink()
+    base_path, copy_path, other_path = paths
+
+    kp = create_database(str(base_path), password=PASSWORD)
+    fast_header(kp)
+    merge_entry(kp, "kept", "Kept", "kept-secret", MERGE_BASE_TIME)
+    merge_entry(kp, "edited", "Edited", "old-secret", MERGE_BASE_TIME)
+    merge_entry(kp, "deleted", "Deleted", "gone-secret", MERGE_BASE_TIME)
+    kp.save()
+
+    # Копия: тот же файл, другой пароль
+    kp = PyKeePass(str(base_path), password=PASSWORD)
+    edited = kp.find_entries(title="Edited", first=True)
+    edited.save_history()
+    edited.password = "new-secret"
+    edited.mtime = MERGE_COPY_TIME
+
+    kp.delete_entry(kp.find_entries(title="Deleted", first=True))
+    root_el = kp.tree.getroot().find("Root")
+    deleted = root_el.find("DeletedObjects")
+    if deleted is None:
+        deleted = SubElement(root_el, "DeletedObjects")
+    obj = SubElement(deleted, "DeletedObject")
+    SubElement(obj, "UUID").text = base64.b64encode(uuid_mod.UUID(MERGE_UUIDS["deleted"]).bytes).decode("ascii")
+    SubElement(obj, "DeletionTime").text = kp._encode_time(MERGE_COPY_TIME)
+
+    merge_entry(kp, "added", "Added", "added-secret", MERGE_COPY_TIME)
+    kp.password = MERGE_COPY_PASSWORD
+    kp.save(filename=str(copy_path))
+
+    # Другая база: свой корень, свой пароль
+    kp = create_database(str(other_path), password=MERGE_OTHER_PASSWORD)
+    fast_header(kp)
+    kp.root_group.uuid = uuid_mod.UUID(MERGE_UUIDS["other_root"])
+    merge_entry(kp, "foreign", "Foreign", "foreign-secret", MERGE_BASE_TIME)
+    kp.save()
+
+    verify_merge_fixtures(base_path, copy_path, other_path)
+
+
+def verify_merge_fixtures(base_path, copy_path, other_path):
+    base = PyKeePass(str(base_path), password=PASSWORD)
+    copy = PyKeePass(str(copy_path), password=MERGE_COPY_PASSWORD)
+    other = PyKeePass(str(other_path), password=MERGE_OTHER_PASSWORD)
+
+    assert sorted(e.title for e in base.entries) == ["Deleted", "Edited", "Kept"]
+    assert sorted(e.title for e in copy.entries) == ["Added", "Edited", "Kept"]
+    assert [e.title for e in other.entries] == ["Foreign"]
+    assert base.root_group.uuid == copy.root_group.uuid, "копия — та же база"
+    assert base.root_group.uuid != other.root_group.uuid, "другая база — свой корень"
+
+    edited = copy.find_entries(title="Edited", first=True)
+    assert edited.password == "new-secret" and len(edited.history) == 1
+    deleted = copy.tree.getroot().findall("Root/DeletedObjects/DeletedObject/UUID")
+    expected = base64.b64encode(uuid_mod.UUID(MERGE_UUIDS["deleted"]).bytes).decode("ascii")
+    assert expected in [d.text for d in deleted], "удаление записано в DeletedObjects"
+
+
 # --- Фикстура TOTP формата KeePass 2.47+ (Step 21) ---------------------------
 #
 # Оригинальный KeePass хранит 2FA не в поле `otp` с `otpauth://` (так делают
@@ -1277,6 +1383,12 @@ def main():
         "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (одинаковые байты двумя блоками)"
         % (DUPLICATE_BINARIES_FIXTURE, "aes256", "argon2d", FAST_ARGON2["memory_mb"],
            FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
+    )
+    build_merge_fixtures()
+    print(
+        "  OK  %-34s %-9s %-9s %2d MB / %2d iter / P=%d  (копия с другим паролем, другая база)"
+        % (", ".join((MERGE_BASE_FIXTURE, MERGE_COPY_FIXTURE, MERGE_OTHER_FIXTURE)), "aes256", "argon2id",
+           FAST_ARGON2["memory_mb"], FAST_ARGON2["iterations"], FAST_ARGON2["parallelism"])
     )
 
     print("\nДальше: python tools/kdbx-oracle/dump_header.py crates/kdbx-rust-core/tests/resources/*.kdbx")

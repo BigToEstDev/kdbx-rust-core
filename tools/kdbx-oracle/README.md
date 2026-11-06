@@ -55,6 +55,14 @@ python -m venv .venv
 | `aes256_argon2d_keyfile.kdbx` + `.keyx` | AES-256/CBC | Argon2d | 16 MB / 2 iter / P=2 |
 | `aes256_argon2d_prod_params.kdbx` | AES-256/CBC | Argon2d | 64 MB / 10 iter / P=2 |
 
+**Слияние и импорт (Step 106)** — `build_merge_fixtures`: `merge_base.kdbx` (пароль общий), её копия
+`merge_copy.kdbx` с паролем `copy-pass-5678` (правка `Edited` с версией, удаление `Deleted` с `DeletedObject`,
+новая `Added` — позже всего в исходной) и другая база `merge_other.kdbx` с паролем `other-pass-9012` и своим
+корнем (шаблон pykeepass даёт всем новым базам **один UUID корня** — задаём явно). Читает
+`tests/merge_from_bytes.rs`; слитую нашим ядром базу проверяет `verify_roundtrip.py` (`written_merged.kdbx`).
+Перегенерировать только их, не трогая остальные:
+`.venv/Scripts/python.exe -I -c "import sys; sys.path.insert(0,'tools/kdbx-oracle'); import gen_fixtures as g; g.build_merge_fixtures()"`.
+
 Параметры Argon2 занижены намеренно: каждый тест платит за KDF при открытии базы. Отдельная фикстура с
 боевыми параметрами проверяет, что и такие читаются.
 

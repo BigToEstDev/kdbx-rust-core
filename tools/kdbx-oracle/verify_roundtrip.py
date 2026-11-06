@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -64,8 +65,14 @@ EXPECTED_PASSWORDS = {
 }
 
 
+# Слитая база (Step 106): фикстуры pykeepass merge_*.kdbx, копия слита, другая база импортирована
+MERGED_TITLES = ["Added", "Edited", "Foreign", "Kept"]
+MERGED_DELETED_UUID = "6c3d9a10-0000-4000-8000-000000000003"
+
+
 def write_databases(out_dir):
-    """Просит наше ядро записать базы. Возвращает список (путь, шифр, kdf, key-file, сжатие, скрытые поля)."""
+    """Просит наше ядро записать базы. Возвращает (список (путь, шифр, kdf, key-file, сжатие, скрытые поля),
+    путь слитой базы)."""
     result = subprocess.run(
         [
             "cargo",
@@ -87,17 +94,38 @@ def write_databases(out_dir):
         raise SystemExit(1)
 
     databases = []
+    merged = None
     for line in result.stdout.splitlines():
+        if line.startswith("merged|"):
+            merged = line.strip().split("|", 1)[1]
+            continue
         # Пример печатает: путь|шифр|kdf|key-file|сжатие|скрытые поля через запятую (key-file может быть пустым)
         parts = line.strip().split("|")
         if len(parts) == 6 and parts[0].endswith(".kdbx"):
             path, cipher, kdf, key_file, compression, protected = parts
             databases.append((path, cipher, kdf, key_file or None, compression, protected.split(",")))
 
-    if not databases:
-        print("пример не напечатал ни одной базы; вывод был:\n%s" % result.stdout)
+    if not databases or merged is None:
+        print("пример не напечатал базы или слитую базу; вывод был:\n%s" % result.stdout)
         raise SystemExit(1)
-    return databases
+    return databases, merged
+
+
+def verify_merged(path):
+    """Слитая и сохранённая нашим ядром база: записи обеих, правка копии с версией, удаление — в DeletedObjects."""
+    kp = PyKeePass(path, password=PASSWORD)
+
+    titles = sorted(entry.title for entry in kp.entries)
+    assert titles == MERGED_TITLES, "записи: %s" % titles
+
+    edited = kp.find_entries(title="Edited", first=True)
+    assert edited.password == "new-secret", "Edited: пароль %r" % edited.password
+    assert [h.password for h in edited.history] == ["old-secret"], "версии Edited"
+    assert kp.find_entries(title="Foreign", first=True).password == "foreign-secret"
+
+    deleted = [el.text for el in kp.tree.getroot().findall("Root/DeletedObjects/DeletedObject/UUID")]
+    expected = base64.b64encode(uuid.UUID(MERGED_DELETED_UUID).bytes).decode("ascii")
+    assert expected in deleted, "удаление Deleted не в DeletedObjects: %s" % deleted
 
 
 def verify_header(kp, cipher, kdf, compression):
@@ -216,7 +244,7 @@ def main():
     out_dir = Path(tempfile.mkdtemp(prefix="okp_roundtrip_"))
     try:
         print("Наше ядро пишет базы в %s" % out_dir)
-        databases = write_databases(out_dir)
+        databases, merged = write_databases(out_dir)
 
         for path, cipher, kdf, key_file, compression, protected in databases:
             verify(path, cipher, kdf, key_file, compression, protected)
@@ -232,7 +260,10 @@ def main():
                 )
             )
 
-        print("\nВсе %d баз, записанных нашим ядром, читаются pykeepass." % len(databases))
+        verify_merged(merged)
+        print("  OK  %-44s слияние копии и импорт другой базы" % Path(merged).name)
+
+        print("\nВсе %d баз, записанных нашим ядром, читаются pykeepass." % (len(databases) + 1))
         return 0
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)
