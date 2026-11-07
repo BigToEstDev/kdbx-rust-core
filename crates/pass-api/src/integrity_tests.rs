@@ -256,6 +256,65 @@ fn a_file_re_encrypted_elsewhere_cannot_be_merged() {
     close_database(&db_key);
 }
 
+#[test]
+fn another_database_in_the_file_is_not_merged_and_nothing_changes() {
+    prepare();
+    let db_key = key_of("merge-not-same");
+    let ours = run_with_bytes("create_and_write_to_writer", &new_db_args(&db_key), None);
+    let ours = ours.payload.expect("the database comes back as bytes");
+    call_ok_with_bytes("calculate_and_set_db_file_checksum", &db_key, ours);
+    let checksum = call_ok("db_checksum_hash", json!({ "db_key": db_key }));
+
+    // A database of its own under the very same password - it opens with our key, but it is not ours
+    let stranger_key = key_of("merge-not-same-stranger");
+    run_with_bytes(
+        "create_and_write_to_writer",
+        &new_db_args(&stranger_key),
+        None,
+    );
+    new_entry(&stranger_key, "Not ours");
+    let stranger_bytes = save_bytes(&stranger_key);
+    close_database(&stranger_key);
+
+    let envelope = with_bytes(
+        "merge_kdbx_with_reader",
+        json!({ "db_key": db_key }),
+        stranger_bytes,
+    );
+
+    assert!(
+        envelope.contains(r#""kind":"NotSameDatabase""#),
+        "another database is an import, not a newer version of this file: {}",
+        envelope
+    );
+    let entries = call_ok(
+        "entry_summary_data",
+        json!({"db_key": db_key, "category": {"kind": "all_entries"}}),
+    );
+    assert_eq!(entries, json!([]), "nothing came in");
+    assert_eq!(
+        call_ok("db_checksum_hash", json!({ "db_key": db_key })),
+        checksum,
+        "the file is still the one last read or written"
+    );
+
+    close_database(&db_key);
+}
+
+#[test]
+fn a_locked_database_takes_no_merge() {
+    let db_key = key_of("merge-locked");
+    open_database(&db_key);
+    let bytes = save_bytes(&db_key);
+    run_with_bytes("lock_kdbx", &db_key_args(&db_key), None);
+
+    let envelope = with_bytes("merge_kdbx_with_reader", json!({ "db_key": db_key }), bytes);
+
+    assert!(envelope.contains(r#""kind":"DbLocked""#), "{}", envelope);
+
+    close_database(&db_key);
+}
+
 fn call_ok_with_bytes(command: &str, db_key: &str, bytes: Vec<u8>) {
     let envelope = with_bytes(command, json!({ "db_key": db_key }), bytes);
     assert!(

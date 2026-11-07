@@ -1198,17 +1198,56 @@ fn merge_from_bytes<R: std::io::Read + std::io::Seek>(
     kind: MergeKind,
 ) -> Result<MergeResult> {
     // The open database is checked first: no key derivation for a database that cannot take the merge
-    call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
-        ctx.kdbx_file
-            .keepass_main_content
-            .as_ref()
-            .map(|_| ())
-            .ok_or(Error::DbLocked)
-    })?;
+    call_kdbx_context_action(db_key, ensure_unlocked)?;
 
     // Outside the store lock - the key derivation takes seconds, every other command would wait on it
-    let mut source = db::read_db_to_merge(reader, password, file_key)?;
+    let source = db::read_db_to_merge(reader, password, file_key)?;
 
+    merge_source(db_key, source, kind, None)
+}
+
+// Merges a newer version of the open file, read from an arbitrary reader, into the in-memory version:
+// the file was saved by someone else since it was read (pass-docs, Step 107, 108). Decrypted with the open
+// database's own key - a file re-encrypted elsewhere is `MergeFailedCredentialsChanged`; another database in
+// the file is `NotSameDatabase`, nothing changed. The checksum becomes the one of these bytes, as they are the
+// file now.
+pub fn merge_kdbx_with_reader<R: std::io::Read + std::io::Seek>(
+    db_key: &str,
+    reader: &mut R,
+) -> Result<MergeResult> {
+    // Only the keys are taken under the store lock; the key derivation of the read is outside it
+    let keys = call_kdbx_context_action(db_key, |ctx: &KdbxContext| {
+        ensure_unlocked(ctx)?;
+        Ok(ctx.kdbx_file.keys_only())
+    })?;
+
+    let source = db::reload(reader, &keys).map_err(|e| match e {
+        Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
+        other => other,
+    })?;
+    let checksum = source.checksum_hash.clone();
+
+    merge_source(db_key, source, MergeKind::Copy, Some(checksum))
+}
+
+/// Locked is refused before any work: its content is out of memory, there is nothing to merge into.
+fn ensure_unlocked(ctx: &KdbxContext) -> Result<()> {
+    ctx.kdbx_file
+        .keepass_main_content
+        .as_ref()
+        .map(|_| ())
+        .ok_or(Error::DbLocked)
+}
+
+/// Merges [source], read already, into the open database - if it is what [kind] says it is; otherwise
+/// nothing changes. [checksum], when given, becomes the one of the open file: the bytes merged are its newer
+/// version. What was decrypted of [source] is wiped either way.
+fn merge_source(
+    db_key: &str,
+    mut source: KdbxFile,
+    kind: MergeKind,
+    mut checksum: Option<Vec<u8>>,
+) -> Result<MergeResult> {
     let merged = call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
         let source_content = source
             .keepass_main_content
@@ -1228,6 +1267,9 @@ fn merge_from_bytes<R: std::io::Read + std::io::Seek>(
         }
 
         let merge_result = db_merge::Merger::from_kdbx_file(&source, &mut ctx.kdbx_file).merge()?;
+        if let Some(checksum) = checksum.take() {
+            ctx.kdbx_file.checksum_hash = checksum;
+        }
         ctx.save_pending = true;
         Ok(merge_result)
     });
@@ -1238,35 +1280,4 @@ fn merge_from_bytes<R: std::io::Read + std::io::Seek>(
     }
 
     merged
-}
-
-// Merges a newer version of the open file, read from an arbitrary reader, into the in-memory version:
-// the file was saved by someone else since it was read (Step 107). Decrypted with the open database's own
-// key - a file re-encrypted elsewhere is `MergeFailedCredentialsChanged`. The checksum becomes the one of
-// these bytes, as they are the file now.
-pub fn merge_kdbx_with_reader<R: std::io::Read + std::io::Seek>(
-    db_key: &str,
-    reader: &mut R,
-) -> Result<MergeResult> {
-    call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
-        if ctx.kdbx_file.keepass_main_content.is_none() {
-            return Err(Error::DbLocked);
-        }
-
-        let mut other_kdbx = db::reload(reader, &ctx.kdbx_file).map_err(|e| match e {
-            Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
-            other => other,
-        })?;
-
-        let merged = db_merge::Merger::from_kdbx_file(&other_kdbx, &mut ctx.kdbx_file).merge();
-        if let Some(content) = other_kdbx.keepass_main_content.as_mut() {
-            content.zeroize_sensitive_content();
-        }
-        let merge_result = merged?;
-
-        ctx.kdbx_file.checksum_hash = db::calculate_db_file_checksum(reader)?;
-        ctx.save_pending = true;
-
-        Ok(merge_result)
-    })
 }

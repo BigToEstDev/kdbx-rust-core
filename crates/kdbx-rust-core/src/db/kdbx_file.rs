@@ -25,6 +25,17 @@ pub struct KdbxFile {
 }
 
 impl KdbxFile {
+    /// This file with its keys and nothing else - enough to read a newer version of it, without a copy of
+    /// its decrypted content (pass-docs, Step 107). The keys stay as secured as they are here.
+    pub(crate) fn keys_only(&self) -> KdbxFile {
+        KdbxFile {
+            database_file_name: self.database_file_name.clone(),
+            file_key: self.file_key.clone(),
+            secured_database_keys: self.secured_database_keys.clone(),
+            ..Default::default()
+        }
+    }
+
     // For now used in unit tests
     #[allow(unused)]
     #[cfg(test)]
