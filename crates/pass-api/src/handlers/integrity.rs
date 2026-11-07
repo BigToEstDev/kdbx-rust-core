@@ -84,10 +84,10 @@ pub(crate) fn db_checksum_hash(
 /// re-encrypted elsewhere comes back as `MergeFailedCredentialsChanged` rather than as a wrong
 /// password.
 ///
-/// There is no undo: the merge changes the content in memory at once, and `different_databases` in
-/// the answer is only known *after* it happened. So the warning about merging two unrelated databases
-/// is shown as a fact, and "cancel" there means closing without saving - the file itself is untouched,
-/// because Kotlin is what writes it.
+/// Only a newer version of this very database is merged: another database in the file is
+/// `NotSameDatabase` before anything changes (pass-docs, Step 107). There is no undo: the merge
+/// changes the content in memory at once, and "cancel" afterwards means closing without saving - the
+/// file itself is untouched, because Kotlin is what writes it.
 pub(crate) fn merge_kdbx_with_reader(
     args_json: &str,
     input: Option<Vec<u8>>,
