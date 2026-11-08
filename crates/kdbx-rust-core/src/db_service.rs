@@ -1201,9 +1201,63 @@ fn merge_from_bytes<R: std::io::Read + std::io::Seek>(
     call_kdbx_context_action(db_key, ensure_unlocked)?;
 
     // Outside the store lock - the key derivation takes seconds, every other command would wait on it
-    let source = db::read_db_to_merge(reader, password, file_key)?;
+    let mut source = db::read_db_to_merge(reader, password, file_key)?;
 
-    merge_source(db_key, source, kind, None)
+    merge_source(db_key, &mut source, kind, None, |_| ()).map(|(result, _)| result)
+}
+
+/// The merge of a copy both ways: what changed in the open database, and the bytes of the copy's file.
+pub struct MergedBothWays {
+    pub result: MergeResult,
+    /// The merged database encrypted for the copy's file - its credentials, cipher, KDF and compression
+    pub copy: Vec<u8>,
+}
+
+/// Merges another copy of the open database both ways (pass-docs, Step 109): into the open one, as
+/// [merge_kdbx_from_bytes] does, and back - the bytes returned are the merged database encrypted for the
+/// copy's file, with its credentials and its header, fresh seeds and salt. Written over that file they make
+/// both files the same database again, still opened with the copy's own password on its device.
+///
+/// The bytes come even when nothing changed here: the copy may still lack what this database has. A
+/// different database is [Error::NotSameDatabase] before anything changes, no bytes. The checksum of the open
+/// file is kept, and the open database is saved by the app as usual.
+///
+/// The merge is done before the copy is written: should the write fail (it is in memory - only the crypto
+/// can), the open database stays merged and unsaved, like after [merge_kdbx_from_bytes].
+pub fn merge_kdbx_both_ways<R: std::io::Read + std::io::Seek>(
+    db_key: &str,
+    reader: &mut R,
+    password: Option<&str>,
+    file_key: Option<FileKey>,
+) -> Result<MergedBothWays> {
+    call_kdbx_context_action(db_key, ensure_unlocked)?;
+
+    // Outside the store lock, like the read: the key derivation of the copy's write takes seconds too
+    let mut copy = db::read_db_to_merge(reader, password, file_key)?;
+
+    // Under the lock only the merge and a clone of what it made - the content and its attachments
+    let (result, (content, inner_header)) =
+        merge_source(db_key, &mut copy, MergeKind::Copy, None, |merged| {
+            (
+                merged.keepass_main_content.clone(),
+                merged.inner_header.clone(),
+            )
+        })?;
+    copy.keepass_main_content = content;
+    copy.inner_header = inner_header;
+
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    let written = db::write_db(&mut bytes, &mut copy);
+    // The clone does not outlive the write, whatever came of it; the copy's keys wipe themselves on drop
+    if let Some(content) = copy.keepass_main_content.as_mut() {
+        content.zeroize_sensitive_content();
+    }
+    written?;
+
+    Ok(MergedBothWays {
+        result,
+        copy: bytes.into_inner(),
+    })
 }
 
 // Merges a newer version of the open file, read from an arbitrary reader, into the in-memory version:
@@ -1221,13 +1275,14 @@ pub fn merge_kdbx_with_reader<R: std::io::Read + std::io::Seek>(
         Ok(ctx.kdbx_file.keys_only())
     })?;
 
-    let source = db::reload(reader, &keys).map_err(|e| match e {
+    let mut source = db::reload(reader, &keys).map_err(|e| match e {
         Error::InvalidCredentials => Error::MergeFailedCredentialsChanged,
         other => other,
     })?;
     let checksum = source.checksum_hash.clone();
 
-    merge_source(db_key, source, MergeKind::Copy, Some(checksum))
+    merge_source(db_key, &mut source, MergeKind::Copy, Some(checksum), |_| ())
+        .map(|(result, _)| result)
 }
 
 /// Locked is refused before any work: its content is out of memory, there is nothing to merge into.
@@ -1241,13 +1296,16 @@ fn ensure_unlocked(ctx: &KdbxContext) -> Result<()> {
 
 /// Merges [source], read already, into the open database - if it is what [kind] says it is; otherwise
 /// nothing changes. [checksum], when given, becomes the one of the open file: the bytes merged are its newer
-/// version. What was decrypted of [source] is wiped either way.
-fn merge_source(
+/// version. [then] runs under the same lock right after the merge, over the merged database - what it returns
+/// comes back beside the result. What was decrypted of [source] is wiped either way; its keys stay, they are
+/// the caller's.
+fn merge_source<T>(
     db_key: &str,
-    mut source: KdbxFile,
+    source: &mut KdbxFile,
     kind: MergeKind,
     mut checksum: Option<Vec<u8>>,
-) -> Result<MergeResult> {
+    then: impl Fn(&KdbxFile) -> T,
+) -> Result<(MergeResult, T)> {
     let merged = call_kdbx_context_mut_action(db_key, |ctx: &mut KdbxContext| {
         let source_content = source
             .keepass_main_content
@@ -1266,12 +1324,12 @@ fn merge_source(
             _ => {}
         }
 
-        let merge_result = db_merge::Merger::from_kdbx_file(&source, &mut ctx.kdbx_file).merge()?;
+        let merge_result = db_merge::Merger::from_kdbx_file(source, &mut ctx.kdbx_file).merge()?;
         if let Some(checksum) = checksum.take() {
             ctx.kdbx_file.checksum_hash = checksum;
         }
         ctx.save_pending = true;
-        Ok(merge_result)
+        Ok((merge_result, then(&ctx.kdbx_file)))
     });
 
     // What was decrypted for the merge does not outlive it; the keys wipe themselves on drop

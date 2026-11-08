@@ -326,6 +326,28 @@ fn build_merged_db(out_dir: &str) {
     println!("merged|{}", db_key);
 }
 
+// В обе стороны (Step 109): байты для файла копии — слитая база её паролем и заголовком. Строка вывода
+// `merged_copy|путь` — для verify_roundtrip.py
+fn build_merged_copy_db(out_dir: &str) {
+    let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("resources");
+    let base = std::path::Path::new(out_dir).join("both_ways_base.kdbx");
+    let db_key = base.to_str().unwrap();
+    std::fs::copy(resources.join("merge_base.kdbx"), &base).unwrap();
+    db_service::load_kdbx(db_key, Some(PASSWORD), None).unwrap();
+
+    let mut copy = std::io::Cursor::new(std::fs::read(resources.join("merge_copy.kdbx")).unwrap());
+    let merged =
+        db_service::merge_kdbx_both_ways(db_key, &mut copy, Some(MERGE_COPY_PASSWORD), None)
+            .unwrap();
+    db_service::close_kdbx(db_key).unwrap();
+
+    let path = std::path::Path::new(out_dir).join("written_merged_copy.kdbx");
+    std::fs::write(&path, &merged.copy).unwrap();
+    println!("merged_copy|{}", path.to_str().unwrap());
+}
+
 fn main() {
     let out_dir = std::env::args()
         .nth(1)
@@ -390,4 +412,5 @@ fn main() {
         },
     );
     build_merged_db(&out_dir);
+    build_merged_copy_db(&out_dir);
 }
