@@ -2,7 +2,8 @@
 //!
 //! The other file is played the way it reaches the app: bytes a save produced. "A copy" is the same file
 //! opened under a key of its own and changed there - on another device, maybe with another password. "A
-//! different database" is one created on its own: a root group of its own.
+//! different database" is one created on its own: a root group of its own. Both ways (Step 109) - the bytes of
+//! the copy's file come back beside the result, encrypted for that file.
 
 use serde_json::{json, Value};
 
@@ -430,7 +431,11 @@ fn a_locked_database_takes_no_merge() {
     );
     call_ok("lock_kdbx", json!({ "db_key": db_key }));
 
-    for command in ["merge_kdbx_from_bytes", "import_kdbx_from_bytes"] {
+    for command in [
+        "merge_kdbx_from_bytes",
+        "import_kdbx_from_bytes",
+        "merge_kdbx_both_ways",
+    ] {
         let refused = with_bytes(
             command,
             merge_args(&db_key, Some(TEST_PASSWORD), None),
@@ -449,7 +454,11 @@ fn a_database_that_is_not_open_takes_no_merge() {
     let stranger = create(new_db_args(&stranger_key));
     close_database(&stranger_key);
 
-    for command in ["merge_kdbx_from_bytes", "import_kdbx_from_bytes"] {
+    for command in [
+        "merge_kdbx_from_bytes",
+        "import_kdbx_from_bytes",
+        "merge_kdbx_both_ways",
+    ] {
         let refused = with_bytes(
             command,
             merge_args(&key_of("merge-not-open"), Some(TEST_PASSWORD), None),
@@ -462,8 +471,117 @@ fn a_database_that_is_not_open_takes_no_merge() {
 #[test]
 fn a_merge_needs_the_bytes_of_the_other_file() {
     prepare();
-    for command in ["merge_kdbx_from_bytes", "import_kdbx_from_bytes"] {
+    for command in [
+        "merge_kdbx_from_bytes",
+        "import_kdbx_from_bytes",
+        "merge_kdbx_both_ways",
+    ] {
         let refused = call(command, merge_args(&key_of("merge-no-bytes"), None, None));
         assert!(refused.starts_with(r#"{"err":"#), "{}", refused);
     }
+}
+
+// --- Both ways (Step 109) ---
+
+#[test]
+fn both_ways_the_bytes_of_the_copy_open_with_its_own_password_and_hold_both_sides() {
+    let db_key = key_of("both-ways-target");
+    let original = create(new_db_args(&db_key));
+    new_entry(&db_key, "Added here");
+    let copy = changed_copy(
+        &key_of("both-ways-source"),
+        original,
+        "Added on the phone",
+        Some(OTHER_PASSWORD),
+    );
+
+    let answer = run_with_bytes(
+        "merge_kdbx_both_ways",
+        &merge_args(&db_key, Some(OTHER_PASSWORD), None).to_string(),
+        Some(copy),
+    );
+    assert_shape("merge_kdbx_both_ways", &answer.envelope);
+    let result = ok_payload(&answer.envelope);
+    assert_eq!(result["merge_done"].as_bool(), Some(true), "{}", result);
+    let both = vec!["Added here".to_string(), "Added on the phone".to_string()];
+    assert_eq!(titles(&db_key), both);
+    let bytes = answer.payload.expect("the bytes of the copy's file");
+
+    // Not with the password of the open database - the copy keeps its own
+    let reopened_key = key_of("both-ways-reopened");
+    let refused = run_with_bytes(
+        "read_kdbx",
+        &read_args(&reopened_key, TEST_PASSWORD),
+        Some(bytes.clone()),
+    );
+    assert!(
+        refused.envelope.contains(r#""kind":"InvalidCredentials""#),
+        "{}",
+        refused.envelope
+    );
+    let opened = run_with_bytes(
+        "read_kdbx",
+        &read_args(&reopened_key, OTHER_PASSWORD),
+        Some(bytes),
+    );
+    assert!(
+        opened.envelope.starts_with(r#"{"ok":"#),
+        "{}",
+        opened.envelope
+    );
+    assert_eq!(titles(&reopened_key), both);
+
+    close_database(&reopened_key);
+    close_database(&db_key);
+}
+
+#[test]
+fn both_ways_keeps_the_checksum_of_the_open_file() {
+    let db_key = key_of("both-ways-checksum");
+    let original = create(new_db_args(&db_key));
+    let before = checksum(&db_key);
+    let copy = changed_copy(
+        &key_of("both-ways-checksum-source"),
+        original,
+        "Added on the phone",
+        None,
+    );
+
+    let answer = run_with_bytes(
+        "merge_kdbx_both_ways",
+        &merge_args(&db_key, Some(TEST_PASSWORD), None).to_string(),
+        Some(copy),
+    );
+    assert!(answer.payload.is_some(), "{}", answer.envelope);
+    assert_eq!(checksum(&db_key), before, "the bytes are for another file");
+
+    close_database(&db_key);
+}
+
+#[test]
+fn both_ways_refuses_a_different_database_and_gives_no_bytes() {
+    let db_key = key_of("both-ways-not-a-copy");
+    create(new_db_args(&db_key));
+    new_entry(&db_key, "Mine");
+
+    let stranger_key = key_of("both-ways-not-a-copy-stranger");
+    create(new_db_args(&stranger_key));
+    new_entry(&stranger_key, "Theirs");
+    let stranger = save_bytes(&stranger_key);
+    close_database(&stranger_key);
+
+    let refused = run_with_bytes(
+        "merge_kdbx_both_ways",
+        &merge_args(&db_key, Some(TEST_PASSWORD), None).to_string(),
+        Some(stranger),
+    );
+    assert!(
+        refused.envelope.contains(r#""kind":"NotSameDatabase""#),
+        "{}",
+        refused.envelope
+    );
+    assert!(refused.payload.is_none(), "no bytes for a refused merge");
+    assert_eq!(titles(&db_key), vec!["Mine".to_string()], "nothing changed");
+
+    close_database(&db_key);
 }

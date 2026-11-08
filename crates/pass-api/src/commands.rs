@@ -125,6 +125,8 @@ commands! {
     // different database imported - two buttons, the core refuses the wrong one (Step 106)
     MergeKdbxFromBytes => "merge_kdbx_from_bytes",
     ImportKdbxFromBytes => "import_kdbx_from_bytes",
+    // A copy merged both ways: the bytes of the copy's file come back, encrypted for it (Step 109)
+    MergeKdbxBothWays => "merge_kdbx_both_ways",
 
     // The recycle bin holds entries only (Step 69): its list and search, restoring to a group, and the
     // irreversible steps - removing picked entries and emptying it

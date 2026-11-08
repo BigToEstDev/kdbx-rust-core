@@ -122,6 +122,7 @@ fn dispatch(
         Command::MergeKdbxWithReader => integrity::merge_kdbx_with_reader(args_json, input),
         Command::MergeKdbxFromBytes => merge::merge_kdbx_from_bytes(args_json, input),
         Command::ImportKdbxFromBytes => merge::import_kdbx_from_bytes(args_json, input),
+        Command::MergeKdbxBothWays => merge::merge_kdbx_both_ways(args_json, input),
 
         Command::TrashEntries => trash::trash_entries(args_json, input),
         Command::SearchTrash => trash::search_trash(args_json, input),
