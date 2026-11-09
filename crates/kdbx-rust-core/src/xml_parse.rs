@@ -2016,72 +2016,40 @@ impl<'a> FileKeyXmlReader<'a> {
         0
     }
 
+    /// Reads `<KeyFile>` the way KeePassXC does (`src/keys/FileKey.cpp`; pass-docs, Step 113): the xml declaration
+    /// is not required, and anything that is not a `<KeyFile>` - another root, broken xml, not xml at all - is
+    /// [Error::NotXmlKeyFile], so the caller goes on to the other formats. Only a `<KeyFile>` of a version not
+    /// known, or without one, fails here.
     pub fn parse(&mut self) -> Result<KeyFileData> {
+        match self.parse_key_file() {
+            Err(Error::UnsupportedXmlKeyFileVersion) => Err(Error::UnsupportedXmlKeyFileVersion),
+            Err(_) => Err(Error::NotXmlKeyFile),
+            parsed => parsed,
+        }
+    }
+
+    fn parse_key_file(&mut self) -> Result<KeyFileData> {
         let mut buf: Vec<u8> = vec![];
-        let mut xml_decl_available = false;
         let mut key_file_data = KeyFileData::default();
         loop {
-            match self.reader.read_event_into(&mut buf) {
-                Ok(Event::Decl(ref _e)) => {
-                    xml_decl_available = true;
-                    // return Err(Error::NotXmlKeyFile);
+            match self.reader.read_event_into(&mut buf)? {
+                Event::Start(ref e) if e.name().as_ref() == KEY_FILE => {
+                    self.read_top_level(&mut key_file_data)?;
+                    // The root is read: what follows it is not the key file's
+                    return Ok(key_file_data);
                 }
-                Ok(Event::DocType(_)) => {}
-                Ok(Event::PI(_)) => {}
-                Ok(Event::Text(_)) => {}
-                // A general entity reference (e.g. `&amp;`) is now reported as its own
-                // event (quick-xml 0.38+) instead of being inlined into Event::Text.
-                Ok(Event::GeneralRef(_)) => {}
-
-                Ok(Event::Start(ref e)) => {
-                    if !xml_decl_available {
-                        return Err(Error::NotXmlKeyFile);
-                        // return Err(Error::XmlReadingFailed(format!(
-                        //     "Xml content does not have XML decl"
-                        // )));
-                    }
-                    match e.name().as_ref() {
-                        KEY_FILE => {
-                            self.read_top_level(&mut key_file_data)?;
-                        }
-                        x => {
-                            //debug!("MAIN: in match {:?}", std::str::from_utf8(e.name()).unwrap());
-                            //debug!("MAIN: in match {:?} KEEPASS_FILE", std::str::from_utf8(KEEPASS_FILE).unwrap());
-                            return Err(Error::XmlReadingFailed(format!(
-                                "Unexpected starting tag {:?}",
-                                std::str::from_utf8(x)
-                            )));
-                        }
-                    }
+                // A <KeyFile/> has no version and no key - a key file broken, not another file
+                Event::Empty(ref e) if e.name().as_ref() == KEY_FILE => {
+                    return Err(Error::UnsupportedXmlKeyFileVersion);
                 }
-
-                Ok(Event::Empty(ref _e)) => {}
-                Ok(Event::End(ref _e)) => {
-                    // KeyFile end tag should have been consumed in read_top_level
-                    //info!("PARSE:End of tag {:?}", self.reader.decode(e));
+                Event::Start(_) | Event::Empty(_) | Event::End(_) | Event::Eof => {
+                    return Err(Error::NotXmlKeyFile);
                 }
-
-                Ok(Event::CData(ref _e)) => {}
-
-                Ok(Event::Comment(ref _e)) => {}
-
-                Ok(Event::Eof) => {
-                    if !xml_decl_available {
-                        return Err(Error::NotXmlKeyFile);
-                    }
-                    break;
-                }
-
-                Err(e) => {
-                    if !xml_decl_available {
-                        return Err(Error::NotXmlKeyFile);
-                    } else {
-                        return Err(Error::from(e));
-                    }
-                }
+                // The declaration, a doctype, comments and text around the root
+                _ => {}
             }
+            buf.clear();
         }
-        Ok(key_file_data)
     }
 
     fn read_top_level(&mut self, key_file_data: &mut KeyFileData) -> Result<()> {
@@ -2114,7 +2082,8 @@ impl<'a> FileKeyXmlReader<'a> {
             KEY_FILE_META
         );
 
-        if key_file_data.version.is_none() || key_file_data.version != Some("2.0".into()) {
+        // 1.0 (KeePass before 2.47 writes "1.00") and 2.0 - the versions KeePass and KeePassXC write
+        if key_file_data.key_version().is_none() {
             return Err(Error::UnsupportedXmlKeyFileVersion);
         }
 

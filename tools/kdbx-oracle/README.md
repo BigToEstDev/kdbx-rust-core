@@ -63,6 +63,13 @@ python -m venv .venv
 Перегенерировать только их, не трогая остальные:
 `.venv/Scripts/python.exe -I -c "import sys; sys.path.insert(0,'tools/kdbx-oracle'); import gen_fixtures as g; g.build_merge_fixtures()"`.
 
+**Key-файлы всех форматов (Step 113)** — `build_key_file_format_fixtures`: по базе на формат, key-файл рядом —
+`key_file_raw32` (ровно 32 байта), `key_file_hex64` (64 hex), `key_file_xml_v1` (XML 1.0, base64),
+`key_file_xml_no_decl` (XML 2.0 без `<?xml`), `key_file_xml_other` (XML не `<KeyFile>` — хешируется). Разбор
+pykeepass совпадает с KeePassXC. Читает `tests/key_file_formats.rs`. Только их:
+`.venv/Scripts/python.exe -I -c "import sys; sys.path.insert(0,'tools/kdbx-oracle'); import gen_fixtures as g; g.build_key_file_format_fixtures()"`.
+Байты фикстур git не трогает: `tests/resources/** binary` в `.gitattributes` (иначе `core.autocrlf` меняет ключ).
+
 Параметры Argon2 занижены намеренно: каждый тест платит за KDF при открытии базы. Отдельная фикстура с
 боевыми параметрами проверяет, что и такие читаются.
 
@@ -71,7 +78,8 @@ python -m venv .venv
 `notes.txt`. Покрывает protected-значения (inner-stream ChaCha20), binaries и вложенность групп.
 
 Key-file — XML KeyFile v2 (`<Data>` = 32 байта ключа в hex, `Hash` = первые 4 байта SHA-256 от них),
-именно этот формат читает `src/db/file_key.rs`.
+тот формат, что пишет наше ядро; остальные форматы key-файлов, что читает `src/db/file_key.rs`, — фикстуры
+Step 113 выше.
 
 ## Грабли pykeepass
 
