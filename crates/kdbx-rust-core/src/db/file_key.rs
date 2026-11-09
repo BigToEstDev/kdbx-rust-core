@@ -9,8 +9,14 @@ use log::debug;
 use crate::{
     crypto,
     error::{Error, Result},
+    util,
     xml_parse::{FileKeyXmlReader, FileKeyXmlWriter},
 };
+
+/// A key file of exactly this many bytes is the key itself, not hashed (KeePass, KeePassXC)
+const RAW_KEY_LEN: usize = 32;
+/// A key file of exactly this many hex characters is the key hex encoded
+const HEX_KEY_LEN: usize = 64;
 
 use super::credential_limits::check_key_file_size;
 
@@ -116,27 +122,34 @@ impl FileKey {
         xml_writer.write(&key_file_data)
     }
 
-    // Called to read a keyx xml and extract the hash from <Data> ...</Data> element or
-    // reads the whole bytes content of  the file and caluclates the hash
+    /// The 32 bytes of the key, read the way KeePass and KeePassXC read a key file (pass-docs, Step 113): an xml
+    /// `<KeyFile>` - version 1.0 or 2.0; otherwise exactly 32 bytes are the key as they are, exactly 64 hex
+    /// characters are the key hex encoded, and anything else is hashed whole.
     fn calculate_hash(buf: &[u8]) -> Result<Vec<u8>> {
-        let content_hash: Vec<u8> = match Self::try_parse_xml(buf) {
+        match Self::try_parse_xml(buf) {
             Ok(key_file_data) => {
-                // We find the hash key in the v2 xml file
-                debug!("Found xml key file and verifying the checksum");
-                key_file_data.verify_checksum()?
+                debug!("Found xml key file");
+                key_file_data.key()
             }
             Err(Error::NotXmlKeyFile) => {
-                // Hash of the file content is the key
-                debug!(
-                    "Key file is not xml based one and calculating the hash of content of the file"
-                );
-                crypto::sha256_hash_from_slice(buf)?
+                debug!("Key file is not xml based one");
+                Self::plain_key(buf)
             }
+            Err(e) => Err(e),
+        }
+    }
 
-            Err(e) => return Err(e),
-        };
-        debug!("Returning File key hash");
-        Ok(content_hash)
+    fn plain_key(buf: &[u8]) -> Result<Vec<u8>> {
+        if buf.len() == RAW_KEY_LEN {
+            return Ok(buf.to_vec());
+        }
+        if buf.len() == HEX_KEY_LEN {
+            // 64 bytes that are not all hex digits are a file like any other
+            if let Ok(key) = hex::decode(buf) {
+                return Ok(key);
+            }
+        }
+        crypto::sha256_hash_from_slice(buf)
     }
 
     fn try_parse_xml(buf: &[u8]) -> Result<KeyFileData> {
@@ -164,7 +177,35 @@ impl std::fmt::Debug for KeyFileData {
     }
 }
 
+/// The versions of `<KeyFile>` there are: 1.0 - the key in base64, KeePass before 2.47; 2.0 - hex with a checksum
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyFileVersion {
+    V1,
+    V2,
+}
+
 impl KeyFileData {
+    /// The version of the file - "1.0" and "2.0", as KeePass writes them ("1.00" too); none for anything else
+    pub(crate) fn key_version(&self) -> Option<KeyFileVersion> {
+        match self.version.as_deref().map(str::trim) {
+            Some(v) if v.starts_with("1.0") => Some(KeyFileVersion::V1),
+            Some(v) if v.starts_with("2.0") => Some(KeyFileVersion::V2),
+            _ => None,
+        }
+    }
+
+    /// The key of the file: base64 for 1.0, hex checked against its checksum for 2.0
+    pub fn key(&self) -> Result<Vec<u8>> {
+        match self.key_version() {
+            Some(KeyFileVersion::V1) => match &self.data {
+                Some(data) => util::base64_decode(data),
+                None => Err(Error::DataError("Key file invalid key data")),
+            },
+            Some(KeyFileVersion::V2) => self.verify_checksum(),
+            None => Err(Error::UnsupportedXmlKeyFileVersion),
+        }
+    }
+
     // Gets the key hash after verifying the checksum
     pub fn verify_checksum(&self) -> Result<Vec<u8>> {
         if let (Some(data), Some(hash)) = (&self.data, &self.hash) {
@@ -220,6 +261,124 @@ mod tests {
         ));
         std::fs::write(&path, content).unwrap();
         path
+    }
+
+    // --- Formats as KeePass / KeePassXC read them (Step 113) ---
+
+    fn key_of(content: &[u8]) -> Vec<u8> {
+        FileKey::from_bytes("key", content).unwrap().content_hash()
+    }
+
+    fn sha256(content: &[u8]) -> Vec<u8> {
+        crypto::sha256_hash_from_slice(content).unwrap()
+    }
+
+    const KEY: [u8; 32] = [7u8; 32];
+
+    fn xml_v2(decl: bool, version: &str, hash: &str, data: &str) -> Vec<u8> {
+        format!(
+            "{}<KeyFile>\n<Meta><Version>{}</Version></Meta>\n<Key><Data Hash=\"{}\">{}</Data></Key>\n</KeyFile>\n",
+            if decl { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" } else { "" },
+            version,
+            hash,
+            data
+        )
+        .into_bytes()
+    }
+
+    fn checksum(key: &[u8]) -> String {
+        hex::encode_upper(&sha256(key)[..4])
+    }
+
+    #[test]
+    fn exactly_32_bytes_are_the_key_as_they_are() {
+        assert_eq!(key_of(&KEY), KEY.to_vec());
+    }
+
+    #[test]
+    fn a_byte_more_or_less_than_32_is_hashed() {
+        assert_eq!(key_of(&[7u8; 31]), sha256(&[7u8; 31]));
+        assert_eq!(key_of(&[7u8; 33]), sha256(&[7u8; 33]));
+    }
+
+    #[test]
+    fn exactly_64_hex_characters_are_the_key_decoded_in_either_case() {
+        assert_eq!(key_of(hex::encode(KEY).as_bytes()), KEY.to_vec());
+        assert_eq!(key_of(hex::encode_upper(KEY).as_bytes()), KEY.to_vec());
+    }
+
+    #[test]
+    fn sixty_four_bytes_that_are_not_hex_are_hashed() {
+        let content = [b'z'; 64];
+        assert_eq!(key_of(&content), sha256(&content));
+    }
+
+    #[test]
+    fn hex_with_a_line_break_after_it_is_hashed_as_keepassxc_does() {
+        let content = format!("{}\n", hex::encode(KEY)).into_bytes();
+        assert_eq!(key_of(&content), sha256(&content));
+    }
+
+    #[test]
+    fn an_xml_key_file_of_version_1_has_its_key_in_base64() {
+        for version in ["1.0", "1.00"] {
+            let content = format!(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<KeyFile>\n\t<Meta>\n\t\t<Version>{}</Version>\n\t</Meta>\n\t<Key>\n\t\t<Data>{}</Data>\n\t</Key>\n</KeyFile>\n",
+                version,
+                crate::util::base64_encode(KEY)
+            );
+            assert_eq!(key_of(content.as_bytes()), KEY.to_vec(), "{version}");
+        }
+    }
+
+    #[test]
+    fn an_xml_key_file_without_the_declaration_is_read_as_xml() {
+        let content = xml_v2(false, "2.0", &checksum(&KEY), &hex::encode_upper(KEY));
+        assert_eq!(key_of(&content), KEY.to_vec());
+    }
+
+    #[test]
+    fn xml_that_is_not_a_key_file_is_hashed_whole() {
+        let content = b"<?xml version=\"1.0\"?>\n<Settings><Theme>dark</Theme></Settings>\n";
+        assert_eq!(key_of(content), sha256(content));
+    }
+
+    #[test]
+    fn a_key_file_broken_off_is_hashed_whole_as_keepassxc_does() {
+        let mut content = xml_v2(true, "2.0", &checksum(&KEY), &hex::encode_upper(KEY));
+        content.truncate(content.len() / 2);
+        assert_eq!(key_of(&content), sha256(&content));
+    }
+
+    #[test]
+    fn a_key_file_of_a_version_not_known_is_refused() {
+        let content = xml_v2(true, "3.0", &checksum(&KEY), &hex::encode_upper(KEY));
+        assert!(matches!(
+            FileKey::from_bytes("key", &content),
+            Err(Error::UnsupportedXmlKeyFileVersion)
+        ));
+    }
+
+    #[test]
+    fn a_key_file_without_a_version_is_refused() {
+        let content = b"<KeyFile><Key><Data>AAAA</Data></Key></KeyFile>";
+        assert!(matches!(
+            FileKey::from_bytes("key", content),
+            Err(Error::UnsupportedXmlKeyFileVersion)
+        ));
+        assert!(matches!(
+            FileKey::from_bytes("key", b"<?xml version=\"1.0\"?><KeyFile/>"),
+            Err(Error::UnsupportedXmlKeyFileVersion)
+        ));
+    }
+
+    #[test]
+    fn a_key_file_of_version_2_with_a_wrong_checksum_is_refused() {
+        let content = xml_v2(true, "2.0", "FFFFFFFF", &hex::encode_upper(KEY));
+        assert!(matches!(
+            FileKey::from_bytes("key", &content),
+            Err(Error::DataError(_))
+        ));
     }
 
     // --- Key file as bytes (Step 29) ---
