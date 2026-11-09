@@ -78,7 +78,8 @@ pykeepass совпадает с KeePassXC. Читает `tests/key_file_formats.
 `notes.txt`. Покрывает protected-значения (inner-stream ChaCha20), binaries и вложенность групп.
 
 Key-file — XML KeyFile v2 (`<Data>` = 32 байта ключа в hex, `Hash` = первые 4 байта SHA-256 от них),
-именно этот формат читает `src/db/file_key.rs`.
+тот формат, что пишет наше ядро; остальные форматы key-файлов, что читает `src/db/file_key.rs`, — фикстуры
+Step 113 выше.
 
 ## Грабли pykeepass
 
