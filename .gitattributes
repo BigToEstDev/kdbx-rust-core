@@ -1,0 +1,3 @@
+# Test fixtures are bytes as the oracle wrote them: a key file hashed whole, or of exactly 32 / 64 bytes, would be
+# another key after a line ending conversion (core.autocrlf) - pass-docs, Step 113
+crates/kdbx-rust-core/tests/resources/** binary

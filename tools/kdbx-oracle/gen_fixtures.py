@@ -1242,6 +1242,77 @@ def write_xml_key_file(path):
     return path
 
 
+# --- Key-файлы всех форматов, что читают KeePass / KeePassXC (Step 113) ----------
+#
+# Ядро разбирало только XML KeyFile 2.0 с объявлением и хеш всего остального - базу, закрытую иначе, не открывало
+# при верных пароле и файле. Тут по базе на каждый формат, key-файл рядом. Разбор pykeepass совпадает с KeePassXC
+# (src/keys/FileKey.cpp): XML (1.0 - base64, 2.0 - hex), не XML <KeyFile> - дальше; ровно 32 байта - как есть;
+# ровно 64 hex - декодированные; иначе SHA-256. Имена продублированы в tests/key_file_formats.rs.
+KEY_FILE_FORMAT_FIXTURES = (
+    # (база, key-файл, как собрать содержимое)
+    ("key_file_raw32.kdbx", "key_file_raw32.key", lambda: os.urandom(32)),
+    ("key_file_hex64.kdbx", "key_file_hex64.key", lambda: os.urandom(32).hex().encode("ascii")),
+    ("key_file_xml_v1.kdbx", "key_file_xml_v1.key", lambda: xml_key_file_v1(os.urandom(32))),
+    ("key_file_xml_no_decl.kdbx", "key_file_xml_no_decl.keyx", lambda: xml_key_file_v2(os.urandom(32), decl=False)),
+    ("key_file_xml_other.kdbx", "key_file_xml_other.xml", lambda: OTHER_XML),
+)
+KEY_FILE_FORMAT_TITLE = "KeyFormat"
+
+# XML, но не <KeyFile>: KeePassXC и pykeepass его хешируют целиком, как любой файл
+OTHER_XML = b'<?xml version="1.0" encoding="UTF-8"?>\n<Settings>\n    <Theme>dark</Theme>\n</Settings>\n'
+
+
+def xml_key_file_v1(key):
+    """XML KeyFile 1.0, как его писал KeePass до 2.47: <Data> - base64 ключа, без Hash."""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<KeyFile>\n"
+        "\t<Meta>\n"
+        "\t\t<Version>1.00</Version>\n"
+        "\t</Meta>\n"
+        "\t<Key>\n"
+        "\t\t<Data>%s</Data>\n"
+        "\t</Key>\n"
+        "</KeyFile>\n" % base64.b64encode(key).decode("ascii")
+    ).encode("utf-8")
+
+
+def xml_key_file_v2(key, decl=True):
+    """XML KeyFile 2.0: <Data> - hex ключа группами по 8, Hash - первые 4 байта SHA-256; объявление - по флагу."""
+    checksum = hashlib.sha256(key).digest()[:4]
+    data_hex = key.hex().upper()
+    grouped = " ".join(data_hex[i:i + 8] for i in range(0, len(data_hex), 8))
+    return (
+        ('<?xml version="1.0" encoding="UTF-8"?>\n' if decl else "")
+        + "<KeyFile>\n"
+        "    <Meta>\n"
+        "        <Version>2.0</Version>\n"
+        "    </Meta>\n"
+        "    <Key>\n"
+        '        <Data Hash="%s">%s</Data>\n'
+        "    </Key>\n"
+        "</KeyFile>\n" % (checksum.hex().upper(), grouped)
+    ).encode("utf-8")
+
+
+def build_key_file_format_fixtures():
+    for db_name, key_name, content in KEY_FILE_FORMAT_FIXTURES:
+        db_path, key_path = OUT_DIR / db_name, OUT_DIR / key_name
+        for path in (db_path, key_path):
+            if path.exists():
+                path.unlink()
+        key_path.write_bytes(content())
+
+        kp = create_database(str(db_path), password=PASSWORD, keyfile=str(key_path))
+        fast_header(kp)
+        kp.add_entry(kp.root_group, KEY_FILE_FORMAT_TITLE, "user", "pw-" + db_name)
+        kp.save()
+
+        opened = PyKeePass(str(db_path), password=PASSWORD, keyfile=str(key_path))
+        assert opened.find_entries(title=KEY_FILE_FORMAT_TITLE, first=True).password == "pw-" + db_name
+        print("  OK  %-34s + %s" % (db_name, key_name))
+
+
 def fill_content(kp):
     """Одинаковое содержимое во всех фикстурах, чтобы Rust-тесты были общими.
 
