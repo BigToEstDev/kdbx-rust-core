@@ -19,6 +19,9 @@ Because the code descends from GPLv3 code, **this library and anything linking i
 see `LICENSE` for the full text. Credit for the original implementation belongs to its author; every change
 since the split is recorded in this repository's commit history.
 
+The licence covers the code, not the name: "KDBX Vault" and its logo are not licensed under the GPLv3. A
+fork is welcome under its own name.
+
 ## Building and testing
 
 ```bash
