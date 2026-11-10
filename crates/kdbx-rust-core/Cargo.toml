@@ -1,12 +1,15 @@
 [package]
 name = "kdbx-rust-core"
 version = "0.25.0"
+description = "Read, write and merge KeePass KDBX 4 databases in pure Rust"
 authors.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
 ## Originally onekeepass-core by jeyasankar (GPL-3.0). This is now an independent project: the api
 ## and the internals have diverged far enough that upstream is no longer merged, but the code
 ## descends from it and stays under the same licence -- see README.md and LICENSE.
-license = "GPL-3.0-only"
+license.workspace = true
 ## Не попадает в архив при `cargo package` / публикации крейта. На `cargo build` и на
 ## сборку под Android не влияет — тестовые данные и так вне `src/`.
 exclude = ["tests/resources/"]
