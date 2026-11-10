@@ -7,6 +7,10 @@ members = ["crates/kdbx-rust-core", "crates/pass-api"]
 [workspace.package]
 authors = ["BigToEstDev"]
 edition = "2021"
+## The oldest Rust the workspace is built and tested with - not a lower bound found by a tool. The exact
+## toolchain is pinned in rust-toolchain.toml.
+rust-version = "1.98"
+repository = "https://github.com/BigToEstDev/kdbx-rust-core"
 ## One licence for every crate of the workspace: the engine descends from GPLv3 code (README.md,
 ## "Origin and licence"), and pass-api links it, so both are GPL-3.0.
 license = "GPL-3.0-only"

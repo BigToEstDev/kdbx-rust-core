@@ -1,0 +1,6 @@
+# The toolchain the workspace is built and tested with; rustup installs it on first use.
+# Bumped together with rust-version in Cargo.toml.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
