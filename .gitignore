@@ -14,3 +14,6 @@ Test1.xml
 # Python venv для tools/kdbx-oracle (dev-инструмент, см. tools/kdbx-oracle/README.md)
 /.venv/
 __pycache__/
+
+# Editor settings - local, not shared
+/.vscode/
