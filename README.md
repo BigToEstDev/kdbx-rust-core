@@ -89,9 +89,7 @@ GPL-3.0-only — see `LICENSE`.
 
 This project descends from [onekeepass-core](https://github.com/OneKeePass/onekeepass-core) by jeyasankar,
 licensed under the GPLv3. It has since been developed independently: the API, the cryptography layer, the XML
-handling and the tests have diverged, and upstream changes are not merged. Because the code descends from
-GPLv3 code, this library and anything that links it are distributed under the GPLv3. Every change since the
-split is recorded in the commit history.
+handling and the tests have diverged, and upstream changes are not merged.
 
 The licence covers the code, not the name: "KDBX Vault" and its logo are not licensed under the GPLv3. Forks
 are welcome under their own name.
