@@ -2,7 +2,7 @@
 
 A Rust library for reading, writing and merging KeePass KDBX 4 password databases.
 
-**Status:** the engine of the KDBX Vault apps (Android and desktop). Not published on crates.io; the API is
+**Status:** the engine of the KeyVault apps (Android and desktop). Not published on crates.io; the API is
 pre-1.0 and changes together with the apps.
 
 ## Features
@@ -91,7 +91,7 @@ This project descends from [onekeepass-core](https://github.com/OneKeePass/oneke
 licensed under the GPLv3. It has since been developed independently: the API, the cryptography layer, the XML
 handling and the tests have diverged, and upstream changes are not merged.
 
-The licence covers the code, not the name: "KDBX Vault" and its logo are not licensed under the GPLv3. Forks
+The licence covers the code, not the name: "KeyVault" and its logo are not licensed under the GPLv3. Forks
 are welcome under their own name.
 
 ## Acknowledgements
