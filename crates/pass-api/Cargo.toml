@@ -1,7 +1,7 @@
 [package]
 name = "pass-api"
-version = "0.1.0"
-description = "The command api of kdbx-rust-core for the KDBX Vault apps: json in, json out"
+version.workspace = true
+description = "The command api of kdbx-rust-core for the KeyVault apps: json in, json out"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true

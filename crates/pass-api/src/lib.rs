@@ -14,6 +14,10 @@
 
 use std::sync::Once;
 
+/// The version of the core - of the workspace, the engine and this api share it (`Cargo.toml`). The apps show it
+/// on their screen "About".
+pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[cfg(test)]
 mod attachment_tests;
 mod commands;

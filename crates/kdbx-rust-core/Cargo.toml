@@ -1,6 +1,6 @@
 [package]
 name = "kdbx-rust-core"
-version = "0.25.0"
+version.workspace = true
 description = "Read, write and merge KeePass KDBX 4 databases in pure Rust"
 authors.workspace = true
 edition.workspace = true

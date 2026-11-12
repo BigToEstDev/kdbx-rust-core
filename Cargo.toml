@@ -5,6 +5,9 @@ resolver = "2"
 members = ["crates/kdbx-rust-core", "crates/pass-api"]
 
 [workspace.package]
+## The version of the core - one for every crate of the workspace, the engine and its api move together
+## (pass-docs: docs/dev/versions-rules.md). SemVer; the app shows it on its screen "About".
+version = "1.0.0"
 authors = ["BigToEstDev"]
 edition = "2021"
 ## The oldest Rust the workspace is built and tested with - not a lower bound found by a tool. The exact
