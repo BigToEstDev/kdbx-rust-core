@@ -1,0 +1,8 @@
+# Keeps the actions of the workflows up to date: they are pinned by commit SHA, Dependabot moves the SHA and the
+# version comment together. Cargo dependencies are bumped by hand - with cargo audit and the full test run.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

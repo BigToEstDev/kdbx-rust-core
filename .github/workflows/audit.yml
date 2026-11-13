@@ -1,0 +1,29 @@
+# RustSec advisories of Cargo.lock: weekly - advisories appear for versions already in the lock, without any change
+# here - and on every change of the dependencies. Warnings (unmaintained, yanked) fail it too: the core keeps 0 / 0.
+name: Audit
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  push:
+    branches: [main]
+    paths: ["**/Cargo.toml", "Cargo.lock"]
+  pull_request:
+    paths: ["**/Cargo.toml", "Cargo.lock"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-audit@0.23.0
+      - run: cargo audit --deny warnings
