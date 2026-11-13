@@ -7,8 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-To be released as 1.0.0 - the first version of the core under its own numbering; the engine and its command api share
-one version.
+## [1.0.0] - 2026-11-14
+
+The first version of the core under its own numbering; the engine and its command api share one version.
 
 ### Added
 
@@ -18,3 +19,6 @@ one version.
 - Merge of two copies of one database and import of another database.
 - A password generator.
 - `pass-api`: the command api the apps call - json in, json out - and `CORE_VERSION`.
+
+[Unreleased]: https://github.com/BigToEstDev/kdbx-rust-core/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/BigToEstDev/kdbx-rust-core/releases/tag/v1.0.0
