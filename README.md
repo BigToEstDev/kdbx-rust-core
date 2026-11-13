@@ -42,7 +42,7 @@ the same way in our reader and writer cannot pass unnoticed.
 
 ## Usage
 
-The crates are not published. They are used by [kdbx-vault-android](https://github.com/BigToEstDev/kdbx-vault-android)
+The crates are not published. They are used by [KeyVault](https://github.com/BigToEstDev/keyvault)
 through a native bridge (JNI on Android, a shared library on desktop). To depend on them from another
 project, use a git dependency:
 
@@ -55,7 +55,7 @@ kdbx-rust-core = { git = "https://github.com/BigToEstDev/kdbx-rust-core" }
 
 Built and tested with Rust 1.98 (stable) on Windows x86_64 (MSVC); the exact toolchain is pinned in
 `rust-toolchain.toml` — install it with `rustup toolchain install`. Android builds go through the bridge in
-kdbx-vault-android, with `cargo-ndk`.
+KeyVault, with `cargo-ndk`.
 
 ```bash
 cargo test --workspace
