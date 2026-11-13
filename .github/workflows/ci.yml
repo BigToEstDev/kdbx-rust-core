@@ -49,5 +49,6 @@ jobs:
         with:
           python-version: "3.14"
       # Wheels only, as locally: no building of lxml / pycryptodomex / argon2-cffi from source
-      - run: python -m pip install --only-binary=:all: -r tools/kdbx-oracle/requirements.txt
+      # Quoted: ":all: " unquoted reads as a YAML key
+      - run: "python -m pip install --only-binary=:all: -r tools/kdbx-oracle/requirements.txt"
       - run: python tools/kdbx-oracle/verify_roundtrip.py
